@@ -1,3 +1,10 @@
+# General
+
+- Always use bun package manager. (use bunx instead npx)
+- This is a tanstack start project. With convex for backend, queries, mutations and databases
+- Never start dev server on your own.
+- Never commit to github on your own.
+
 <!-- convex-ai-start -->
 
 This project uses [Convex](https://convex.dev) as its backend.
