@@ -8,13 +8,31 @@
  * @module
  */
 
+import type * as lib_modelCatalog from "../lib/modelCatalog.js";
+import type * as lib_providers from "../lib/providers.js";
+import type * as lib_schemas from "../lib/schemas.js";
+import type * as lib_videoAdapters from "../lib/videoAdapters.js";
+import type * as studio from "../studio.js";
+import type * as studioActions from "../studioActions.js";
+import type * as studioInternal from "../studioInternal.js";
+import type * as studioQueries from "../studioQueries.js";
+
 import type {
   ApiFromModules,
   FilterApi,
   FunctionReference,
 } from "convex/server";
 
-declare const fullApi: ApiFromModules<{}>;
+declare const fullApi: ApiFromModules<{
+  "lib/modelCatalog": typeof lib_modelCatalog;
+  "lib/providers": typeof lib_providers;
+  "lib/schemas": typeof lib_schemas;
+  "lib/videoAdapters": typeof lib_videoAdapters;
+  studio: typeof studio;
+  studioActions: typeof studioActions;
+  studioInternal: typeof studioInternal;
+  studioQueries: typeof studioQueries;
+}>;
 
 /**
  * A utility for referencing Convex functions in your app's public API.
