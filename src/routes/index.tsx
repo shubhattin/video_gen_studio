@@ -8,6 +8,7 @@ import { HistoryPanel } from "#/components/studio/history-panel";
 import { ReferenceImagePanel } from "#/components/studio/reference-image-panel";
 import { ShlokaComposer } from "#/components/studio/shloka-composer";
 import { ShlokaPlanPreview } from "#/components/studio/shloka-plan-preview";
+import { StudioErrorAlert } from "#/components/studio/studio-error-alert";
 import { StudioShell } from "#/components/studio/studio-shell";
 import {
 	VideoConfiguration,
@@ -28,6 +29,7 @@ import {
 	defaultVideoParams,
 	type VideoModelId,
 } from "#/lib/model-catalog";
+import { notifyStudioError, notifyStudioSuccess } from "#/lib/studio-toast";
 
 export const Route = createFileRoute("/")({
 	component: ShlokaStudioPage,
@@ -107,6 +109,9 @@ function ShlokaStudioPage() {
 		try {
 			const id = await ensureRun();
 			await planRun({ runId: id });
+			notifyStudioSuccess("Plan ready", "Image and video prompts updated.");
+		} catch (error) {
+			notifyStudioError("Planning failed", error);
 		} finally {
 			setBusyStage(null);
 		}
@@ -117,6 +122,9 @@ function ShlokaStudioPage() {
 		try {
 			const id = await ensureRun();
 			await generateImage({ runId: id });
+			notifyStudioSuccess("Reference image ready");
+		} catch (error) {
+			notifyStudioError("Image generation failed", error);
 		} finally {
 			setBusyStage(null);
 		}
@@ -127,6 +135,9 @@ function ShlokaStudioPage() {
 		try {
 			const id = await ensureRun();
 			await generateVideo({ runId: id });
+			notifyStudioSuccess("Video appended", "Clip saved to this run.");
+		} catch (error) {
+			notifyStudioError("Video generation failed", error);
 		} finally {
 			setBusyStage(null);
 		}
@@ -174,11 +185,7 @@ function ShlokaStudioPage() {
 				</section>
 
 				{run ? (
-					<GenerationStatus
-						status={run.status}
-						lastError={run.lastError}
-						warnings={run.warnings}
-					/>
+					<GenerationStatus status={run.status} warnings={run.warnings} />
 				) : null}
 
 				<ShlokaComposer
@@ -200,58 +207,63 @@ function ShlokaStudioPage() {
 				</div>
 
 				{planReady ? (
-					<ShlokaPlanPreview
-						imagePrompt={run?.imagePrompt}
-						videoScenes={run?.videoScenes}
-						plannerModel={run?.plannerModel}
-						plannerReasoning={run?.plannerReasoning}
-						onRegenerate={() => planRun({ runId: runId!, force: true })}
-						regenerating={busyStage === "planning"}
-					/>
+					<div className="flex flex-col gap-4">
+						<ShlokaPlanPreview
+							imagePrompt={run?.imagePrompt}
+							videoScenes={run?.videoScenes}
+							plannerModel={run?.plannerModel}
+							plannerReasoning={run?.plannerReasoning}
+							onRegenerate={() => planRun({ runId: runId!, force: true })}
+							regenerating={busyStage === "planning"}
+						/>
+						<StudioErrorAlert
+							error={run?.lastError}
+							title="Error (image / plan)"
+						/>
+						<ReferenceImagePanel
+							imageSize={imageSize}
+							imageQuality={imageQuality}
+							onSizeChange={setImageSize}
+							onQualityChange={setImageQuality}
+							onGenerate={onGenerateImage}
+							generating={busyStage === "image"}
+							images={images}
+							firstFrameImageId={run?.firstFrameImageId}
+							lastFrameImageId={run?.lastFrameImageId}
+							extraReferenceImageIds={extraIds}
+							supportsLastFrame={profile?.supportsLastFrame}
+							supportsInputReferences={profile?.supportsInputReferences}
+							maxInputReferences={profile?.maxInputReferences}
+							disabled={busyStage !== null || !runId}
+							onSelectFirstFrame={async (id) => {
+								if (!runId) return;
+								await updateDraft({ runId, firstFrameImageId: id });
+							}}
+							onSelectLastFrame={async (id) => {
+								if (!runId) return;
+								await updateDraft({ runId, lastFrameImageId: id });
+							}}
+							onToggleExtraReference={async (id) => {
+								if (!runId) return;
+								const next = extraIds.includes(id)
+									? extraIds.filter((item) => item !== id)
+									: [...extraIds, id];
+								await updateDraft({ runId, extraReferenceImageIds: next });
+							}}
+							onRemoveImage={async (id) => {
+								if (!runId) return;
+								await removeReferenceImage({ runId, imageId: id });
+							}}
+						/>
+					</div>
 				) : null}
 
 				{planReady ? (
-					<ReferenceImagePanel
-						imageSize={imageSize}
-						imageQuality={imageQuality}
-						onSizeChange={setImageSize}
-						onQualityChange={setImageQuality}
-						onGenerate={onGenerateImage}
-						generating={busyStage === "image"}
-						images={images}
-						firstFrameImageId={run?.firstFrameImageId}
-						lastFrameImageId={run?.lastFrameImageId}
-						extraReferenceImageIds={extraIds}
-						supportsLastFrame={profile?.supportsLastFrame}
-						supportsInputReferences={profile?.supportsInputReferences}
-						maxInputReferences={profile?.maxInputReferences}
-						disabled={busyStage !== null || !runId}
-						onSelectFirstFrame={async (id) => {
-							if (!runId) return;
-							await updateDraft({ runId, firstFrameImageId: id });
-						}}
-						onSelectLastFrame={async (id) => {
-							if (!runId) return;
-							await updateDraft({ runId, lastFrameImageId: id });
-						}}
-						onToggleExtraReference={async (id) => {
-							if (!runId) return;
-							const next = extraIds.includes(id)
-								? extraIds.filter((item) => item !== id)
-								: [...extraIds, id];
-							await updateDraft({ runId, extraReferenceImageIds: next });
-						}}
-						onRemoveImage={async (id) => {
-							if (!runId) return;
-							await removeReferenceImage({ runId, imageId: id });
-						}}
-					/>
-				) : null}
-
-				{planReady ? (
-					<div className="space-y-4 border-t border-border/80 pt-6">
+					<div className="flex flex-col gap-4 border-t border-border/80 pt-6">
 						<div className="space-y-2">
-							<h2 className="font-heading text-xl font-semibold">Video model</h2>
+							<h2 className="font-heading text-xl font-semibold">
+								Video model
+							</h2>
 							<Select
 								value={videoConfig.modelId}
 								onValueChange={(modelId) => {
@@ -275,6 +287,10 @@ function ShlokaStudioPage() {
 								</SelectContent>
 							</Select>
 						</div>
+						<StudioErrorAlert
+							error={run?.lastError}
+							title="Error (video generation)"
+						/>
 						<VideoConfiguration
 							value={videoConfig}
 							onChange={setVideoConfig}

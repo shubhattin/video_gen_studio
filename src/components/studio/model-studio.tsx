@@ -2,14 +2,15 @@ import { useAction, useMutation, useQuery } from "convex/react";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
+import { GenerationStatus } from "#/components/studio/generation-status";
 import { ModelCard } from "#/components/studio/model-card";
+import { ReferenceImagePanel } from "#/components/studio/reference-image-panel";
+import { StudioErrorAlert } from "#/components/studio/studio-error-alert";
 import {
 	VideoConfiguration,
 	type VideoConfigState,
 } from "#/components/studio/video-configuration";
-import { GenerationStatus } from "#/components/studio/generation-status";
 import { VideoResult } from "#/components/studio/video-result";
-import { ReferenceImagePanel } from "#/components/studio/reference-image-panel";
 import { Button } from "#/components/ui/button";
 import {
 	MODEL_CAPABILITY_PROFILES,
@@ -18,6 +19,7 @@ import {
 	isVideoModelId,
 	type VideoModelId,
 } from "#/lib/model-catalog";
+import { notifyStudioError, notifyStudioSuccess } from "#/lib/studio-toast";
 
 export function ModelStudio() {
 	const catalog = useQuery(api.studio.getCachedOpenRouterCatalog);
@@ -104,6 +106,9 @@ export function ModelStudio() {
 		try {
 			const runId = await ensureDraft();
 			await generateVideo({ runId });
+			notifyStudioSuccess("Video appended", "Clip saved to this run.");
+		} catch (error) {
+			notifyStudioError("Video generation failed", error);
 		} finally {
 			setBusy(false);
 		}
@@ -114,6 +119,9 @@ export function ModelStudio() {
 		try {
 			const runId = await ensureDraft();
 			await generateImage({ runId });
+			notifyStudioSuccess("Reference image ready");
+		} catch (error) {
+			notifyStudioError("Image generation failed", error);
 		} finally {
 			setBusy(false);
 		}
@@ -174,6 +182,10 @@ export function ModelStudio() {
 				))}
 			</div>
 
+			<StudioErrorAlert
+				error={run?.lastError}
+				title="Error (video prompt / generate)"
+			/>
 			<VideoConfiguration
 				value={{ ...videoConfig, modelId: selectedModel }}
 				onChange={(next) => {
@@ -186,6 +198,10 @@ export function ModelStudio() {
 				disabled={busy}
 			/>
 
+			<StudioErrorAlert
+				error={run?.lastError}
+				title="Error (reference image)"
+			/>
 			<ReferenceImagePanel
 				imageSize={imageSize}
 				imageQuality={imageQuality}
@@ -230,11 +246,7 @@ export function ModelStudio() {
 
 			{run ? (
 				<>
-					<GenerationStatus
-						status={run.status}
-						lastError={run.lastError}
-						warnings={run.warnings}
-					/>
+					<GenerationStatus status={run.status} warnings={run.warnings} />
 					<VideoResult videos={videos} />
 				</>
 			) : null}

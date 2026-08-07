@@ -12,16 +12,11 @@ const STAGES = [
 
 type GenerationStatusProps = {
 	status: string;
-	lastError?: string;
 	warnings?: string[];
 };
 
-export function GenerationStatus({
-	status,
-	lastError,
-	warnings,
-}: GenerationStatusProps) {
-	const activeIndex = STAGES.indexOf(status as typeof STAGES[number]);
+export function GenerationStatus({ status, warnings }: GenerationStatusProps) {
+	const activeIndex = STAGES.indexOf(status as (typeof STAGES)[number]);
 	const progress =
 		status === "failed"
 			? 0
@@ -41,9 +36,6 @@ export function GenerationStatus({
 				<p className="text-sm text-muted-foreground">{Math.round(progress)}%</p>
 			</div>
 			<Progress value={progress} className="mt-3" />
-			{lastError ? (
-				<p className="mt-3 text-sm text-destructive">{lastError}</p>
-			) : null}
 			{warnings?.length ? (
 				<ul className="mt-3 space-y-1 text-xs text-muted-foreground">
 					{warnings.map((warning) => (

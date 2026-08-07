@@ -77,8 +77,8 @@ export function VideoResult({ videos }: VideoResultProps) {
 			<div>
 				<h2 className="font-heading text-xl font-semibold">Generated videos</h2>
 				<p className="text-sm text-muted-foreground">
-					Each generate appends a new clip. Stored in Convex until you delete the
-					run.
+					Each generate appends a new clip. Stored in Convex until you delete
+					the run.
 				</p>
 			</div>
 

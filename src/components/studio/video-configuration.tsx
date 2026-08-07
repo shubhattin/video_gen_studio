@@ -45,7 +45,9 @@ export function VideoConfiguration({
 	return (
 		<section className="space-y-4 border-t border-border/80 pt-6">
 			<div>
-				<h2 className="font-heading text-xl font-semibold">Video configuration</h2>
+				<h2 className="font-heading text-xl font-semibold">
+					Video configuration
+				</h2>
 				<p className="text-sm text-muted-foreground">{profile.pricingNotes}</p>
 			</div>
 

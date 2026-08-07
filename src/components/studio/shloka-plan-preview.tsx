@@ -53,7 +53,8 @@ export function ShlokaPlanPreview({
 				<div>
 					<h2 className="font-heading text-xl font-semibold">Creative plan</h2>
 					<p className="text-sm text-muted-foreground">
-						{plannerModel ?? "Planner"} · reasoning {plannerReasoning ?? "medium"}
+						{plannerModel ?? "Planner"} · reasoning{" "}
+						{plannerReasoning ?? "medium"}
 					</p>
 				</div>
 				{onRegenerate ? (

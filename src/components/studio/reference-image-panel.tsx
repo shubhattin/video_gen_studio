@@ -143,7 +143,9 @@ export function ReferenceImagePanel({
 								) : null}
 								<div className="flex flex-wrap gap-2">
 									{isFirst ? <Badge>First frame</Badge> : null}
-									{isLast ? <Badge variant="secondary">Last frame</Badge> : null}
+									{isLast ? (
+										<Badge variant="secondary">Last frame</Badge>
+									) : null}
 									{isExtra ? <Badge variant="outline">Style ref</Badge> : null}
 								</div>
 								<div className="flex flex-wrap gap-2">

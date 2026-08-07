@@ -1,12 +1,15 @@
 import { ConvexProvider } from "convex/react";
 import type { ReactNode } from "react";
-import { convex } from "#/lib/convex";
+import { Toaster } from "#/components/ui/toast";
 import { ThemeProvider } from "#/hooks/use-theme";
+import { convex } from "#/lib/convex";
 
 export function AppProviders({ children }: { children: ReactNode }) {
 	return (
 		<ConvexProvider client={convex}>
-			<ThemeProvider>{children}</ThemeProvider>
+			<ThemeProvider>
+				<Toaster>{children}</Toaster>
+			</ThemeProvider>
 		</ConvexProvider>
 	);
 }

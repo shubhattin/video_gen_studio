@@ -73,7 +73,10 @@ export function ShlokaComposer({
 					}}
 					onBlur={() => typingContextRef.current.clearContext()}
 					onKeyDown={(event) =>
-						clearTypingContextOnKeyDown(event.nativeEvent, typingContextRef.current)
+						clearTypingContextOnKeyDown(
+							event.nativeEvent,
+							typingContextRef.current,
+						)
 					}
 					placeholder="Type in Roman or paste Devanagari…"
 					className={cn("min-h-32 text-base leading-relaxed")}
