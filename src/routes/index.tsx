@@ -9,7 +9,10 @@ import { ReferenceImagePanel } from "#/components/studio/reference-image-panel";
 import { ShlokaComposer } from "#/components/studio/shloka-composer";
 import { ShlokaPlanPreview } from "#/components/studio/shloka-plan-preview";
 import { StudioShell } from "#/components/studio/studio-shell";
-import { VideoConfiguration, type VideoConfigState } from "#/components/studio/video-configuration";
+import {
+	VideoConfiguration,
+	type VideoConfigState,
+} from "#/components/studio/video-configuration";
 import { VideoResult } from "#/components/studio/video-result";
 import { Button } from "#/components/ui/button";
 import {
@@ -20,8 +23,8 @@ import {
 	SelectValue,
 } from "#/components/ui/select";
 import {
-	VIDEO_MODEL_IDS,
 	MODEL_CAPABILITY_PROFILES,
+	VIDEO_MODEL_IDS,
 	defaultVideoParams,
 	type VideoModelId,
 } from "#/lib/model-catalog";
@@ -35,20 +38,17 @@ function ShlokaStudioPage() {
 	const [shlokaText, setShlokaText] = useState("");
 	const [customInstructions, setCustomInstructions] = useState("");
 	const [imageSize, setImageSize] = useState("1024x1536");
-	const [imageQuality, setImageQuality] = useState("medium");
+	const [imageQuality, setImageQuality] = useState("low");
 	const [videoConfig, setVideoConfig] = useState<VideoConfigState>(
-		defaultVideoParams("google/veo-3.1-generate-001"),
+		defaultVideoParams("google/veo-3.1-lite"),
 	);
 	const [busyStage, setBusyStage] = useState<string | null>(null);
 
-	const run = useQuery(
-		api.studio.getRun,
-		runId ? { runId } : "skip",
-	);
+	const run = useQuery(api.studio.getRun, runId ? { runId } : "skip");
 
 	const createDraft = useMutation(api.studio.createShlokaDraft);
 	const updateDraft = useMutation(api.studio.updateDraft);
-	const createImageRevision = useMutation(api.studio.createImageRevision);
+	const removeReferenceImage = useMutation(api.studio.removeReferenceImage);
 	const planRun = useAction(api.studioActions.planShlokaRun);
 	const generateImage = useAction(api.studioActions.generateReferenceImage);
 	const generateVideo = useAction(api.studioActions.generateVideoForRun);
@@ -60,7 +60,7 @@ function ShlokaStudioPage() {
 		setShlokaText(run.shlokaText ?? "");
 		setCustomInstructions(run.customInstructions ?? "");
 		setImageSize(run.imageSize ?? "1024x1536");
-		setImageQuality(run.imageQuality ?? "medium");
+		setImageQuality(run.imageQuality ?? "low");
 		if (run.videoParams) {
 			setVideoConfig({
 				modelId: (run.selectedModelId as VideoModelId) ?? videoConfig.modelId,
@@ -69,9 +69,10 @@ function ShlokaStudioPage() {
 				durationSeconds: run.videoParams.durationSeconds,
 				generateAudio: run.videoParams.generateAudio,
 				negativePrompt: run.videoParams.negativePrompt,
-				klingMode: run.videoParams.klingMode as "std" | "pro" | undefined,
+				cfgScale: run.videoParams.cfgScale,
 			});
 		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [run?._id]);
 
 	const ensureRun = async () => {
@@ -91,6 +92,13 @@ function ShlokaStudioPage() {
 			customInstructions,
 		});
 		setRunId(id);
+		await updateDraft({
+			runId: id,
+			imageSize,
+			imageQuality,
+			selectedModelId: videoConfig.modelId,
+			videoParams: videoConfig,
+		});
 		return id;
 	};
 
@@ -104,11 +112,11 @@ function ShlokaStudioPage() {
 		}
 	};
 
-	const onGenerateImage = async (force = false) => {
+	const onGenerateImage = async () => {
 		setBusyStage("image");
 		try {
 			const id = await ensureRun();
-			await generateImage({ runId: id, force });
+			await generateImage({ runId: id });
 		} finally {
 			setBusyStage(null);
 		}
@@ -124,19 +132,8 @@ function ShlokaStudioPage() {
 		}
 	};
 
-	const onNewImageRevision = async () => {
-		if (!runId) {
-			return;
-		}
-		setBusyStage("revision");
-		try {
-			const revisionId = await createImageRevision({ parentRunId: runId });
-			setRunId(revisionId);
-			await generateImage({ runId: revisionId, force: true });
-		} finally {
-			setBusyStage(null);
-		}
-	};
+	const profile =
+		MODEL_CAPABILITY_PROFILES[videoConfig.modelId as VideoModelId];
 
 	const planReady =
 		run?.status === "plan_ready" ||
@@ -146,10 +143,9 @@ function ShlokaStudioPage() {
 		run?.status === "completed" ||
 		run?.status === "failed";
 
-	const imageReady =
-		run?.status === "image_ready" ||
-		run?.status === "video_generating" ||
-		run?.status === "completed";
+	const images = run?.referenceImages ?? [];
+	const videos = run?.videos ?? [];
+	const extraIds = run?.extraReferenceImageIds ?? [];
 
 	return (
 		<StudioShell
@@ -158,6 +154,11 @@ function ShlokaStudioPage() {
 				<HistoryPanel
 					selectedRunId={runId}
 					onSelect={(id) => setRunId(id)}
+					onDeleted={(id) => {
+						if (runId === id) {
+							setRunId(null);
+						}
+					}}
 				/>
 			}
 		>
@@ -167,7 +168,7 @@ function ShlokaStudioPage() {
 						Shloka Video Generator
 					</h1>
 					<p className="text-sm text-muted-foreground">
-						Plan → reference still → model-specific video. Default path is 9:16
+						Plan → reference stills → OpenRouter video. Default path is 9:16
 						portrait for shorts.
 					</p>
 				</section>
@@ -215,34 +216,59 @@ function ShlokaStudioPage() {
 						imageQuality={imageQuality}
 						onSizeChange={setImageSize}
 						onQualityChange={setImageQuality}
-						onGenerate={() => onGenerateImage()}
-						onRegenerate={onNewImageRevision}
-						generating={busyStage === "image" || busyStage === "revision"}
-						referenceImageUrl={run?.referenceImageUrl}
-						revisedPrompt={run?.revisedImagePrompt}
-						disabled={busyStage !== null}
+						onGenerate={onGenerateImage}
+						generating={busyStage === "image"}
+						images={images}
+						firstFrameImageId={run?.firstFrameImageId}
+						lastFrameImageId={run?.lastFrameImageId}
+						extraReferenceImageIds={extraIds}
+						supportsLastFrame={profile?.supportsLastFrame}
+						supportsInputReferences={profile?.supportsInputReferences}
+						maxInputReferences={profile?.maxInputReferences}
+						disabled={busyStage !== null || !runId}
+						onSelectFirstFrame={async (id) => {
+							if (!runId) return;
+							await updateDraft({ runId, firstFrameImageId: id });
+						}}
+						onSelectLastFrame={async (id) => {
+							if (!runId) return;
+							await updateDraft({ runId, lastFrameImageId: id });
+						}}
+						onToggleExtraReference={async (id) => {
+							if (!runId) return;
+							const next = extraIds.includes(id)
+								? extraIds.filter((item) => item !== id)
+								: [...extraIds, id];
+							await updateDraft({ runId, extraReferenceImageIds: next });
+						}}
+						onRemoveImage={async (id) => {
+							if (!runId) return;
+							await removeReferenceImage({ runId, imageId: id });
+						}}
 					/>
 				) : null}
 
-				{imageReady || run?.provenance === "shloka" ? (
+				{planReady ? (
 					<div className="space-y-4 border-t border-border/80 pt-6">
 						<div className="space-y-2">
 							<h2 className="font-heading text-xl font-semibold">Video model</h2>
 							<Select
 								value={videoConfig.modelId}
-								onValueChange={(modelId) =>
+								onValueChange={(modelId) => {
+									if (!modelId) return;
 									setVideoConfig({
 										...defaultVideoParams(modelId as VideoModelId),
-									})
-								}
+									});
+								}}
 								disabled={busyStage !== null}
 							>
-								<SelectTrigger className="min-h-11">
+								<SelectTrigger className="min-h-11 w-full min-w-0 sm:min-w-[28rem] md:min-w-[36rem]">
 									<SelectValue />
 								</SelectTrigger>
-								<SelectContent>
+								<SelectContent className="min-w-[var(--anchor-width)] w-[var(--anchor-width)]">
 									{VIDEO_MODEL_IDS.map((modelId) => (
 										<SelectItem key={modelId} value={modelId}>
+											{MODEL_CAPABILITY_PROFILES[modelId].displayName} ·{" "}
 											{modelId}
 										</SelectItem>
 									))}
@@ -256,28 +282,17 @@ function ShlokaStudioPage() {
 						/>
 						<Button
 							className="min-h-11"
-							disabled={
-								busyStage !== null ||
-								(MODEL_CAPABILITY_PROFILES[
-									videoConfig.modelId as VideoModelId
-								].requiresFirstFrame &&
-									!run?.referenceImageStorageId)
-							}
+							disabled={busyStage !== null}
 							onClick={onGenerateVideo}
 						>
-							{busyStage === "video" ? "Generating video…" : "Generate video"}
+							{busyStage === "video"
+								? "Generating video (OpenRouter poll)…"
+								: "Generate video (append)"}
 						</Button>
 					</div>
 				) : null}
 
-				<VideoResult
-					videoUrl={run?.videoUrl}
-					mimeType={run?.videoMeta?.mimeType}
-					durationSeconds={run?.videoMeta?.durationSeconds}
-					gatewayGenerationId={run?.gatewayGenerationId}
-					actualCostUsd={run?.actualCostUsd}
-					warnings={run?.warnings}
-				/>
+				<VideoResult videos={videos} />
 			</div>
 		</StudioShell>
 	);

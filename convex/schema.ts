@@ -47,8 +47,29 @@ export const videoParamsValidator = v.object({
 	durationSeconds: v.number(),
 	generateAudio: v.optional(v.boolean()),
 	negativePrompt: v.optional(v.string()),
-	klingMode: v.optional(v.string()),
+	cfgScale: v.optional(v.number()),
 	prompt: v.optional(v.string()),
+});
+
+export const referenceImageValidator = v.object({
+	id: v.string(),
+	storageId: v.id("_storage"),
+	meta: mediaMetaValidator,
+	revisedImagePrompt: v.optional(v.string()),
+	createdAt: v.number(),
+});
+
+export const generatedVideoValidator = v.object({
+	id: v.string(),
+	storageId: v.id("_storage"),
+	meta: mediaMetaValidator,
+	openRouterJobId: v.string(),
+	openRouterGenerationId: v.optional(v.string()),
+	actualCostUsd: v.optional(v.number()),
+	videoParams: videoParamsValidator,
+	videoPrompt: v.optional(v.string()),
+	warnings: v.optional(v.array(v.string())),
+	createdAt: v.number(),
 });
 
 export default defineSchema({
@@ -65,22 +86,17 @@ export default defineSchema({
 		videoScenes: v.optional(v.array(videoSceneValidator)),
 		imageSize: v.optional(v.string()),
 		imageQuality: v.optional(v.string()),
-		revisedImagePrompt: v.optional(v.string()),
 		selectedModelId: v.optional(v.string()),
 		videoParams: v.optional(videoParamsValidator),
 		videoPrompt: v.optional(v.string()),
-		referenceImageStorageId: v.optional(v.id("_storage")),
-		referenceImageMeta: v.optional(mediaMetaValidator),
-		videoStorageId: v.optional(v.id("_storage")),
-		videoMeta: v.optional(mediaMetaValidator),
-		gatewayGenerationId: v.optional(v.string()),
-		openRouterGenerationId: v.optional(v.string()),
-		actualCostUsd: v.optional(v.number()),
+		referenceImages: v.optional(v.array(referenceImageValidator)),
+		firstFrameImageId: v.optional(v.string()),
+		lastFrameImageId: v.optional(v.string()),
+		extraReferenceImageIds: v.optional(v.array(v.string())),
+		videos: v.optional(v.array(generatedVideoValidator)),
 		warnings: v.optional(v.array(v.string())),
 		lastError: v.optional(v.string()),
 		planningKey: v.optional(v.string()),
-		imageKey: v.optional(v.string()),
-		videoKey: v.optional(v.string()),
 		planningCompletedAt: v.optional(v.number()),
 		imageCompletedAt: v.optional(v.number()),
 		videoCompletedAt: v.optional(v.number()),
@@ -92,7 +108,7 @@ export default defineSchema({
 		.index("by_model_status", ["selectedModelId", "status"]),
 
 	catalogCache: defineTable({
-		key: v.literal("gateway_models"),
+		key: v.string(),
 		payload: v.string(),
 		fetchedAt: v.number(),
 	}),

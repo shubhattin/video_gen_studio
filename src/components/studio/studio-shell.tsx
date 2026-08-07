@@ -31,8 +31,8 @@ export function StudioShell({
 				</div>
 			</header>
 
-			<div className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[15rem_minmax(0,1fr)]">
-				<aside className="hidden lg:block">
+			<div className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[18rem_minmax(0,1fr)]">
+				<aside className="hidden min-w-0 lg:block">
 					<nav className="space-y-1">
 						<NavItem to="/" active={activePath === "/"}>
 							Shloka Studio

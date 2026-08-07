@@ -23,6 +23,7 @@ export function ModelCard({
 	gatewayPricing,
 }: ModelCardProps) {
 	const profile = MODEL_CAPABILITY_PROFILES[modelId];
+	const durations = profile.supportedDurations;
 
 	return (
 		<button
@@ -44,15 +45,16 @@ export function ModelCard({
 				{selected ? <Badge>Selected</Badge> : null}
 			</div>
 			<div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
-				<span>{profile.aspectRatios.join(" · ")}</span>
+				<span>{profile.aspectRatios.slice(0, 3).join(" · ")}</span>
 				<span>{profile.resolutions.join(" · ")}</span>
 				<span>
-					{profile.durationSeconds.min}–{profile.durationSeconds.max}s
+					{durations[0]}–{durations[durations.length - 1]}s
 				</span>
+				{profile.supportsAudio ? <span>audio</span> : null}
 			</div>
 			<p className="mt-3 text-xs text-muted-foreground">
 				{gatewayPricing?.output
-					? `Gateway output rate: $${gatewayPricing.output}/token`
+					? `OpenRouter SKU sample: ${gatewayPricing.output}`
 					: profile.pricingNotes}
 			</p>
 			{onSelect ? (

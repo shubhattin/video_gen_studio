@@ -32,12 +32,12 @@ export type VideoScene = z.infer<typeof videoSceneSchema>;
 
 export const videoParamsSchema = z.object({
 	modelId: z.string(),
-	aspectRatio: z.enum(["16:9", "9:16", "1:1"]),
-	resolution: z.enum(["480p", "720p", "1080p"]),
+	aspectRatio: z.string(),
+	resolution: z.string(),
 	durationSeconds: z.number(),
 	generateAudio: z.boolean().optional(),
 	negativePrompt: z.string().optional(),
-	klingMode: z.enum(["std", "pro"]).optional(),
+	cfgScale: z.number().optional(),
 	prompt: z.string().optional(),
 });
 
@@ -48,7 +48,7 @@ export function validateVideoParams(params: VideoParams): VideoParams {
 		throw new Error(`Unsupported video model: ${params.modelId}`);
 	}
 
-	const profile = MODEL_CAPABILITY_PROFILES[params.modelId as VideoModelId];
+	const profile = MODEL_CAPABILITY_PROFILES[params.modelId];
 
 	if (!profile.aspectRatios.includes(params.aspectRatio as AspectRatio)) {
 		throw new Error(
@@ -62,18 +62,9 @@ export function validateVideoParams(params: VideoParams): VideoParams {
 		);
 	}
 
-	const { min, max, step, presets } = profile.durationSeconds;
-	if (presets && !presets.includes(params.durationSeconds)) {
+	if (!profile.supportedDurations.includes(params.durationSeconds)) {
 		throw new Error(
-			`Duration must be one of ${presets.join(", ")} seconds for ${params.modelId}.`,
-		);
-	} else if (
-		params.durationSeconds < min ||
-		params.durationSeconds > max ||
-		params.durationSeconds % step !== 0
-	) {
-		throw new Error(
-			`Duration must be between ${min} and ${max} seconds (step ${step}) for ${params.modelId}.`,
+			`Duration must be one of ${profile.supportedDurations.join(", ")} seconds for ${params.modelId}.`,
 		);
 	}
 
@@ -81,15 +72,16 @@ export function validateVideoParams(params: VideoParams): VideoParams {
 		throw new Error(`Negative prompts are not supported for ${params.modelId}.`);
 	}
 
-	if (params.klingMode && !profile.supportsKlingMode) {
-		throw new Error(`Quality mode is not supported for ${params.modelId}.`);
-	}
-
 	if (params.generateAudio && !profile.supportsAudio) {
 		throw new Error(`Audio generation is not supported for ${params.modelId}.`);
 	}
 
-	return params;
+	return {
+		...params,
+		generateAudio: profile.supportsAudio
+			? (params.generateAudio ?? false)
+			: false,
+	};
 }
 
 export const imageConfigSchema = z.object({
@@ -100,20 +92,23 @@ export const imageConfigSchema = z.object({
 export type ImageConfig = z.infer<typeof imageConfigSchema>;
 
 export function defaultImageConfig(): ImageConfig {
-	return { size: "1024x1536", quality: "medium" };
+	return { size: "1024x1536", quality: "low" };
 }
 
 export function defaultVideoParams(modelId: VideoModelId): VideoParams {
 	const profile = MODEL_CAPABILITY_PROFILES[modelId];
-	const duration = profile.durationSeconds.presets?.[0] ?? profile.durationSeconds.min;
+	const preferred = [8, 6, 5, 4].find((d) =>
+		profile.supportedDurations.includes(d),
+	);
 	return {
 		modelId,
-		aspectRatio: profile.aspectRatios.includes("9:16") ? "9:16" : profile.aspectRatios[0],
+		aspectRatio: profile.aspectRatios.includes("9:16")
+			? "9:16"
+			: profile.aspectRatios[0],
 		resolution: profile.resolutions.includes("720p")
 			? "720p"
 			: profile.resolutions[0],
-		durationSeconds: duration,
+		durationSeconds: preferred ?? profile.supportedDurations[0],
 		generateAudio: false,
-		klingMode: profile.supportsKlingMode ? "std" : undefined,
 	};
 }

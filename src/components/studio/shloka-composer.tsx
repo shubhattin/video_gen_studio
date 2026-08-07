@@ -90,8 +90,8 @@ export function ShlokaComposer({
 				<Textarea
 					value={customInstructions}
 					onChange={(event) => onInstructionsChange(event.target.value)}
-					placeholder="Example: twilight forest, soft gold light, gentle camera drift, no text overlays…"
-					className="min-h-28"
+					placeholder="Example: twilight temple courtyard, soft diya glow, marigold petals, gentle camera drift, no text overlays…"
+					className="min-h-40 max-h-72 overflow-y-auto resize-y"
 					disabled={disabled}
 				/>
 			</div>

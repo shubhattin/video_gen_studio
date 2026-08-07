@@ -1,5 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 import {
 	MODEL_CAPABILITY_PROFILES,
 	VIDEO_MODEL_IDS,
@@ -8,20 +10,64 @@ import {
 import { defaultImageConfig, defaultVideoParams } from "./lib/schemas";
 import { videoParamsValidator } from "./schema";
 
-async function resolveMediaUrls(
-	ctx: { storage: { getUrl: (id: string) => Promise<string | null> } },
+async function resolveRunUrls(
+	ctx: { storage: { getUrl: (id: Id<"_storage">) => Promise<string | null> } },
 	run: {
-		referenceImageStorageId?: string | null;
-		videoStorageId?: string | null;
+		referenceImages?: Array<{
+			id: string;
+			storageId: Id<"_storage">;
+			meta: {
+				mimeType: string;
+				width?: number;
+				height?: number;
+				durationSeconds?: number;
+				bytes?: number;
+			};
+			revisedImagePrompt?: string;
+			createdAt: number;
+		}>;
+		videos?: Array<{
+			id: string;
+			storageId: Id<"_storage">;
+			meta: {
+				mimeType: string;
+				width?: number;
+				height?: number;
+				durationSeconds?: number;
+				bytes?: number;
+			};
+			openRouterJobId: string;
+			openRouterGenerationId?: string;
+			actualCostUsd?: number;
+			videoParams: {
+				modelId: string;
+				aspectRatio: string;
+				resolution: string;
+				durationSeconds: number;
+				generateAudio?: boolean;
+				negativePrompt?: string;
+				cfgScale?: number;
+				prompt?: string;
+			};
+			videoPrompt?: string;
+			warnings?: string[];
+			createdAt: number;
+		}>;
 	},
 ) {
-	const referenceImageUrl = run.referenceImageStorageId
-		? await ctx.storage.getUrl(run.referenceImageStorageId)
-		: null;
-	const videoUrl = run.videoStorageId
-		? await ctx.storage.getUrl(run.videoStorageId)
-		: null;
-	return { referenceImageUrl, videoUrl };
+	const referenceImages = await Promise.all(
+		(run.referenceImages ?? []).map(async (image) => ({
+			...image,
+			url: await ctx.storage.getUrl(image.storageId),
+		})),
+	);
+	const videos = await Promise.all(
+		(run.videos ?? []).map(async (video) => ({
+			...video,
+			url: await ctx.storage.getUrl(video.storageId),
+		})),
+	);
+	return { referenceImages, videos };
 }
 
 export const getRun = query({
@@ -34,8 +80,8 @@ export const getRun = query({
 		if (!run) {
 			return null;
 		}
-		const urls = await resolveMediaUrls(ctx, run);
-		return { ...run, ...urls };
+		const media = await resolveRunUrls(ctx, run);
+		return { ...run, ...media };
 	},
 });
 
@@ -53,8 +99,8 @@ export const listRecentRuns = query({
 			.take(limit);
 		return await Promise.all(
 			runs.map(async (run) => {
-				const urls = await resolveMediaUrls(ctx, run);
-				return { ...run, ...urls };
+				const media = await resolveRunUrls(ctx, run);
+				return { ...run, ...media };
 			}),
 		);
 	},
@@ -71,14 +117,11 @@ export const getStaticModelCatalog = query({
 	},
 });
 
-export const getCachedGatewayCatalog = query({
+export const getCachedOpenRouterCatalog = query({
 	args: {},
 	returns: v.union(v.null(), v.any()),
 	handler: async (ctx) => {
-		const cached = await ctx.db
-			.query("catalogCache")
-			.filter((q) => q.eq(q.field("key"), "gateway_models"))
-			.first();
+		const cached = await ctx.db.query("catalogCache").first();
 		if (!cached) {
 			return null;
 		}
@@ -106,7 +149,7 @@ export const createShlokaDraft = mutation({
 		}
 		const now = Date.now();
 		const imageConfig = defaultImageConfig();
-		const defaultModel: VideoModelId = "google/veo-3.1-generate-001";
+		const defaultModel: VideoModelId = "google/veo-3.1-lite";
 		return await ctx.db.insert("generationRuns", {
 			provenance: "shloka",
 			status: "draft",
@@ -117,6 +160,9 @@ export const createShlokaDraft = mutation({
 			imageSize: imageConfig.size,
 			imageQuality: imageConfig.quality,
 			videoParams: defaultVideoParams(defaultModel),
+			referenceImages: [],
+			extraReferenceImageIds: [],
+			videos: [],
 			createdAt: now,
 			updatedAt: now,
 		});
@@ -145,6 +191,9 @@ export const createModelStudioDraft = mutation({
 				prompt: args.prompt?.trim() || undefined,
 			},
 			videoPrompt: args.prompt?.trim() || undefined,
+			referenceImages: [],
+			extraReferenceImageIds: [],
+			videos: [],
 			createdAt: now,
 			updatedAt: now,
 		});
@@ -160,6 +209,9 @@ export const updateDraft = mutation({
 		selectedModelId: v.optional(v.string()),
 		videoParams: v.optional(videoParamsValidator),
 		videoPrompt: v.optional(v.string()),
+		firstFrameImageId: v.optional(v.union(v.string(), v.null())),
+		lastFrameImageId: v.optional(v.union(v.string(), v.null())),
+		extraReferenceImageIds: v.optional(v.array(v.string())),
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
@@ -171,65 +223,109 @@ export const updateDraft = mutation({
 			throw new Error("Run is busy. Wait for the current stage to finish.");
 		}
 		await ctx.db.patch(args.runId, {
-			customInstructions: args.customInstructions?.trim() || run.customInstructions,
+			customInstructions:
+				args.customInstructions !== undefined
+					? args.customInstructions.trim() || undefined
+					: run.customInstructions,
 			imageSize: args.imageSize ?? run.imageSize,
 			imageQuality: args.imageQuality ?? run.imageQuality,
 			selectedModelId: args.selectedModelId ?? run.selectedModelId,
 			videoParams: args.videoParams ?? run.videoParams,
-			videoPrompt: args.videoPrompt?.trim() || run.videoPrompt,
+			videoPrompt:
+				args.videoPrompt !== undefined
+					? args.videoPrompt.trim() || undefined
+					: run.videoPrompt,
+			firstFrameImageId:
+				args.firstFrameImageId === null
+					? undefined
+					: (args.firstFrameImageId ?? run.firstFrameImageId),
+			lastFrameImageId:
+				args.lastFrameImageId === null
+					? undefined
+					: (args.lastFrameImageId ?? run.lastFrameImageId),
+			extraReferenceImageIds:
+				args.extraReferenceImageIds ?? run.extraReferenceImageIds,
 			updatedAt: Date.now(),
 		});
 		return null;
 	},
 });
 
-export const createImageRevision = mutation({
-	args: {
-		parentRunId: v.id("generationRuns"),
-	},
-	returns: v.id("generationRuns"),
-	handler: async (ctx, args) => {
-		const parent = await ctx.db.get(args.parentRunId);
-		if (!parent) {
-			throw new Error("Parent run not found.");
-		}
-		const now = Date.now();
-		return await ctx.db.insert("generationRuns", {
-			provenance: parent.provenance,
-			status: parent.imagePrompt ? "plan_ready" : parent.status,
-			revisionNumber: parent.revisionNumber + 1,
-			parentRunId: args.parentRunId,
-			shlokaText: parent.shlokaText,
-			customInstructions: parent.customInstructions,
-			plannerModel: parent.plannerModel,
-			plannerReasoning: parent.plannerReasoning,
-			imagePrompt: parent.imagePrompt,
-			videoScenes: parent.videoScenes,
-			imageSize: parent.imageSize,
-			imageQuality: parent.imageQuality,
-			selectedModelId: parent.selectedModelId,
-			videoParams: parent.videoParams,
-			videoPrompt: parent.videoPrompt,
-			planningKey: parent.planningKey,
-			planningCompletedAt: parent.planningCompletedAt,
-			createdAt: now,
-			updatedAt: now,
-		});
-	},
-});
-
-export const markRunFailed = mutation({
+export const deleteRun = mutation({
 	args: {
 		runId: v.id("generationRuns"),
-		lastError: v.string(),
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
+		const run = await ctx.db.get(args.runId);
+		if (!run) {
+			return null;
+		}
+		for (const image of run.referenceImages ?? []) {
+			await ctx.storage.delete(image.storageId);
+		}
+		for (const video of run.videos ?? []) {
+			await ctx.storage.delete(video.storageId);
+		}
+		await ctx.db.delete(args.runId);
+		return null;
+	},
+});
+
+export const removeReferenceImage = mutation({
+	args: {
+		runId: v.id("generationRuns"),
+		imageId: v.string(),
+	},
+	returns: v.null(),
+	handler: async (ctx, args) => {
+		const run = await ctx.db.get(args.runId);
+		if (!run) {
+			throw new Error("Run not found.");
+		}
+		const target = (run.referenceImages ?? []).find(
+			(image) => image.id === args.imageId,
+		);
+		if (!target) {
+			return null;
+		}
+		await ctx.storage.delete(target.storageId);
+		const referenceImages = (run.referenceImages ?? []).filter(
+			(image) => image.id !== args.imageId,
+		);
 		await ctx.db.patch(args.runId, {
-			status: "failed",
-			lastError: args.lastError,
+			referenceImages,
+			firstFrameImageId:
+				run.firstFrameImageId === args.imageId
+					? referenceImages[0]?.id
+					: run.firstFrameImageId,
+			lastFrameImageId:
+				run.lastFrameImageId === args.imageId
+					? undefined
+					: run.lastFrameImageId,
+			extraReferenceImageIds: (run.extraReferenceImageIds ?? []).filter(
+				(id) => id !== args.imageId,
+			),
+			status: referenceImages.length > 0 ? run.status : "plan_ready",
 			updatedAt: Date.now(),
 		});
 		return null;
+	},
+});
+
+/** One-time cleanup: deletes all runs, media files, and catalog cache. */
+export const wipeAllStudioData = mutation({
+	args: {},
+	returns: v.object({
+		runsDeleted: v.number(),
+		filesDeleted: v.number(),
+		cachesDeleted: v.number(),
+	}),
+	handler: async (ctx): Promise<{
+		runsDeleted: number;
+		filesDeleted: number;
+		cachesDeleted: number;
+	}> => {
+		return await ctx.runMutation(internal.studioInternal.wipeAllStudioData, {});
 	},
 });

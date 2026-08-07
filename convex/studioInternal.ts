@@ -1,7 +1,8 @@
 import { v } from "convex/values";
 import { internalMutation } from "./_generated/server";
 import {
-	mediaMetaValidator,
+	generatedVideoValidator,
+	referenceImageValidator,
 	runStatusValidator,
 	videoParamsValidator,
 	videoSceneValidator,
@@ -21,7 +22,7 @@ export const setRunStatus = internalMutation({
 		}
 		await ctx.db.patch(args.runId, {
 			status: args.status,
-			lastError: args.lastError ?? undefined,
+			lastError: args.lastError,
 			updatedAt: Date.now(),
 		});
 		return null;
@@ -35,7 +36,6 @@ export const commitPlan = internalMutation({
 		plannerReasoning: v.string(),
 		imagePrompt: v.string(),
 		videoScenes: v.array(videoSceneValidator),
-		openRouterGenerationId: v.optional(v.string()),
 		warnings: v.optional(v.array(v.string())),
 		planningKey: v.string(),
 	},
@@ -47,7 +47,6 @@ export const commitPlan = internalMutation({
 			plannerReasoning: args.plannerReasoning,
 			imagePrompt: args.imagePrompt,
 			videoScenes: args.videoScenes,
-			openRouterGenerationId: args.openRouterGenerationId,
 			warnings: args.warnings,
 			planningKey: args.planningKey,
 			planningCompletedAt: Date.now(),
@@ -58,23 +57,27 @@ export const commitPlan = internalMutation({
 	},
 });
 
-export const commitReferenceImage = internalMutation({
+export const appendReferenceImage = internalMutation({
 	args: {
 		runId: v.id("generationRuns"),
-		storageId: v.id("_storage"),
-		meta: mediaMetaValidator,
-		revisedImagePrompt: v.optional(v.string()),
-		imageKey: v.string(),
+		image: referenceImageValidator,
+		setAsFirstFrame: v.optional(v.boolean()),
 		warnings: v.optional(v.array(v.string())),
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
+		const run = await ctx.db.get(args.runId);
+		if (!run) {
+			throw new Error("Run not found.");
+		}
+		const referenceImages = [...(run.referenceImages ?? []), args.image];
 		await ctx.db.patch(args.runId, {
 			status: "image_ready",
-			referenceImageStorageId: args.storageId,
-			referenceImageMeta: args.meta,
-			revisedImagePrompt: args.revisedImagePrompt,
-			imageKey: args.imageKey,
+			referenceImages,
+			firstFrameImageId:
+				args.setAsFirstFrame !== false
+					? args.image.id
+					: (run.firstFrameImageId ?? args.image.id),
 			imageCompletedAt: Date.now(),
 			warnings: args.warnings,
 			lastError: undefined,
@@ -84,25 +87,22 @@ export const commitReferenceImage = internalMutation({
 	},
 });
 
-export const commitVideo = internalMutation({
+export const appendVideo = internalMutation({
 	args: {
 		runId: v.id("generationRuns"),
-		storageId: v.id("_storage"),
-		meta: mediaMetaValidator,
-		gatewayGenerationId: v.optional(v.string()),
-		actualCostUsd: v.optional(v.number()),
-		videoKey: v.string(),
+		video: generatedVideoValidator,
 		warnings: v.optional(v.array(v.string())),
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
+		const run = await ctx.db.get(args.runId);
+		if (!run) {
+			throw new Error("Run not found.");
+		}
+		const videos = [...(run.videos ?? []), args.video];
 		await ctx.db.patch(args.runId, {
 			status: "completed",
-			videoStorageId: args.storageId,
-			videoMeta: args.meta,
-			gatewayGenerationId: args.gatewayGenerationId,
-			actualCostUsd: args.actualCostUsd,
-			videoKey: args.videoKey,
+			videos,
 			videoCompletedAt: Date.now(),
 			warnings: args.warnings,
 			lastError: undefined,
@@ -138,22 +138,70 @@ export const setCatalogCache = internalMutation({
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
-		const existing = await ctx.db
-			.query("catalogCache")
-			.filter((q) => q.eq(q.field("key"), "gateway_models"))
-			.first();
+		const existing = await ctx.db.query("catalogCache").first();
 		if (existing) {
 			await ctx.db.patch(existing._id, {
+				key: "openrouter_video_models",
 				payload: args.payload,
 				fetchedAt: args.fetchedAt,
 			});
 		} else {
 			await ctx.db.insert("catalogCache", {
-				key: "gateway_models",
+				key: "openrouter_video_models",
 				payload: args.payload,
 				fetchedAt: args.fetchedAt,
 			});
 		}
 		return null;
+	},
+});
+
+export const wipeAllStudioData = internalMutation({
+	args: {},
+	returns: v.object({
+		runsDeleted: v.number(),
+		filesDeleted: v.number(),
+		cachesDeleted: v.number(),
+	}),
+	handler: async (ctx) => {
+		const runs = await ctx.db.query("generationRuns").collect();
+		let filesDeleted = 0;
+		for (const run of runs) {
+			const doc = run as Record<string, unknown>;
+			for (const image of run.referenceImages ?? []) {
+				await ctx.storage.delete(image.storageId);
+				filesDeleted += 1;
+			}
+			for (const video of run.videos ?? []) {
+				await ctx.storage.delete(video.storageId);
+				filesDeleted += 1;
+			}
+			const legacyImage = doc.referenceImageStorageId as
+				| import("./_generated/dataModel").Id<"_storage">
+				| undefined;
+			const legacyVideo = doc.videoStorageId as
+				| import("./_generated/dataModel").Id<"_storage">
+				| undefined;
+			if (legacyImage) {
+				await ctx.storage.delete(legacyImage);
+				filesDeleted += 1;
+			}
+			if (legacyVideo) {
+				await ctx.storage.delete(legacyVideo);
+				filesDeleted += 1;
+			}
+			await ctx.db.delete(run._id);
+		}
+
+		const caches = await ctx.db.query("catalogCache").collect();
+		for (const cache of caches) {
+			await ctx.db.delete(cache._id);
+		}
+
+		return {
+			runsDeleted: runs.length,
+			filesDeleted,
+			cachesDeleted: caches.length,
+		};
 	},
 });

@@ -20,7 +20,7 @@ export type VideoConfigState = {
 	durationSeconds: number;
 	generateAudio?: boolean;
 	negativePrompt?: string;
-	klingMode?: "std" | "pro";
+	cfgScale?: number;
 	prompt?: string;
 };
 
@@ -38,28 +38,15 @@ export function VideoConfiguration({
 	showPrompt,
 }: VideoConfigurationProps) {
 	const profile = MODEL_CAPABILITY_PROFILES[value.modelId as VideoModelId];
-	const durationOptions = profile.durationSeconds.presets ??
-		Array.from(
-			{
-				length:
-					(profile.durationSeconds.max - profile.durationSeconds.min) /
-						profile.durationSeconds.step +
-					1,
-			},
-			(_, index) =>
-				profile.durationSeconds.min + index * profile.durationSeconds.step,
-		);
+	if (!profile) {
+		return null;
+	}
 
 	return (
 		<section className="space-y-4 border-t border-border/80 pt-6">
 			<div>
 				<h2 className="font-heading text-xl font-semibold">Video configuration</h2>
 				<p className="text-sm text-muted-foreground">{profile.pricingNotes}</p>
-				{profile.audioBeta ? (
-					<p className="text-xs text-muted-foreground">
-						Audio is marked beta for this model — verify with a short test clip.
-					</p>
-				) : null}
 			</div>
 
 			<div className="grid gap-4 sm:grid-cols-2">
@@ -77,7 +64,9 @@ export function VideoConfiguration({
 						</SelectTrigger>
 						<SelectContent>
 							{profile.aspectRatios.map((ratio) => (
-								<SelectItem key={ratio} value={ratio}>{ratio}</SelectItem>
+								<SelectItem key={ratio} value={ratio}>
+									{ratio}
+								</SelectItem>
 							))}
 						</SelectContent>
 					</Select>
@@ -108,7 +97,8 @@ export function VideoConfiguration({
 					<Select
 						value={String(value.durationSeconds)}
 						onValueChange={(duration) =>
-							duration && onChange({ ...value, durationSeconds: Number(duration) })
+							duration &&
+							onChange({ ...value, durationSeconds: Number(duration) })
 						}
 						disabled={disabled}
 					>
@@ -116,7 +106,7 @@ export function VideoConfiguration({
 							<SelectValue />
 						</SelectTrigger>
 						<SelectContent>
-							{durationOptions.map((duration) => (
+							{profile.supportedDurations.map((duration) => (
 								<SelectItem key={duration} value={String(duration)}>
 									{duration}s
 								</SelectItem>
@@ -124,29 +114,6 @@ export function VideoConfiguration({
 						</SelectContent>
 					</Select>
 				</div>
-				{profile.supportsKlingMode ? (
-					<div className="space-y-2">
-						<Label>Kling quality</Label>
-						<Select
-							value={value.klingMode ?? "std"}
-							onValueChange={(mode) =>
-								onChange({
-									...value,
-									klingMode: mode as "std" | "pro",
-								})
-							}
-							disabled={disabled}
-						>
-							<SelectTrigger className="min-h-11">
-								<SelectValue />
-							</SelectTrigger>
-							<SelectContent>
-								<SelectItem value="std">Standard</SelectItem>
-								<SelectItem value="pro">Pro</SelectItem>
-							</SelectContent>
-						</Select>
-					</div>
-				) : null}
 			</div>
 
 			{profile.supportsAudio ? (
@@ -173,6 +140,7 @@ export function VideoConfiguration({
 						}
 						placeholder="blur, text overlays, distorted faces…"
 						disabled={disabled}
+						className="max-h-40 overflow-y-auto"
 					/>
 				</div>
 			) : null}
@@ -185,7 +153,7 @@ export function VideoConfiguration({
 						onChange={(event) =>
 							onChange({ ...value, prompt: event.target.value })
 						}
-						className="min-h-28"
+						className="min-h-28 max-h-56 overflow-y-auto"
 						disabled={disabled}
 					/>
 				</div>

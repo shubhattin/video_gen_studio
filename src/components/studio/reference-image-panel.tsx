@@ -8,6 +8,15 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "#/components/ui/select";
+import { Badge } from "#/components/ui/badge";
+import { cn } from "#/lib/utils";
+
+export type ReferenceImageItem = {
+	id: string;
+	url?: string | null;
+	revisedImagePrompt?: string;
+	createdAt: number;
+};
 
 type ReferenceImagePanelProps = {
 	imageSize: string;
@@ -15,10 +24,18 @@ type ReferenceImagePanelProps = {
 	onSizeChange: (value: string) => void;
 	onQualityChange: (value: string) => void;
 	onGenerate: () => void;
-	onRegenerate?: () => void;
 	generating?: boolean;
-	referenceImageUrl?: string | null;
-	revisedPrompt?: string;
+	images: ReferenceImageItem[];
+	firstFrameImageId?: string;
+	lastFrameImageId?: string;
+	extraReferenceImageIds: string[];
+	onSelectFirstFrame: (id: string | null) => void;
+	onSelectLastFrame: (id: string | null) => void;
+	onToggleExtraReference: (id: string) => void;
+	onRemoveImage: (id: string) => void;
+	supportsLastFrame?: boolean;
+	supportsInputReferences?: boolean;
+	maxInputReferences?: number;
 	disabled?: boolean;
 };
 
@@ -28,32 +45,43 @@ export function ReferenceImagePanel({
 	onSizeChange,
 	onQualityChange,
 	onGenerate,
-	onRegenerate,
 	generating,
-	referenceImageUrl,
-	revisedPrompt,
+	images,
+	firstFrameImageId,
+	lastFrameImageId,
+	extraReferenceImageIds,
+	onSelectFirstFrame,
+	onSelectLastFrame,
+	onToggleExtraReference,
+	onRemoveImage,
+	supportsLastFrame,
+	supportsInputReferences,
+	maxInputReferences = 0,
 	disabled,
 }: ReferenceImagePanelProps) {
 	const estimate =
 		GPT_IMAGE_ESTIMATES_USD["1024x1536"][
 			imageQuality as "low" | "medium" | "high"
-		] ??
-		GPT_IMAGE_ESTIMATES_USD["1024x1536"].medium;
+		] ?? GPT_IMAGE_ESTIMATES_USD["1024x1536"].medium;
 
 	return (
 		<section className="space-y-4 border-t border-border/80 pt-6">
 			<div>
-				<h2 className="font-heading text-xl font-semibold">Reference image</h2>
+				<h2 className="font-heading text-xl font-semibold">Reference images</h2>
 				<p className="text-sm text-muted-foreground">
-					GPT Image 2 portrait still for image-to-video models. Estimate ~
-					${estimate.toFixed(3)} for {imageQuality} quality.
+					GPT Image 2 stills. Pick first/last frames and optional style refs.
+					Estimate ~${estimate.toFixed(3)} per {imageQuality} generate.
 				</p>
 			</div>
 
 			<div className="grid gap-4 sm:grid-cols-2">
 				<div className="space-y-2">
 					<Label>Size</Label>
-					<Select value={imageSize} onValueChange={(value) => value && onSizeChange(value)} disabled={disabled}>
+					<Select
+						value={imageSize}
+						onValueChange={(value) => value && onSizeChange(value)}
+						disabled={disabled}
+					>
 						<SelectTrigger className="min-h-11">
 							<SelectValue />
 						</SelectTrigger>
@@ -84,38 +112,98 @@ export function ReferenceImagePanel({
 				</div>
 			</div>
 
-			<div className="flex flex-wrap gap-3">
-				<Button
-					className="min-h-11"
-					onClick={onGenerate}
-					disabled={disabled || generating}
-				>
-					{generating ? "Generating image…" : "Generate reference image"}
-				</Button>
-				{referenceImageUrl && onRegenerate ? (
-					<Button
-						variant="outline"
-						className="min-h-11"
-						onClick={onRegenerate}
-						disabled={disabled || generating}
-					>
-						New revision
-					</Button>
-				) : null}
-			</div>
+			<Button
+				className="min-h-11"
+				onClick={onGenerate}
+				disabled={disabled || generating}
+			>
+				{generating ? "Generating image…" : "Generate reference image"}
+			</Button>
 
-			{referenceImageUrl ? (
-				<div className="space-y-2">
-					<img
-						src={referenceImageUrl}
-						alt="Generated reference still"
-						className="mx-auto max-h-[min(70vh,720px)] w-auto rounded-lg border border-border/80"
-					/>
-					{revisedPrompt ? (
-						<p className="text-xs text-muted-foreground">
-							Provider revised prompt: {revisedPrompt}
-						</p>
-					) : null}
+			{images.length > 0 ? (
+				<div className="grid gap-4 sm:grid-cols-2">
+					{images.map((image) => {
+						const isFirst = firstFrameImageId === image.id;
+						const isLast = lastFrameImageId === image.id;
+						const isExtra = extraReferenceImageIds.includes(image.id);
+						return (
+							<div
+								key={image.id}
+								className={cn(
+									"rounded-xl border p-3 space-y-3",
+									isFirst ? "border-primary" : "border-border/80",
+								)}
+							>
+								{image.url ? (
+									<img
+										src={image.url}
+										alt="Reference still"
+										className="mx-auto max-h-64 w-auto rounded-lg"
+									/>
+								) : null}
+								<div className="flex flex-wrap gap-2">
+									{isFirst ? <Badge>First frame</Badge> : null}
+									{isLast ? <Badge variant="secondary">Last frame</Badge> : null}
+									{isExtra ? <Badge variant="outline">Style ref</Badge> : null}
+								</div>
+								<div className="flex flex-wrap gap-2">
+									<Button
+										size="sm"
+										variant={isFirst ? "default" : "outline"}
+										className="min-h-11"
+										disabled={disabled}
+										onClick={() =>
+											onSelectFirstFrame(isFirst ? null : image.id)
+										}
+									>
+										{isFirst ? "Unset first" : "Use as first"}
+									</Button>
+									{supportsLastFrame ? (
+										<Button
+											size="sm"
+											variant={isLast ? "secondary" : "outline"}
+											className="min-h-11"
+											disabled={disabled}
+											onClick={() =>
+												onSelectLastFrame(isLast ? null : image.id)
+											}
+										>
+											{isLast ? "Unset last" : "Use as last"}
+										</Button>
+									) : null}
+									{supportsInputReferences ? (
+										<Button
+											size="sm"
+											variant={isExtra ? "secondary" : "outline"}
+											className="min-h-11"
+											disabled={
+												disabled ||
+												(!isExtra &&
+													extraReferenceImageIds.length >= maxInputReferences)
+											}
+											onClick={() => onToggleExtraReference(image.id)}
+										>
+											{isExtra ? "Remove ref" : "Add as ref"}
+										</Button>
+									) : null}
+									<Button
+										size="sm"
+										variant="destructive"
+										className="min-h-11"
+										disabled={disabled}
+										onClick={() => onRemoveImage(image.id)}
+									>
+										Delete
+									</Button>
+								</div>
+								{image.revisedImagePrompt ? (
+									<p className="text-xs text-muted-foreground">
+										Revised: {image.revisedImagePrompt}
+									</p>
+								) : null}
+							</div>
+						);
+					})}
 				</div>
 			) : null}
 		</section>

@@ -217,6 +217,18 @@
       "skillPath": "skills/find-skills/SKILL.md",
       "computedHash": "b146008599c31057cef1c145774cea5d5afb30e8f43fa802e47a4b461419aaaf"
     },
+    "openrouter-models": {
+      "source": "openrouterteam/skills",
+      "sourceType": "github",
+      "skillPath": "skills/openrouter-models/SKILL.md",
+      "computedHash": "d1ef33877a30b9b22c0f1a2cedd54f795c9459ae70d8bb66978feba526549fc4"
+    },
+    "openrouter-video": {
+      "source": "openrouterteam/skills",
+      "sourceType": "github",
+      "skillPath": "skills/openrouter-video/SKILL.md",
+      "computedHash": "ca1a65aeb1cb30b4d3a96a698a3eff1ad8c1819396469631a1ef5767bd6f0f54"
+    },
     "shadcn": {
       "source": "shadcn/ui",
       "sourceType": "github",

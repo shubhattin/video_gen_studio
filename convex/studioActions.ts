@@ -1,6 +1,6 @@
 "use node";
 
-import { generateText, generateImage, experimental_generateVideo, Output } from "ai";
+import { generateImage, generateText, Output } from "ai";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { action } from "./_generated/server";
@@ -13,51 +13,64 @@ import {
 	isVideoModelId,
 } from "./lib/modelCatalog";
 import {
-	getGatewayProvider,
 	getOpenAIProvider,
+	getOpenRouterApiKey,
 	getOpenRouterProvider,
-	validateGatewayCredentials,
 } from "./lib/providers";
+import {
+	downloadOpenRouterVideo,
+	fetchOpenRouterVideoModels,
+	submitOpenRouterVideoJob,
+	waitForOpenRouterVideoJob,
+} from "./lib/openrouterVideo";
 import {
 	imageConfigSchema,
 	plannerOutputSchema,
 	videoParamsSchema,
 	type ImageConfig,
 } from "./lib/schemas";
-import { adaptVideoRequest } from "./lib/videoAdapters";
+import { adaptOpenRouterVideoRequest } from "./lib/videoAdapters";
 
-const PLANNER_SYSTEM = `You are a creative director for devotional short-form video (9:16 portrait).
-Produce structured plans for AI image and video generation from a supplied Sanskrit/Hindi shloka.
+const PLANNER_SYSTEM = `You are a creative director for warm, Indian-devotional short-form video (default 9:16 portrait).
 
-Rules:
-- Preserve the supplied shloka verbatim in your reasoning; never fabricate religious claims or scripture.
-- Use the custom instructions for mood, symbolism, pacing, and visual constraints.
-- imagePrompt must describe a single portrait-friendly reference still (no text overlays, no logos).
-- videoScenes must be cinematic beats suitable for a short reel; each scene is one structured shot plan.
-- Keep content respectful; avoid sensational or inaccurate religious depictions.`;
+Your job is to turn a supplied Sanskrit or Hindi shloka plus optional custom instructions into:
+1) one portrait-friendly reference-image prompt, and
+2) a structured multi-scene video plan.
+
+Core principles:
+- Keep the shloka as the spiritual and narrative center. Do not invent scripture, fake quotes, or religious claims not present in the input.
+- Treat custom instructions as hard creative constraints (mood, symbolism, pacing, places, colors, what to avoid).
+- Aesthetic: Indian and warm — soft temple gold, marigold and vermilion accents, sandalwood browns, monsoon greens, diya glow, dawn/dusk light, gentle reverence. Avoid cold neon cyberpunk looks unless the user asks.
+- Prefer calm devotion over spectacle: quiet motion, incense smoke, lamp flame, cloth, petals, river light, sacred geometry used sparingly.
+- Distinctive faces: when a scene or reference image includes multiple people (devotees, kings, attendants, family, crowd), give each person clearly different facial features, age cues, skin tone variation within a respectful range, hairstyle, beard/jewelry, and clothing detail. Never make a row of identical clone faces. Name or tag distinct roles in the prompt (e.g. elder with grey beard, young woman with jasmine garland, boy with topknot) so image and video models keep individuals unique across the frame and across scenes. Only keep one face consistent when it is the same named character recurring.
+- imagePrompt must describe a single still suitable as a first frame / reference (no text overlays, logos, watermarks, or readable Devanagari burned into the image unless explicitly requested).
+- videoScenes should read as cinematic beats for a short reel, preserving the emotional through-line of the shloka.
+- Stay respectful; no sensational, ironic, or inaccurate religious depiction.`;
 
 function buildPlannerPrompt(
 	shlokaText: string,
 	customInstructions: string | undefined,
 ) {
 	return [
-		`Shloka (preserve meaning, do not rewrite as translation unless asked):\n${shlokaText}`,
-		customInstructions
-			? `Custom instructions:\n${customInstructions}`
-			: "Custom instructions: none provided.",
-		"Return imagePrompt plus videoScenes for a portrait 9:16 devotional short.",
+		`Shloka (preserve meaning; do not replace with an invented translation unless asked):\n"""\n${shlokaText}\n"""`,
+		customInstructions?.trim()
+			? `Custom instructions (follow closely):\n"""\n${customInstructions.trim()}\n"""`
+			: "Custom instructions: none. Default to warm Indian devotional atmosphere.",
+		"Produce imagePrompt + videoScenes for a portrait 9:16 short rooted in this shloka.",
 	].join("\n\n");
 }
 
 function buildVideoPromptFromScenes(
 	scenes: Array<{ intent: string; actionMotion: string; composition: string }>,
 ) {
+	// Keep compact — Kling and similar providers reject very long prompts.
 	return scenes
+		.slice(0, 6)
 		.map(
 			(scene, index) =>
-				`Scene ${index + 1}: ${scene.intent}. ${scene.composition}. Motion: ${scene.actionMotion}.`,
+				`${index + 1}. ${scene.intent}: ${scene.actionMotion}`,
 		)
-		.join("\n");
+		.join(" | ");
 }
 
 function warningMessages(
@@ -76,6 +89,10 @@ async function storeBytes(
 	const normalized = Uint8Array.from(bytes);
 	const blob = new Blob([normalized], { type: mimeType });
 	return await ctx.storage.store(blob);
+}
+
+function newMediaId(prefix: string) {
+	return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 export const planShlokaRun = action({
@@ -117,10 +134,7 @@ export const planShlokaRun = action({
 				model: openrouter(PLANNER_MODEL_ID),
 				reasoning: "medium",
 				system: PLANNER_SYSTEM,
-				prompt: buildPlannerPrompt(
-					run.shlokaText,
-					run.customInstructions,
-				),
+				prompt: buildPlannerPrompt(run.shlokaText, run.customInstructions),
 				output: Output.object({ schema: plannerOutputSchema }),
 			});
 
@@ -133,7 +147,6 @@ export const planShlokaRun = action({
 				plannerReasoning: "medium",
 				imagePrompt: plan.imagePrompt,
 				videoScenes: plan.videoScenes,
-				openRouterGenerationId: result.response?.id,
 				warnings: warnings.length > 0 ? warnings : undefined,
 				planningKey,
 			});
@@ -155,30 +168,27 @@ export const planShlokaRun = action({
 export const generateReferenceImage = action({
 	args: {
 		runId: v.id("generationRuns"),
-		force: v.optional(v.boolean()),
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
 		const run = await ctx.runQuery(internal.studioQueries.getRunDoc, {
 			runId: args.runId,
 		});
-		if (!run?.imagePrompt) {
-			throw new Error("Plan an image prompt before generating a reference image.");
+		if (!run?.imagePrompt && !run?.videoPrompt && !run?.videoParams?.prompt) {
+			throw new Error(
+				"Plan an image prompt (or provide a video prompt) before generating a reference image.",
+			);
 		}
 
-		const imageKey = `image-${args.runId}-${run.revisionNumber}`;
-		if (
-			!args.force &&
-			run.imageKey === imageKey &&
-			run.referenceImageStorageId &&
-			run.status === "image_ready"
-		) {
-			return null;
-		}
+		const imagePrompt =
+			run.imagePrompt?.trim() ||
+			run.videoPrompt?.trim() ||
+			run.videoParams?.prompt?.trim() ||
+			"";
 
 		const imageConfig = imageConfigSchema.parse({
 			size: run.imageSize ?? "1024x1536",
-			quality: run.imageQuality ?? "medium",
+			quality: run.imageQuality ?? "low",
 		});
 
 		await ctx.runMutation(internal.studioInternal.setRunStatus, {
@@ -190,7 +200,7 @@ export const generateReferenceImage = action({
 			const openai = getOpenAIProvider();
 			const result = await generateImage({
 				model: openai.image("gpt-image-2"),
-				prompt: run.imagePrompt,
+				prompt: imagePrompt,
 				size: imageConfig.size as ImageConfig["size"],
 				providerOptions: {
 					openai: {
@@ -205,25 +215,27 @@ export const generateReferenceImage = action({
 				image.uint8Array,
 				image.mediaType,
 			);
-
 			const [width, height] = imageConfig.size.split("x").map(Number);
 			const warnings = warningMessages(result.warnings ?? []);
-
 			const openaiMeta = result.providerMetadata?.openai as
 				| { revisedPrompt?: string }
 				| undefined;
 
-			await ctx.runMutation(internal.studioInternal.commitReferenceImage, {
+			await ctx.runMutation(internal.studioInternal.appendReferenceImage, {
 				runId: args.runId,
-				storageId,
-				meta: {
-					mimeType: image.mediaType,
-					width,
-					height,
-					bytes: image.uint8Array.byteLength,
+				image: {
+					id: newMediaId("img"),
+					storageId,
+					meta: {
+						mimeType: image.mediaType,
+						width,
+						height,
+						bytes: image.uint8Array.byteLength,
+					},
+					revisedImagePrompt: openaiMeta?.revisedPrompt,
+					createdAt: Date.now(),
 				},
-				revisedImagePrompt: openaiMeta?.revisedPrompt,
-				imageKey,
+				setAsFirstFrame: true,
 				warnings: warnings.length > 0 ? warnings : undefined,
 			});
 		} catch (error) {
@@ -244,7 +256,6 @@ export const generateReferenceImage = action({
 export const generateVideoForRun = action({
 	args: {
 		runId: v.id("generationRuns"),
-		force: v.optional(v.boolean()),
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
@@ -261,18 +272,27 @@ export const generateVideoForRun = action({
 		}
 
 		const profile = MODEL_CAPABILITY_PROFILES[modelId];
-		if (profile.requiresFirstFrame && !run.referenceImageStorageId) {
-			throw new Error("This model requires a reference image.");
-		}
+		type RefImage = {
+			id: string;
+			storageId: Id<"_storage">;
+		};
+		const images = (run.referenceImages ?? []) as RefImage[];
+		const first =
+			images.find((image: RefImage) => image.id === run.firstFrameImageId) ??
+			images[0];
+		const last = images.find(
+			(image: RefImage) => image.id === run.lastFrameImageId,
+		);
+		const extraIds = new Set((run.extraReferenceImageIds ?? []) as string[]);
+		const extras = images.filter(
+			(image: RefImage) =>
+				extraIds.has(image.id) &&
+				image.id !== first?.id &&
+				image.id !== last?.id,
+		);
 
-		const videoKey = `video-${args.runId}-${run.revisionNumber}`;
-		if (
-			!args.force &&
-			run.videoKey === videoKey &&
-			run.videoStorageId &&
-			run.status === "completed"
-		) {
-			return null;
+		if (profile.requiresFirstFrame && !first) {
+			throw new Error("This model requires a first-frame reference image.");
 		}
 
 		const parsedParams = videoParamsSchema.parse({
@@ -285,15 +305,33 @@ export const generateVideoForRun = action({
 			(run.videoScenes
 				? buildVideoPromptFromScenes(run.videoScenes)
 				: run.imagePrompt) ||
-			"Devotional cinematic motion portrait.";
+			"Warm Indian cinematic motion portrait.";
 
-		const adapted = adaptVideoRequest(parsedParams, fallbackPrompt);
+		const firstUrl = first
+			? await ctx.storage.getUrl(first.storageId)
+			: null;
+		const lastUrl = last ? await ctx.storage.getUrl(last.storageId) : null;
+		const referenceUrls = (
+			await Promise.all(
+				extras.map(async (image: RefImage) =>
+					ctx.storage.getUrl(image.storageId),
+				),
+			)
+		).filter((url: string | null): url is string => Boolean(url));
+
+		const adapted = adaptOpenRouterVideoRequest({
+			params: parsedParams,
+			fallbackPrompt,
+			firstFrameUrl: firstUrl,
+			lastFrameUrl: lastUrl,
+			referenceUrls,
+		});
 
 		await ctx.runMutation(internal.studioInternal.updateVideoConfig, {
 			runId: args.runId,
 			selectedModelId: modelId,
 			videoParams: parsedParams,
-			videoPrompt: adapted.prompt,
+			videoPrompt: adapted.body.prompt,
 		});
 
 		await ctx.runMutation(internal.studioInternal.setRunStatus, {
@@ -302,61 +340,42 @@ export const generateVideoForRun = action({
 		});
 
 		try {
-			const gateway = getGatewayProvider();
-			let frameImages:
-				| Array<{ image: string; frameType: "first_frame" }>
-				| undefined;
-
-			if (run.referenceImageStorageId) {
-				const imageUrl = await ctx.storage.getUrl(run.referenceImageStorageId);
-				if (!imageUrl) {
-					throw new Error("Reference image is no longer available.");
-				}
-				frameImages = [{ image: imageUrl, frameType: "first_frame" }];
-			}
-
-			const result = await experimental_generateVideo({
-				model: gateway.video(modelId),
-				prompt: adapted.prompt,
-				aspectRatio: adapted.aspectRatio,
-				resolution: adapted.resolution,
-				duration: adapted.duration,
-				fps: adapted.fps,
-				generateAudio: adapted.generateAudio,
-				frameImages,
-				providerOptions: adapted.providerOptions,
-				headers: {
-					"idempotency-key": videoKey,
-				},
-				poll: {
-					intervalMs: 5000,
-					timeoutMs: 600000,
-				},
+			const apiKey = getOpenRouterApiKey();
+			const submitted = await submitOpenRouterVideoJob(apiKey, adapted.body);
+			const completed = await waitForOpenRouterVideoJob(apiKey, submitted, {
+				intervalMs: 8000,
+				timeoutMs: 540_000,
 			});
-
-			const video = result.video;
+			const downloaded = await downloadOpenRouterVideo(apiKey, completed);
 			const storageId = await storeBytes(
 				ctx,
-				video.uint8Array,
-				video.mediaType,
+				downloaded.bytes,
+				downloaded.mimeType,
 			);
 
-			const warnings = warningMessages(result.warnings ?? []);
-			const gatewayGenerationId =
-				(result.providerMetadata?.gateway as { generationId?: string } | undefined)
-					?.generationId;
-
-			await ctx.runMutation(internal.studioInternal.commitVideo, {
+			await ctx.runMutation(internal.studioInternal.appendVideo, {
 				runId: args.runId,
-				storageId,
-				meta: {
-					mimeType: video.mediaType,
-					durationSeconds: adapted.duration,
-					bytes: video.uint8Array.byteLength,
+				video: {
+					id: newMediaId("vid"),
+					storageId,
+					meta: {
+						mimeType: downloaded.mimeType,
+						durationSeconds: adapted.body.duration,
+						bytes: downloaded.bytes.byteLength,
+					},
+					openRouterJobId: completed.id,
+					openRouterGenerationId: completed.generation_id,
+					actualCostUsd:
+						typeof completed.usage?.cost === "number"
+							? completed.usage.cost
+							: undefined,
+					videoParams: parsedParams,
+					videoPrompt: adapted.body.prompt,
+					warnings:
+						adapted.warnings.length > 0 ? adapted.warnings : undefined,
+					createdAt: Date.now(),
 				},
-				gatewayGenerationId,
-				videoKey,
-				warnings: warnings.length > 0 ? warnings : undefined,
+				warnings: adapted.warnings.length > 0 ? adapted.warnings : undefined,
 			});
 		} catch (error) {
 			const message =
@@ -377,12 +396,11 @@ export const refreshModelCatalog = action({
 	args: {},
 	returns: v.any(),
 	handler: async (ctx) => {
-		const auth = await validateGatewayCredentials();
-		const gateway = getGatewayProvider();
-		const { models } = await gateway.getAvailableModels();
+		const apiKey = getOpenRouterApiKey();
+		const models = await fetchOpenRouterVideoModels(apiKey);
 		const allowed = new Set(VIDEO_MODEL_IDS);
-		const filtered = models.filter(
-			(model) => allowed.has(model.id as VideoModelId) || model.modelType === "video",
+		const filtered = (models as Array<{ id: string }>).filter((model) =>
+			allowed.has(model.id as VideoModelId),
 		);
 
 		const payload = JSON.stringify(filtered);
@@ -396,11 +414,6 @@ export const refreshModelCatalog = action({
 			fetchedAt,
 			models: filtered,
 			profiles: MODEL_CAPABILITY_PROFILES,
-			gatewayAuth: auth,
-			note:
-				auth.ok
-					? "Gateway catalog loaded and API key verified."
-					: "Catalog is public, but your AI Gateway API key failed authentication. Video and paid inference will not work until you create a valid key at Vercel AI Gateway API Keys and update Convex env.",
 		};
 	},
 });

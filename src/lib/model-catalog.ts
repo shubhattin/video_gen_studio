@@ -6,13 +6,11 @@ export {
 	PLANNER_MODEL_ID,
 	REFERENCE_IMAGE_MODEL_ID,
 	isVideoModelId,
-	resolutionToPixels,
 	type VideoModelId,
 	type AspectRatio,
 	type ResolutionLabel,
 	type ImageQuality,
 	type ImageSize,
-	type KlingMode,
 	type ModelCapabilityProfile,
 } from "../../convex/lib/modelCatalog";
 

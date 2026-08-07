@@ -18,6 +18,8 @@ describe("studio mutations", () => {
 		expect(run?.status).toBe("draft");
 		expect(run?.imageSize).toBe("1024x1536");
 		expect(run?.videoParams?.aspectRatio).toBe("9:16");
+		expect(run?.referenceImages).toEqual([]);
+		expect(run?.videos).toEqual([]);
 	});
 
 	it("transitions plan commit to plan_ready", async () => {
@@ -30,17 +32,17 @@ describe("studio mutations", () => {
 			runId,
 			plannerModel: "openai/gpt-5.6-terra",
 			plannerReasoning: "medium",
-			imagePrompt: "Portrait devotional forest scene with soft gold light",
+			imagePrompt: "Portrait warm temple courtyard with soft diya glow",
 			videoScenes: [
 				{
 					sceneNumber: 1,
 					intent: "Opening",
-					subjects: "Forest path",
+					subjects: "Temple path",
 					locationTime: "Twilight",
 					composition: "Centered portrait",
 					lensCamera: "Slow push-in",
 					lighting: "Soft gold",
-					paletteAesthetics: "Warm greens",
+					paletteAesthetics: "Warm marigold and sandalwood",
 					actionMotion: "Gentle drift",
 					soundDirection: "Quiet ambience",
 					transition: "Fade",
@@ -54,13 +56,23 @@ describe("studio mutations", () => {
 		expect(run?.status).toBe("plan_ready");
 		expect(run?.imagePrompt).toContain("Portrait");
 	});
+
+	it("deletes a run", async () => {
+		const t = convexTest(schema, modules);
+		const runId = await t.mutation(api.studio.createShlokaDraft, {
+			shlokaText: "Delete me",
+		});
+		await t.mutation(api.studio.deleteRun, { runId });
+		const run = await t.query(api.studio.getRun, { runId });
+		expect(run).toBeNull();
+	});
 });
 
 describe("video param validation", () => {
 	it("rejects unsupported Veo duration", () => {
 		expect(() =>
 			validateVideoParams({
-				modelId: "google/veo-3.1-generate-001",
+				modelId: "google/veo-3.1",
 				aspectRatio: "9:16",
 				resolution: "720p",
 				durationSeconds: 10,
@@ -70,13 +82,34 @@ describe("video param validation", () => {
 
 	it("accepts valid Kling configuration", () => {
 		const params = validateVideoParams({
-			modelId: "klingai/kling-v3.0-i2v",
+			modelId: "kwaivgi/kling-v3.0-std",
 			aspectRatio: "9:16",
-			resolution: "1080p",
+			resolution: "720p",
 			durationSeconds: 5,
-			klingMode: "pro",
 			generateAudio: true,
 		});
 		expect(params.durationSeconds).toBe(5);
+	});
+
+	it("rejects audio on Grok", () => {
+		expect(() =>
+			validateVideoParams({
+				modelId: "x-ai/grok-imagine-video-1.5",
+				aspectRatio: "9:16",
+				resolution: "720p",
+				durationSeconds: 5,
+				generateAudio: true,
+			}),
+		).toThrow();
+	});
+});
+
+describe("prompt limits", () => {
+	it("truncates Kling prompts over 2500 chars", async () => {
+		const { fitPromptToLimit } = await import("./lib/videoAdapters");
+		const long = "a".repeat(3000);
+		const fitted = fitPromptToLimit(long, 2500);
+		expect(fitted.truncated).toBe(true);
+		expect(fitted.prompt.length).toBeLessThanOrEqual(2500);
 	});
 });
