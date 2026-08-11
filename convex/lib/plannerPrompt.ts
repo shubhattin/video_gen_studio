@@ -21,7 +21,40 @@ Turn a supplied Sanskrit or Hindi shloka plus optional custom instructions into:
 - **Distinctive faces:** when a scene or reference image includes multiple people (devotees, kings, attendants, family, crowd), give each person clearly different facial features, age cues, skin tone variation within a respectful range, hairstyle, beard/jewelry, and clothing detail. Never make a row of identical clone faces. Name or tag distinct roles (e.g. _elder with grey beard_, _young woman with jasmine garland_, _boy with topknot_) so image and video models keep individuals unique. Only keep one face consistent when it is the same named character recurring.
 - \`imagePrompt\` must describe a single still suitable as a first frame / reference (no text overlays, logos, watermarks, or readable Devanagari burned into the image unless explicitly requested).
 - \`videoScenes\` should read as cinematic beats for a short reel, preserving the emotional through-line of the shloka, still in the same stylized non-photoreal register.
-- Stay respectful; no sensational, ironic, or inaccurate religious depiction.`;
+- Stay respectful; no sensational, ironic, or inaccurate religious depiction.
+- Always return \`kind: "single-clip"\` in the structured response.`;
+
+export const MODEL_STUDIO_PLANNER_SYSTEM_PROMPT = `You are a precise cinematic video director.
+
+Turn the user's video brief into a short, coherent visual plan. Keep the supplied subject, style, action, and constraints intact. Use concise provider-ready language: specific subject identity, setting, camera movement, lighting, motion, visual continuity, and exclusions. Avoid boilerplate, text overlays, watermarks, and unsupported claims.
+
+Always return \`kind: "single-clip"\` in the structured response.`;
+
+export function multiClipPlannerInstructions(args: {
+	mode: "continuation" | "cut-scenes";
+	clipCount: number;
+	clipDurationSeconds: number;
+	maxPromptChars: number;
+}) {
+	const continuity =
+		args.mode === "continuation"
+			? "Continue directly from the prior clip's final composition, subject pose, lighting, movement, and emotional beat. Every handoff must name the visual anchor that the next clip should preserve."
+			: "Make each clip a distinct but coherent cut scene. Preserve the story-wide visual identity and describe a clean editorial transition from the preceding clip.";
+
+	return `## Multi-clip composition mode
+Create exactly ${args.clipCount} ordered clips, each ${args.clipDurationSeconds} seconds. Return \`kind: "multi-clip"\`.
+
+For every clip, provide:
+- \`clipIndex\`: zero-based and consecutive from 0 through ${args.clipCount - 1};
+- \`globalDescription\`: the same concise description of the whole finished video;
+- \`scenePrompt\`: a self-contained provider-ready prompt no longer than ${args.maxPromptChars} characters;
+- \`continuityInstructions\`: visual identity and prior-scene handoff instructions;
+- \`transition\`: how this beat starts from or cuts after the preceding clip.
+
+${continuity}
+
+Each clip must advance the story rather than repeat the same shot. Clip 1 must establish the reference still. The final clip must resolve the story. Do not request text overlays, logos, watermarks, or photoreal people unless the user explicitly asks.`;
+}
 
 /**
  * Persist only when the user customized away from the built-in prompt.

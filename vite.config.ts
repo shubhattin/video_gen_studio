@@ -18,6 +18,9 @@ const config = defineConfig({
 			"#": path.resolve(rootDir, "./src"),
 		},
 	},
+	optimizeDeps: {
+		exclude: ["@ffmpeg/ffmpeg", "@ffmpeg/util"],
+	},
 	plugins: [
 		devtools(),
 		nitro({ rollupConfig: { external: [/^@sentry\//] } }),

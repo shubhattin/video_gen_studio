@@ -1,24 +1,33 @@
+import { api } from "@convex/_generated/api";
+import type { Id } from "@convex/_generated/dataModel";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { useEffect, useMemo, useState } from "react";
-import { api } from "@convex/_generated/api";
-import type { Id } from "@convex/_generated/dataModel";
+import {
+	type CompositionClipResult,
+	CompositionResult,
+} from "#/components/studio/composition-result";
 import { GenerationProgressDock } from "#/components/studio/generation-progress-dock";
 import { HistoryPanel } from "#/components/studio/history-panel";
+import {
+	type CompositionSettings,
+	MultiClipCompositionControls,
+} from "#/components/studio/multi-clip-composition-controls";
 import { ReferenceImagePanel } from "#/components/studio/reference-image-panel";
 import { ShlokaComposer } from "#/components/studio/shloka-composer";
 import { ShlokaPlanPreview } from "#/components/studio/shloka-plan-preview";
 import { StudioShell } from "#/components/studio/studio-shell";
 import {
-	VideoConfiguration,
 	type VideoConfigState,
+	VideoConfiguration,
 } from "#/components/studio/video-configuration";
 import { VideoModelSelector } from "#/components/studio/video-model-selector";
 import { VideoResult } from "#/components/studio/video-result";
 import { Button } from "#/components/ui/button";
+import { downloadMergedComposition } from "#/lib/merge-composition-videos";
 import {
-	MODEL_CAPABILITY_PROFILES,
 	defaultVideoParams,
+	MODEL_CAPABILITY_PROFILES,
 	type VideoModelId,
 } from "#/lib/model-catalog";
 import {
@@ -27,8 +36,8 @@ import {
 	resolvePlannerSystemPrompt,
 } from "#/lib/planner-prompt";
 import {
-	studioRunSearchSchema,
 	type StudioRunSearch,
+	studioRunSearchSchema,
 } from "#/lib/studio-run-search";
 import type { StudioBusyStage } from "#/lib/studio-run-status";
 import { notifyStudioError, notifyStudioSuccess } from "#/lib/studio-toast";
@@ -67,8 +76,18 @@ function ShlokaStudioPage() {
 		defaultVideoParams("google/veo-3.1-lite"),
 	);
 	const [busyStage, setBusyStage] = useState<StudioBusyStage>(null);
+	const [composition, setComposition] = useState<CompositionSettings>({
+		enabled: false,
+		mode: "continuation",
+		multiplier: 2,
+	});
+	const [mergingComposition, setMergingComposition] = useState(false);
 
 	const run = useQuery(api.studio.getRun, runId ? { runId } : "skip");
+	const compositionJob = useQuery(
+		api.studio.getCompositionForRun,
+		runId ? { runId } : "skip",
+	);
 	const catalog = useQuery(api.studio.getCachedOpenRouterCatalog);
 	const refreshCatalog = useAction(api.studioActions.refreshModelCatalog);
 
@@ -82,6 +101,8 @@ function ShlokaStudioPage() {
 	const planRun = useAction(api.studioActions.planShlokaRun);
 	const generateImage = useAction(api.studioActions.generateReferenceImage);
 	const generateVideo = useAction(api.studioActions.generateVideoForRun);
+	const startComposition = useMutation(api.studio.startComposition);
+	const cancelComposition = useMutation(api.studio.cancelComposition);
 
 	useEffect(() => {
 		if (!catalog) {
@@ -108,6 +129,7 @@ function ShlokaStudioPage() {
 		return { gatewayById: gateway, pricingSkusById: skus };
 	}, [catalog]);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: Hydrate the local draft only when the selected run changes.
 	useEffect(() => {
 		if (!runId) {
 			setShlokaText("");
@@ -116,6 +138,11 @@ function ShlokaStudioPage() {
 			setImageSize("1024x1536");
 			setImageQuality("low");
 			setVideoConfig(defaultVideoParams("google/veo-3.1-lite"));
+			setComposition({
+				enabled: false,
+				mode: "continuation",
+				multiplier: 2,
+			});
 			setBusyStage(null);
 			return;
 		}
@@ -150,6 +177,11 @@ function ShlokaStudioPage() {
 				cfgScale: run.videoParams.cfgScale,
 			});
 		}
+		setComposition({
+			enabled: Boolean(run.compositionMode),
+			mode: run.compositionMode ?? "continuation",
+			multiplier: run.compositionMultiplier ?? 2,
+		});
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [runId, run?._id, run === null]);
 
@@ -165,6 +197,13 @@ function ShlokaStudioPage() {
 				imageQuality,
 				selectedModelId: videoConfig.modelId,
 				videoParams: videoConfig,
+				compositionMode: composition.enabled ? composition.mode : null,
+				compositionMultiplier: composition.enabled
+					? composition.multiplier
+					: null,
+				compositionClipCount: composition.enabled
+					? composition.multiplier
+					: null,
 			});
 			return runId;
 		}
@@ -183,6 +222,11 @@ function ShlokaStudioPage() {
 			imageQuality,
 			selectedModelId: videoConfig.modelId,
 			videoParams: videoConfig,
+			compositionMode: composition.enabled ? composition.mode : null,
+			compositionMultiplier: composition.enabled
+				? composition.multiplier
+				: null,
+			compositionClipCount: composition.enabled ? composition.multiplier : null,
 		});
 		return id;
 	};
@@ -244,6 +288,40 @@ function ShlokaStudioPage() {
 		}
 	};
 
+	const onStartComposition = async () => {
+		setBusyStage("video");
+		try {
+			const id = await ensureRun();
+			await startComposition({ runId: id });
+			notifyStudioSuccess(
+				"Composition started",
+				"Clips will generate one at a time.",
+			);
+		} catch (error) {
+			notifyStudioError("Composition could not start", error);
+		} finally {
+			setBusyStage(null);
+		}
+	};
+
+	const onDownloadComposition = async () => {
+		if (!compositionJob) return;
+		setMergingComposition(true);
+		try {
+			await downloadMergedComposition(
+				compositionJob.clips.map(
+					(clip: { video?: { url?: string | null } }) => ({
+						url: clip.video?.url,
+					}),
+				),
+			);
+		} catch (error) {
+			notifyStudioError("Merged download failed", error);
+		} finally {
+			setMergingComposition(false);
+		}
+	};
+
 	const profile =
 		MODEL_CAPABILITY_PROFILES[videoConfig.modelId as VideoModelId];
 
@@ -294,13 +372,55 @@ function ShlokaStudioPage() {
 					disabled={busyStage !== null}
 				/>
 
+				<MultiClipCompositionControls
+					value={composition}
+					modelId={videoConfig.modelId as VideoModelId}
+					durationSeconds={videoConfig.durationSeconds}
+					onChange={setComposition}
+					disabled={
+						busyStage !== null || compositionJob?.status === "generating"
+					}
+				/>
+
+				{composition.enabled ? (
+					<div className="flex flex-col gap-4 border-t border-border/80 pt-6">
+						<div className="flex flex-col gap-2">
+							<h2 className="font-heading text-xl font-semibold">
+								Video model
+							</h2>
+							<p className="text-sm text-muted-foreground">
+								Choose the model and native clip duration before generating the
+								multi-clip plan.
+							</p>
+							<VideoModelSelector
+								value={videoConfig.modelId as VideoModelId}
+								gatewayPricingById={gatewayById}
+								pricingSkusById={pricingSkusById}
+								disabled={busyStage !== null}
+								onValueChange={(modelId) => {
+									setVideoConfig(defaultVideoParams(modelId));
+								}}
+							/>
+						</div>
+						<VideoConfiguration
+							value={videoConfig}
+							onChange={setVideoConfig}
+							disabled={busyStage !== null}
+						/>
+					</div>
+				) : null}
+
 				<div className="flex flex-wrap gap-3">
 					<Button
 						className="min-h-11"
 						disabled={!shlokaText.trim() || busyStage !== null}
 						onClick={onPlan}
 					>
-						{busyStage === "planning" ? "Planning…" : "Generate creative plan"}
+						{busyStage === "planning"
+							? "Planning…"
+							: composition.enabled
+								? "Generate multi-clip plan"
+								: "Generate creative plan"}
 					</Button>
 				</div>
 
@@ -309,9 +429,30 @@ function ShlokaStudioPage() {
 						<ShlokaPlanPreview
 							imagePrompt={run?.imagePrompt}
 							videoScenes={run?.videoScenes}
+							compositionOverallDescription={
+								compositionJob?.overallDescription
+							}
+							compositionClips={compositionJob?.clips.map((clip) => ({
+								clipIndex: clip.clipIndex,
+								durationSeconds:
+									compositionJob.videoParams?.durationSeconds ?? 0,
+								scenePrompt: clip.scenePrompt,
+								globalDescription: clip.globalDescription,
+								continuityInstructions: clip.continuityInstructions,
+								transition: clip.transition,
+								usesPreviousTerminalFrame:
+									compositionJob.mode === "continuation" &&
+									clip.clipIndex > 0,
+							}))}
 							plannerModel={run?.plannerModel}
 							plannerReasoning={run?.plannerReasoning}
-							onRegenerate={() => planRun({ runId: runId!, force: true })}
+							onRegenerate={
+								runId
+									? () => {
+											void planRun({ runId, force: true });
+										}
+									: undefined
+							}
 							regenerating={busyStage === "planning"}
 						/>
 						<ReferenceImagePanel
@@ -354,7 +495,7 @@ function ShlokaStudioPage() {
 					</div>
 				) : null}
 
-				{planReady ? (
+				{planReady && !composition.enabled ? (
 					<div className="flex flex-col gap-4 border-t border-border/80 pt-6">
 						<div className="flex flex-col gap-2">
 							<h2 className="font-heading text-xl font-semibold">
@@ -390,6 +531,43 @@ function ShlokaStudioPage() {
 								: "Generate video (append)"}
 						</Button>
 					</div>
+				) : null}
+
+				{planReady && composition.enabled && compositionJob ? (
+					<div className="flex flex-wrap gap-3 border-t border-border/80 pt-6">
+						{compositionJob.status === "planned" ||
+						compositionJob.status === "failed" ? (
+							<Button
+								className="min-h-11"
+								disabled={busyStage !== null}
+								onClick={onStartComposition}
+							>
+								{busyStage === "video"
+									? "Starting composition…"
+									: `Generate ${composition.multiplier} clips`}
+							</Button>
+						) : null}
+						{compositionJob.status === "generating" ? (
+							<Button
+								className="min-h-11"
+								variant="outline"
+								disabled={busyStage !== null}
+								onClick={() => runId && cancelComposition({ runId })}
+							>
+								Cancel composition
+							</Button>
+						) : null}
+					</div>
+				) : null}
+
+				{compositionJob ? (
+					<CompositionResult
+						status={compositionJob.status}
+						clips={compositionJob.clips as CompositionClipResult[]}
+						totalDurationSeconds={compositionJob.totalDurationSeconds}
+						onDownloadMerged={onDownloadComposition}
+						merging={mergingComposition}
+					/>
 				) : null}
 
 				<VideoResult videos={videos} />

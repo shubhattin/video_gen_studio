@@ -27,6 +27,8 @@ import type { DataModel } from "./dataModel.js";
 type Env = {
   readonly OPENAI_API_KEY: string | undefined;
   readonly OPENROUTER_API_KEY: string | undefined;
+  readonly VIDEO_PROCESSOR_SHARED_SECRET: string | undefined;
+  readonly VIDEO_PROCESSOR_URL: string | undefined;
 };
 
 /**

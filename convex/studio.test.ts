@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest";
 import { api, internal } from "./_generated/api";
 import schema from "./schema";
 import { modules } from "./test.setup";
-import { validateVideoParams } from "./lib/schemas";
+import {
+	compositionPlannerOutputSchema,
+	validateVideoParams,
+} from "./lib/schemas";
 
 describe("studio mutations", () => {
 	it("creates a shloka draft with portrait defaults", async () => {
@@ -101,6 +104,58 @@ describe("studio mutations", () => {
 		expect(run?.referenceImages?.[0]?.meta.mimeType).toBe("image/png");
 		expect(run?.referenceImages?.[0]?.id).toBe(attached.imageId);
 	});
+
+	it("persists a bounded composition plan as ordered clip rows", async () => {
+		const t = convexTest(schema, modules);
+		const runId = await t.mutation(api.studio.createShlokaDraft, {
+			shlokaText: "वसुदेवसुतं देवं",
+		});
+		await t.mutation(api.studio.updateDraft, {
+			runId,
+			compositionMode: "continuation",
+			compositionMultiplier: 2,
+			compositionClipCount: 2,
+		});
+		await t.mutation(internal.studioInternal.commitCompositionPlan, {
+			runId,
+			plannerModel: "openai/gpt-5.6-terra",
+			plannerReasoning: "medium",
+			imagePrompt: "A warm illustrated temple path at dawn with a golden diya",
+			overallDescription: "A devotional walk from dawn prayer into quiet temple light.",
+			clips: [
+				{
+					clipIndex: 0,
+					globalDescription:
+						"A devotional walk from dawn prayer into quiet temple light.",
+					scenePrompt: "A devotee walks toward a dawn temple, slow camera push in.",
+					continuityInstructions:
+						"Keep the same illustrated devotee, saffron shawl, and golden dawn.",
+					transition: "End on the devotee reaching the carved temple gate.",
+				},
+				{
+					clipIndex: 1,
+					globalDescription:
+						"A devotional walk from dawn prayer into quiet temple light.",
+					scenePrompt:
+						"Continue from the gate into the glowing temple courtyard, gentle pan.",
+					continuityInstructions:
+						"Continue the same pose, shawl, lighting, and temple architecture.",
+					transition: "Resolve on the diya flame in the courtyard.",
+				},
+			],
+			planningKey: "composition-plan-test",
+		});
+
+		const composition = await t.query(api.studio.getCompositionForRun, {
+			runId,
+		});
+		expect(composition?.status).toBe("planned");
+		expect(composition?.clips).toHaveLength(2);
+		expect(composition?.clips.map((clip: { clipIndex: number }) => clip.clipIndex)).toEqual([
+			0,
+			1,
+		]);
+	});
 });
 
 describe("video param validation", () => {
@@ -178,5 +233,26 @@ describe("prompt limits", () => {
 		const fitted = fitPromptToLimit(long, 2500);
 		expect(fitted.truncated).toBe(true);
 		expect(fitted.prompt.length).toBeLessThanOrEqual(2500);
+	});
+
+	it("requires at least two composition clips", () => {
+		expect(() =>
+			compositionPlannerOutputSchema.parse({
+				kind: "multi-clip",
+				imagePrompt: "A warm stylized temple path with soft dawn light.",
+				overallDescription: "A connected devotional walk from dawn to temple prayer.",
+				clips: [
+					{
+						clipIndex: 0,
+						globalDescription:
+							"A connected devotional walk from dawn to temple prayer.",
+						scenePrompt: "A devotee walks toward a temple at dawn.",
+						continuityInstructions:
+							"Keep the saffron shawl and warm illustrated dawn lighting.",
+						transition: "Hold on the temple gate.",
+					},
+				],
+			}),
+		).toThrow();
 	});
 });

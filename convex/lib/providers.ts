@@ -41,3 +41,17 @@ export function getOpenRouterProvider() {
 		apiKey: getOpenRouterApiKey(),
 	});
 }
+
+export function getVideoProcessorUrl() {
+	return requireEnv("VIDEO_PROCESSOR_URL", env.VIDEO_PROCESSOR_URL).replace(
+		/\/$/,
+		"",
+	);
+}
+
+export function getVideoProcessorSecret() {
+	return requireEnv(
+		"VIDEO_PROCESSOR_SHARED_SECRET",
+		env.VIDEO_PROCESSOR_SHARED_SECRET,
+	);
+}

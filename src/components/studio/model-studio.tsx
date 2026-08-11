@@ -1,20 +1,29 @@
-import { useAction, useMutation, useQuery } from "convex/react";
-import { useEffect, useMemo, useState } from "react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
-import { GenerationProgressDock } from "#/components/studio/generation-progress-dock";
-import { ReferenceImagePanel } from "#/components/studio/reference-image-panel";
-import { VideoModelSelector } from "#/components/studio/video-model-selector";
+import { useAction, useMutation, useQuery } from "convex/react";
+import { useEffect, useMemo, useState } from "react";
 import {
-	VideoConfiguration,
+	type CompositionClipResult,
+	CompositionResult,
+} from "#/components/studio/composition-result";
+import { GenerationProgressDock } from "#/components/studio/generation-progress-dock";
+import {
+	type CompositionSettings,
+	MultiClipCompositionControls,
+} from "#/components/studio/multi-clip-composition-controls";
+import { ReferenceImagePanel } from "#/components/studio/reference-image-panel";
+import {
 	type VideoConfigState,
+	VideoConfiguration,
 } from "#/components/studio/video-configuration";
+import { VideoModelSelector } from "#/components/studio/video-model-selector";
 import { VideoResult } from "#/components/studio/video-result";
 import { Button } from "#/components/ui/button";
+import { downloadMergedComposition } from "#/lib/merge-composition-videos";
 import {
-	MODEL_CAPABILITY_PROFILES,
 	defaultVideoParams,
 	isVideoModelId,
+	MODEL_CAPABILITY_PROFILES,
 	type VideoModelId,
 } from "#/lib/model-catalog";
 import type { StudioBusyStage } from "#/lib/studio-run-status";
@@ -41,6 +50,11 @@ export function ModelStudio({
 	);
 	const generateImage = useAction(api.studioActions.generateReferenceImage);
 	const generateVideo = useAction(api.studioActions.generateVideoForRun);
+	const planComposition = useAction(
+		api.studioActions.planModelStudioComposition,
+	);
+	const startComposition = useMutation(api.studio.startComposition);
+	const cancelComposition = useMutation(api.studio.cancelComposition);
 
 	const [selectedModel, setSelectedModel] = useState<VideoModelId>(
 		"google/veo-3.1-lite",
@@ -53,10 +67,20 @@ export function ModelStudio({
 	const [imageQuality, setImageQuality] = useState("low");
 	const [busyStage, setBusyStage] = useState<StudioBusyStage>(null);
 	const [refreshingCatalog, setRefreshingCatalog] = useState(false);
+	const [mergingComposition, setMergingComposition] = useState(false);
+	const [composition, setComposition] = useState<CompositionSettings>({
+		enabled: false,
+		mode: "continuation",
+		multiplier: 2,
+	});
 
 	const activeRunId = controlledRunId;
 	const run = useQuery(
 		api.studio.getRun,
+		activeRunId ? { runId: activeRunId } : "skip",
+	);
+	const compositionJob = useQuery(
+		api.studio.getCompositionForRun,
 		activeRunId ? { runId: activeRunId } : "skip",
 	);
 	const profile = MODEL_CAPABILITY_PROFILES[selectedModel];
@@ -67,6 +91,7 @@ export function ModelStudio({
 		}
 	}, [catalog, refreshCatalog]);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: Hydrate the local draft only when the selected run changes.
 	useEffect(() => {
 		if (!controlledRunId) {
 			setSelectedModel("google/veo-3.1-lite");
@@ -76,6 +101,11 @@ export function ModelStudio({
 			});
 			setImageSize("1024x1536");
 			setImageQuality("low");
+			setComposition({
+				enabled: false,
+				mode: "continuation",
+				multiplier: 2,
+			});
 			return;
 		}
 		if (!run || run._id !== controlledRunId) {
@@ -92,6 +122,11 @@ export function ModelStudio({
 			...(run.videoParams ?? {}),
 			modelId,
 			prompt: run.videoPrompt ?? run.videoParams?.prompt ?? "",
+		});
+		setComposition({
+			enabled: Boolean(run.compositionMode),
+			mode: run.compositionMode ?? "continuation",
+			multiplier: run.compositionMultiplier ?? 2,
 		});
 	}, [controlledRunId, run?._id]);
 
@@ -123,6 +158,13 @@ export function ModelStudio({
 				selectedModelId: selectedModel,
 				imageSize,
 				imageQuality,
+				compositionMode: composition.enabled ? composition.mode : null,
+				compositionMultiplier: composition.enabled
+					? composition.multiplier
+					: null,
+				compositionClipCount: composition.enabled
+					? composition.multiplier
+					: null,
 			});
 			return activeRunId;
 		}
@@ -137,6 +179,11 @@ export function ModelStudio({
 			videoPrompt: videoConfig.prompt,
 			imageSize,
 			imageQuality,
+			compositionMode: composition.enabled ? composition.mode : null,
+			compositionMultiplier: composition.enabled
+				? composition.multiplier
+				: null,
+			compositionClipCount: composition.enabled ? composition.multiplier : null,
 		});
 		return runId;
 	};
@@ -151,6 +198,53 @@ export function ModelStudio({
 			notifyStudioError("Video generation failed", error);
 		} finally {
 			setBusyStage(null);
+		}
+	};
+
+	const onPlanComposition = async () => {
+		setBusyStage("planning");
+		try {
+			const runId = await ensureDraft();
+			await planComposition({ runId, force: true });
+			notifyStudioSuccess("Composition plan ready");
+		} catch (error) {
+			notifyStudioError("Composition planning failed", error);
+		} finally {
+			setBusyStage(null);
+		}
+	};
+
+	const onStartComposition = async () => {
+		setBusyStage("video");
+		try {
+			const runId = await ensureDraft();
+			await startComposition({ runId });
+			notifyStudioSuccess(
+				"Composition started",
+				"Clips will generate sequentially and can be resumed if one fails.",
+			);
+		} catch (error) {
+			notifyStudioError("Composition could not start", error);
+		} finally {
+			setBusyStage(null);
+		}
+	};
+
+	const onDownloadComposition = async () => {
+		if (!compositionJob) return;
+		setMergingComposition(true);
+		try {
+			await downloadMergedComposition(
+				compositionJob.clips.map(
+					(clip: { video?: { url?: string | null } }) => ({
+						url: clip.video?.url,
+					}),
+				),
+			);
+		} catch (error) {
+			notifyStudioError("Merged download failed", error);
+		} finally {
+			setMergingComposition(false);
 		}
 	};
 
@@ -189,6 +283,13 @@ export function ModelStudio({
 	const videos = run?.videos ?? [];
 	const extraIds = run?.extraReferenceImageIds ?? [];
 	const isBusy = busyStage !== null;
+	const isModelLocked =
+		Boolean(run?.videos?.length) ||
+		run?.status === "video_generating" ||
+		compositionJob?.status === "generating" ||
+		Boolean(
+			compositionJob?.clips.some((clip: { video?: unknown }) => clip.video),
+		);
 
 	return (
 		<div className="flex flex-col gap-8">
@@ -207,7 +308,7 @@ export function ModelStudio({
 							value={selectedModel}
 							gatewayPricingById={gatewayById}
 							pricingSkusById={pricingSkusById}
-							disabled={isBusy}
+							disabled={isBusy || isModelLocked}
 							onValueChange={(modelId) => {
 								setSelectedModel(modelId);
 								setVideoConfig({
@@ -216,6 +317,11 @@ export function ModelStudio({
 								});
 							}}
 						/>
+						{isModelLocked ? (
+							<p className="mt-2 text-xs text-muted-foreground">
+								The video model is fixed after generation begins for this run.
+							</p>
+						) : null}
 					</div>
 					<div className="flex flex-col gap-1">
 						<Button
@@ -257,6 +363,14 @@ export function ModelStudio({
 				disabled={isBusy}
 			/>
 
+			<MultiClipCompositionControls
+				value={composition}
+				modelId={selectedModel}
+				durationSeconds={videoConfig.durationSeconds}
+				onChange={setComposition}
+				disabled={isBusy || compositionJob?.status === "generating"}
+			/>
+
 			<ReferenceImagePanel
 				imageSize={imageSize}
 				imageQuality={imageQuality}
@@ -296,12 +410,60 @@ export function ModelStudio({
 			/>
 
 			<div className="flex flex-wrap gap-3">
-				<Button className="min-h-11" disabled={isBusy} onClick={startVideo}>
-					{busyStage === "video"
-						? "Generating video…"
-						: "Generate video (append)"}
-				</Button>
+				{composition.enabled ? (
+					<>
+						<Button
+							className="min-h-11"
+							disabled={isBusy || !videoConfig.prompt?.trim()}
+							onClick={onPlanComposition}
+						>
+							{busyStage === "planning"
+								? "Planning composition…"
+								: "Generate composition plan"}
+						</Button>
+						{compositionJob?.status === "planned" ||
+						compositionJob?.status === "failed" ? (
+							<Button
+								className="min-h-11"
+								disabled={isBusy}
+								onClick={onStartComposition}
+							>
+								{busyStage === "video"
+									? "Starting composition…"
+									: `Generate ${composition.multiplier} clips`}
+							</Button>
+						) : null}
+						{compositionJob?.status === "generating" ? (
+							<Button
+								className="min-h-11"
+								variant="outline"
+								disabled={isBusy}
+								onClick={() =>
+									activeRunId && cancelComposition({ runId: activeRunId })
+								}
+							>
+								Cancel composition
+							</Button>
+						) : null}
+					</>
+				) : (
+					<Button className="min-h-11" disabled={isBusy} onClick={startVideo}>
+						{busyStage === "video"
+							? "Generating video…"
+							: "Generate video (append)"}
+					</Button>
+				)}
 			</div>
+
+			{compositionJob ? (
+				<CompositionResult
+					status={compositionJob.status}
+					clips={compositionJob.clips as CompositionClipResult[]}
+					totalDurationSeconds={compositionJob.totalDurationSeconds}
+					onDownloadMerged={onDownloadComposition}
+					merging={mergingComposition}
+				/>
+			) : null}
 
 			{run ? <VideoResult videos={videos} /> : null}
 

@@ -22,13 +22,38 @@ export const videoSceneSchema = z.object({
 	negativeConstraints: z.string().min(1),
 });
 
-export const plannerOutputSchema = z.object({
+export const normalPlannerOutputSchema = z.object({
+	kind: z.literal("single-clip"),
 	imagePrompt: z.string().min(20),
 	videoScenes: z.array(videoSceneSchema).min(1).max(12),
 });
 
+export const compositionClipPlanSchema = z.object({
+	clipIndex: z.number().int().min(0),
+	globalDescription: z.string().min(20).max(1_200),
+	scenePrompt: z.string().min(20).max(2_500),
+	continuityInstructions: z.string().min(10).max(1_200),
+	transition: z.string().min(1).max(400),
+});
+
+export const compositionPlannerOutputSchema = z.object({
+	kind: z.literal("multi-clip"),
+	imagePrompt: z.string().min(20),
+	overallDescription: z.string().min(20).max(2_000),
+	clips: z.array(compositionClipPlanSchema).min(2).max(6),
+});
+
+export const plannerOutputSchema = z.discriminatedUnion("kind", [
+	normalPlannerOutputSchema,
+	compositionPlannerOutputSchema,
+]);
+
 export type PlannerOutput = z.infer<typeof plannerOutputSchema>;
 export type VideoScene = z.infer<typeof videoSceneSchema>;
+export type CompositionClipPlan = z.infer<typeof compositionClipPlanSchema>;
+export type CompositionPlannerOutput = z.infer<
+	typeof compositionPlannerOutputSchema
+>;
 
 export const videoParamsSchema = z.object({
 	modelId: z.string(),

@@ -9,7 +9,7 @@ import {
 } from "./lib/modelCatalog";
 import { normalizePlannerSystemPromptForStorage } from "./lib/plannerPrompt";
 import { defaultImageConfig, defaultVideoParams } from "./lib/schemas";
-import { videoParamsValidator } from "./schema";
+import { compositionModeValidator, videoParamsValidator } from "./schema";
 
 async function resolveRunUrls(
 	ctx: { storage: { getUrl: (id: Id<"_storage">) => Promise<string | null> } },
@@ -84,6 +84,41 @@ export const getRun = query({
 		}
 		const media = await resolveRunUrls(ctx, run);
 		return { ...run, ...media };
+	},
+});
+
+export const getCompositionForRun = query({
+	args: {
+		runId: v.id("generationRuns"),
+	},
+	returns: v.union(v.null(), v.any()),
+	handler: async (ctx, args) => {
+		const job = await ctx.db
+			.query("compositionJobs")
+			.withIndex("by_runId", (q) => q.eq("runId", args.runId))
+			.unique();
+		if (!job) {
+			return null;
+		}
+		const clips = await ctx.db
+			.query("compositionClips")
+			.withIndex("by_jobId_and_clipIndex", (q) => q.eq("jobId", job._id))
+			.order("asc")
+			.take(6);
+		return {
+			...job,
+			clips: await Promise.all(
+				clips.map(async (clip) => ({
+					...clip,
+					video: clip.video
+						? {
+								...clip.video,
+								url: await ctx.storage.getUrl(clip.video.storageId),
+							}
+						: undefined,
+				})),
+			),
+		};
 	},
 });
 
@@ -217,6 +252,9 @@ export const updateDraft = mutation({
 		selectedModelId: v.optional(v.string()),
 		videoParams: v.optional(videoParamsValidator),
 		videoPrompt: v.optional(v.string()),
+		compositionMode: v.optional(v.union(compositionModeValidator, v.null())),
+		compositionMultiplier: v.optional(v.union(v.number(), v.null())),
+		compositionClipCount: v.optional(v.union(v.number(), v.null())),
 		firstFrameImageId: v.optional(v.union(v.string(), v.null())),
 		lastFrameImageId: v.optional(v.union(v.string(), v.null())),
 		extraReferenceImageIds: v.optional(v.array(v.string())),
@@ -230,10 +268,62 @@ export const updateDraft = mutation({
 		if (run.status === "video_generating" || run.status === "planning") {
 			throw new Error("Run is busy. Wait for the current stage to finish.");
 		}
+		const compositionJob = await ctx.db
+			.query("compositionJobs")
+			.withIndex("by_runId", (q) => q.eq("runId", args.runId))
+			.unique();
+		const compositionHasVideo = compositionJob
+			? Boolean(
+					(
+						await ctx.db
+							.query("compositionClips")
+							.withIndex("by_jobId_and_clipIndex", (q) =>
+								q.eq("jobId", compositionJob._id),
+							)
+							.take(6)
+					).some((clip) => clip.video),
+				)
+			: false;
+		const requestedModelId = args.selectedModelId ?? args.videoParams?.modelId;
+		const currentModelId = run.selectedModelId ?? run.videoParams?.modelId;
+		if (
+			(run.videos?.length || compositionHasVideo) &&
+			requestedModelId &&
+			currentModelId &&
+			requestedModelId !== currentModelId
+		) {
+			throw new Error(
+				"The video model is fixed after generation begins for this run.",
+			);
+		}
 		const plannerSystemPrompt =
 			args.plannerSystemPrompt === undefined
 				? run.plannerSystemPrompt
 				: normalizePlannerSystemPromptForStorage(args.plannerSystemPrompt);
+		const compositionMultiplier =
+			args.compositionMultiplier === null
+				? undefined
+				: (args.compositionMultiplier ?? run.compositionMultiplier);
+		const compositionClipCount =
+			args.compositionClipCount === null
+				? undefined
+				: (args.compositionClipCount ?? run.compositionClipCount);
+		if (
+			compositionMultiplier !== undefined &&
+			(!Number.isInteger(compositionMultiplier) ||
+				compositionMultiplier < 2 ||
+				compositionMultiplier > 6)
+		) {
+			throw new Error("Composition multiplier must be between 2× and 6×.");
+		}
+		if (
+			compositionClipCount !== undefined &&
+			(!Number.isInteger(compositionClipCount) ||
+				compositionClipCount < 2 ||
+				compositionClipCount > 6)
+		) {
+			throw new Error("Composition clip count must be between 2 and 6.");
+		}
 		await ctx.db.patch(args.runId, {
 			customInstructions:
 				args.customInstructions !== undefined
@@ -248,6 +338,12 @@ export const updateDraft = mutation({
 				args.videoPrompt !== undefined
 					? args.videoPrompt.trim() || undefined
 					: run.videoPrompt,
+			compositionMode:
+				args.compositionMode === null
+					? undefined
+					: (args.compositionMode ?? run.compositionMode),
+			compositionMultiplier,
+			compositionClipCount,
 			firstFrameImageId:
 				args.firstFrameImageId === null
 					? undefined
@@ -264,6 +360,63 @@ export const updateDraft = mutation({
 	},
 });
 
+export const startComposition = mutation({
+	args: {
+		runId: v.id("generationRuns"),
+	},
+	returns: v.null(),
+	handler: async (ctx, args) => {
+		const job = await ctx.db
+			.query("compositionJobs")
+			.withIndex("by_runId", (q) => q.eq("runId", args.runId))
+			.unique();
+		if (!job) {
+			throw new Error("Generate a multi-clip plan before starting the composition.");
+		}
+		if (job.status === "completed" || job.status === "cancelled") {
+			throw new Error("This composition cannot be started.");
+		}
+		if (job.status === "failed") {
+			await ctx.runMutation(internal.studioInternal.resetFailedCompositionJob, {
+				jobId: job._id,
+			});
+		}
+		await ctx.scheduler.runAfter(
+			0,
+			internal.studioActions.generateNextCompositionClip,
+			{ jobId: job._id },
+		);
+		return null;
+	},
+});
+
+export const cancelComposition = mutation({
+	args: {
+		runId: v.id("generationRuns"),
+	},
+	returns: v.null(),
+	handler: async (ctx, args) => {
+		const job = await ctx.db
+			.query("compositionJobs")
+			.withIndex("by_runId", (q) => q.eq("runId", args.runId))
+			.unique();
+		if (!job || job.status === "completed") {
+			return null;
+		}
+		await ctx.db.patch(job._id, {
+			status: "cancelled",
+			currentClipIndex: undefined,
+			updatedAt: Date.now(),
+		});
+		await ctx.db.patch(args.runId, {
+			status: "plan_ready",
+			lastError: undefined,
+			updatedAt: Date.now(),
+		});
+		return null;
+	},
+});
+
 export const deleteRun = mutation({
 	args: {
 		runId: v.id("generationRuns"),
@@ -273,6 +426,28 @@ export const deleteRun = mutation({
 		const run = await ctx.db.get(args.runId);
 		if (!run) {
 			return null;
+		}
+		const compositionJob = await ctx.db
+			.query("compositionJobs")
+			.withIndex("by_runId", (q) => q.eq("runId", args.runId))
+			.unique();
+		if (compositionJob) {
+			const compositionClips = await ctx.db
+				.query("compositionClips")
+				.withIndex("by_jobId_and_clipIndex", (q) =>
+					q.eq("jobId", compositionJob._id),
+				)
+				.take(6);
+			for (const clip of compositionClips) {
+				if (clip.video) {
+					await ctx.storage.delete(clip.video.storageId);
+				}
+				if (clip.terminalFrameStorageId) {
+					await ctx.storage.delete(clip.terminalFrameStorageId);
+				}
+				await ctx.db.delete(clip._id);
+			}
+			await ctx.db.delete(compositionJob._id);
 		}
 		for (const image of run.referenceImages ?? []) {
 			await ctx.storage.delete(image.storageId);
