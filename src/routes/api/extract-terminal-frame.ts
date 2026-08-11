@@ -1,12 +1,39 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID, timingSafeEqual } from "node:crypto";
+import { accessSync, constants } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createFileRoute } from "@tanstack/react-router";
-import ffmpegPath from "ffmpeg-static";
 
 const MAX_SOURCE_BYTES = 80 * 1024 * 1024;
+
+/**
+ * Prefer the binary copied into the Nitro server output. Never import
+ * `ffmpeg-static` in this ESM bundle — its package uses `__dirname` and
+ * crashes Vercel/Nitro SSR entry loading.
+ */
+function resolveFfmpegBinary(): string {
+	const candidates = [
+		join(process.cwd(), "_libs", "ffmpeg"),
+		join(process.cwd(), ".output", "server", "_libs", "ffmpeg"),
+		join(process.cwd(), "node_modules", "ffmpeg-static", "ffmpeg"),
+	];
+	for (const candidate of candidates) {
+		try {
+			accessSync(candidate, constants.X_OK);
+			return candidate;
+		} catch {
+			try {
+				accessSync(candidate, constants.R_OK);
+				return candidate;
+			} catch {
+				// try next candidate
+			}
+		}
+	}
+	throw new Error("FFmpeg binary is unavailable in this server runtime.");
+}
 
 function hasMatchingSecret(request: Request) {
 	const expected = process.env.VIDEO_PROCESSOR_SHARED_SECRET;
@@ -43,10 +70,7 @@ function allowedSourceUrl(value: unknown): URL | null {
 }
 
 async function runFfmpeg(args: string[]) {
-	const binaryPath = ffmpegPath;
-	if (typeof binaryPath !== "string") {
-		throw new Error("FFmpeg binary is unavailable in this server runtime.");
-	}
+	const binaryPath = resolveFfmpegBinary();
 	await new Promise<void>((resolve, reject) => {
 		const process = spawn(binaryPath, args, {
 			stdio: "ignore",

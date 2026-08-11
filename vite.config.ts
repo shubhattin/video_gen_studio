@@ -23,7 +23,11 @@ const config = defineConfig({
 	},
 	plugins: [
 		devtools(),
-		nitro({ rollupConfig: { external: [/^@sentry\//] } }),
+		nitro({
+			rollupConfig: {
+				external: [/^@sentry\//, "ffmpeg-static"],
+			},
+		}),
 		tailwindcss(),
 		tanstackStart(),
 		viteReact(),
