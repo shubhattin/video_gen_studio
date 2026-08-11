@@ -1,8 +1,8 @@
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery } from "convex/react";
 import { formatDistanceToNow } from "date-fns";
-import { MoreHorizontal, Plus, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Clapperboard, MoreHorizontal, Sparkles, Trash2 } from "lucide-react";
+import { useState } from "react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import {
@@ -15,6 +15,7 @@ import {
 	AlertDialogHeader,
 	AlertDialogTitle,
 } from "#/components/ui/alert-dialog";
+import { Badge } from "#/components/ui/badge";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -27,7 +28,6 @@ import {
 	SidebarMenuButton,
 	SidebarMenuItem,
 } from "#/components/ui/sidebar";
-import type { StudioRunSearch } from "#/lib/studio-run-search";
 import { cn } from "#/lib/utils";
 
 type HistoryRun = {
@@ -40,39 +40,27 @@ type HistoryRun = {
 	videos?: Array<{ url?: string | null }>;
 };
 
-type StudioPath = "/" | "/studio";
-
 type HistoryPanelProps = {
-	to: StudioPath;
-	provenance?: "shloka" | "model-studio";
 	selectedRunId?: Id<"generationRuns"> | null;
 	onDeleted?: (runId: Id<"generationRuns">) => void;
 };
 
-function clearRunSearch(prev: StudioRunSearch): StudioRunSearch {
-	const { run: _removed, ...rest } = prev;
-	return rest;
+function pathForProvenance(provenance: string): "/" | "/studio" {
+	return provenance === "model-studio" ? "/studio" : "/";
 }
 
-export function HistoryPanel({
-	to,
-	provenance,
-	selectedRunId,
-	onDeleted,
-}: HistoryPanelProps) {
+function isShlokaRun(provenance: string) {
+	return provenance !== "model-studio";
+}
+
+export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 	const runs = useQuery(api.studio.listRecentRuns, { limit: 24 });
 	const deleteRun = useMutation(api.studio.deleteRun);
 	const [pendingDeleteId, setPendingDeleteId] =
 		useState<Id<"generationRuns"> | null>(null);
 	const [deleting, setDeleting] = useState(false);
 
-	const filteredRuns = useMemo(() => {
-		if (!runs) return undefined;
-		if (!provenance) return runs as HistoryRun[];
-		return (runs as HistoryRun[]).filter(
-			(run) => run.provenance === provenance,
-		);
-	}, [runs, provenance]);
+	const historyRuns = runs as HistoryRun[] | undefined;
 
 	const confirmDelete = async () => {
 		if (!pendingDeleteId) {
@@ -90,35 +78,18 @@ export function HistoryPanel({
 
 	return (
 		<div className="flex min-h-0 flex-col gap-2">
-			<SidebarMenu>
-				<SidebarMenuItem>
-					<SidebarMenuButton
-						tooltip="New run"
-						render={<Link to={to} search={clearRunSearch} replace />}
-					>
-						<Plus />
-						<span>New run</span>
-					</SidebarMenuButton>
-				</SidebarMenuItem>
-			</SidebarMenu>
-
-			{filteredRuns === undefined ? (
+			{historyRuns === undefined ? (
 				<p className="px-2 text-sm text-muted-foreground">Loading history…</p>
-			) : filteredRuns.length === 0 ? (
-				<p className="px-2 text-sm text-muted-foreground">
-					{provenance === "shloka"
-						? "No Shloka runs yet."
-						: provenance === "model-studio"
-							? "No Model Studio runs yet."
-							: "No runs yet."}
-				</p>
+			) : historyRuns.length === 0 ? (
+				<p className="px-2 text-sm text-muted-foreground">No runs yet.</p>
 			) : (
 				<SidebarMenu className="gap-1">
-					{filteredRuns.map((run) => {
-						const title =
-							run.provenance === "shloka"
-								? run.shlokaText?.slice(0, 48) || "Shloka run"
-								: run.selectedModelId || "Model studio";
+					{historyRuns.map((run) => {
+						const shloka = isShlokaRun(run.provenance);
+						const to = pathForProvenance(run.provenance);
+						const title = shloka
+							? run.shlokaText?.slice(0, 48) || "Shloka run"
+							: run.selectedModelId || "Model studio";
 						const meta = [
 							formatDistanceToNow(run.createdAt, { addSuffix: true }),
 							run.videos?.length
@@ -151,8 +122,21 @@ export function HistoryPanel({
 										title={run.status.replaceAll("_", " ")}
 										aria-label={run.status.replaceAll("_", " ")}
 									/>
-									<span className="flex min-w-0 flex-1 flex-col gap-0.5 text-left">
-										<span className="truncate font-medium">{title}</span>
+									<span className="flex min-w-0 flex-1 flex-col gap-1 text-left">
+										<span className="flex min-w-0 items-center gap-1.5">
+											<Badge
+												variant="outline"
+												className="h-5 shrink-0 gap-1 px-1.5 font-normal"
+											>
+												{shloka ? (
+													<Sparkles className="size-3" />
+												) : (
+													<Clapperboard className="size-3" />
+												)}
+												{shloka ? "Shloka" : "Model"}
+											</Badge>
+											<span className="truncate font-medium">{title}</span>
+										</span>
 										<span className="truncate text-xs text-muted-foreground">
 											{meta}
 										</span>

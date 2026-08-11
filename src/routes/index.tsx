@@ -247,8 +247,6 @@ function ShlokaStudioPage() {
 			activePath="/"
 			history={
 				<HistoryPanel
-					to="/"
-					provenance="shloka"
 					selectedRunId={runId}
 					onDeleted={(id) => {
 						if (runId === id) {

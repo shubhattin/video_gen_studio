@@ -21,6 +21,8 @@ import {
 } from "#/components/ui/sidebar";
 import { TooltipProvider } from "#/components/ui/tooltip";
 
+const emptyStudioSearch = {} as const;
+
 type StudioShellProps = {
 	children: ReactNode;
 	history: ReactNode;
@@ -61,15 +63,17 @@ export function StudioShell({
 
 						<SidebarGroup className="p-0">
 							<SidebarGroupLabel className="group-data-[collapsible=icon]:sr-only">
-								Modes
+								New run
 							</SidebarGroupLabel>
 							<SidebarGroupContent>
 								<SidebarMenu>
 									<SidebarMenuItem>
 										<SidebarMenuButton
 											isActive={activePath === "/"}
-											tooltip="Shloka Studio"
-											render={<Link to="/" />}
+											tooltip="New Shloka run"
+											render={
+												<Link to="/" search={emptyStudioSearch} />
+											}
 										>
 											<Sparkles />
 											<span>Shloka Studio</span>
@@ -78,8 +82,10 @@ export function StudioShell({
 									<SidebarMenuItem>
 										<SidebarMenuButton
 											isActive={activePath === "/studio"}
-											tooltip="Model Studio"
-											render={<Link to="/studio" />}
+											tooltip="New Model Studio run"
+											render={
+												<Link to="/studio" search={emptyStudioSearch} />
+											}
 										>
 											<Clapperboard />
 											<span>Model Studio</span>
@@ -101,7 +107,8 @@ export function StudioShell({
 
 					<SidebarFooter className="group-data-[collapsible=icon]:hidden">
 						<p className="px-2 text-xs text-sidebar-foreground/60">
-							Runs are saved per studio. Pick one to resume, or start a new run.
+							All runs in one list. Mode buttons start a new run; pick a history
+							item to resume.
 						</p>
 					</SidebarFooter>
 					<SidebarRail />

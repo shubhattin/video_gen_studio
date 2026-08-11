@@ -67,8 +67,6 @@ function ModelStudioPage() {
 			activePath="/studio"
 			history={
 				<HistoryPanel
-					to="/studio"
-					provenance="model-studio"
 					selectedRunId={selectedRunId}
 					onDeleted={(id) => {
 						if (selectedRunId === id) {
