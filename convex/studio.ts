@@ -23,6 +23,7 @@ async function resolveRunUrls(
 				durationSeconds?: number;
 				bytes?: number;
 			};
+			source?: "generated" | "uploaded";
 			revisedImagePrompt?: string;
 			createdAt: number;
 		}>;
@@ -297,7 +298,7 @@ export const removeReferenceImage = mutation({
 			referenceImages,
 			firstFrameImageId:
 				run.firstFrameImageId === args.imageId
-					? referenceImages[0]?.id
+					? undefined
 					: run.firstFrameImageId,
 			lastFrameImageId:
 				run.lastFrameImageId === args.imageId
@@ -310,6 +311,93 @@ export const removeReferenceImage = mutation({
 			updatedAt: Date.now(),
 		});
 		return null;
+	},
+});
+
+const ALLOWED_REFERENCE_UPLOAD_MIME_TYPES = new Set([
+	"image/png",
+	"image/jpeg",
+	"image/jpg",
+	"image/webp",
+	"image/gif",
+]);
+
+const MAX_REFERENCE_UPLOAD_BYTES = 20 * 1024 * 1024;
+
+function newReferenceImageId() {
+	return `img_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export const generateUploadUrl = mutation({
+	args: {},
+	returns: v.string(),
+	handler: async (ctx) => {
+		return await ctx.storage.generateUploadUrl();
+	},
+});
+
+export const attachUploadedReferenceImage = mutation({
+	args: {
+		runId: v.id("generationRuns"),
+		storageId: v.id("_storage"),
+		mimeType: v.string(),
+		width: v.optional(v.number()),
+		height: v.optional(v.number()),
+		bytes: v.optional(v.number()),
+		setAsFirstFrame: v.optional(v.boolean()),
+	},
+	returns: v.object({
+		imageId: v.string(),
+	}),
+	handler: async (ctx, args) => {
+		const run = await ctx.db.get(args.runId);
+		if (!run) {
+			throw new Error("Run not found.");
+		}
+
+		const mimeType = args.mimeType.toLowerCase();
+		if (!ALLOWED_REFERENCE_UPLOAD_MIME_TYPES.has(mimeType)) {
+			await ctx.storage.delete(args.storageId);
+			throw new Error(
+				"Unsupported image type. Use PNG, JPEG, WebP, or GIF.",
+			);
+		}
+
+		const url = await ctx.storage.getUrl(args.storageId);
+		if (!url) {
+			throw new Error("Uploaded file not found in storage.");
+		}
+		const bytes = args.bytes;
+		if (bytes !== undefined && bytes > MAX_REFERENCE_UPLOAD_BYTES) {
+			await ctx.storage.delete(args.storageId);
+			throw new Error("Image is too large. Max size is 20MB.");
+		}
+
+		const imageId = newReferenceImageId();
+		const setAsFirstFrame = args.setAsFirstFrame === true;
+		const image = {
+			id: imageId,
+			storageId: args.storageId,
+			meta: {
+				mimeType,
+				width: args.width,
+				height: args.height,
+				bytes,
+			},
+			source: "uploaded" as const,
+			createdAt: Date.now(),
+		};
+		const referenceImages = [...(run.referenceImages ?? []), image];
+		await ctx.db.patch(args.runId, {
+			status: "image_ready",
+			referenceImages,
+			firstFrameImageId: setAsFirstFrame ? imageId : run.firstFrameImageId,
+			imageCompletedAt: Date.now(),
+			lastError: undefined,
+			updatedAt: Date.now(),
+		});
+
+		return { imageId };
 	},
 });
 

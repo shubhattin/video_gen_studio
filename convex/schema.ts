@@ -51,10 +51,16 @@ export const videoParamsValidator = v.object({
 	prompt: v.optional(v.string()),
 });
 
+export const referenceImageSourceValidator = v.union(
+	v.literal("generated"),
+	v.literal("uploaded"),
+);
+
 export const referenceImageValidator = v.object({
 	id: v.string(),
 	storageId: v.id("_storage"),
 	meta: mediaMetaValidator,
+	source: v.optional(referenceImageSourceValidator),
 	revisedImagePrompt: v.optional(v.string()),
 	createdAt: v.number(),
 });

@@ -246,10 +246,11 @@ export const generateReferenceImage = action({
 						height,
 						bytes: image.uint8Array.byteLength,
 					},
+					source: "generated",
 					revisedImagePrompt: openaiMeta?.revisedPrompt,
 					createdAt: Date.now(),
 				},
-				setAsFirstFrame: true,
+				setAsFirstFrame: false,
 				warnings: warnings.length > 0 ? warnings : undefined,
 			});
 		} catch (error) {
@@ -291,9 +292,9 @@ export const generateVideoForRun = action({
 			storageId: Id<"_storage">;
 		};
 		const images = (run.referenceImages ?? []) as RefImage[];
-		const first =
-			images.find((image: RefImage) => image.id === run.firstFrameImageId) ??
-			images[0];
+		const first = images.find(
+			(image: RefImage) => image.id === run.firstFrameImageId,
+		);
 		const last = images.find(
 			(image: RefImage) => image.id === run.lastFrameImageId,
 		);

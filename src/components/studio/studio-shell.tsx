@@ -1,72 +1,131 @@
 import { Link } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { Clapperboard, Sparkles } from "lucide-react";
+import type { CSSProperties, ReactNode } from "react";
 import { ThemeToggle } from "#/components/studio/theme-toggle";
-import { Button } from "#/components/ui/button";
-import { cn } from "#/lib/utils";
+import {
+	Sidebar,
+	SidebarContent,
+	SidebarFooter,
+	SidebarGroup,
+	SidebarGroupContent,
+	SidebarGroupLabel,
+	SidebarHeader,
+	SidebarInset,
+	SidebarMenu,
+	SidebarMenuButton,
+	SidebarMenuItem,
+	SidebarProvider,
+	SidebarRail,
+	SidebarSeparator,
+	SidebarTrigger,
+} from "#/components/ui/sidebar";
+import { TooltipProvider } from "#/components/ui/tooltip";
 
 type StudioShellProps = {
 	children: ReactNode;
-	sidebar: ReactNode;
+	history: ReactNode;
 	activePath?: "/" | "/studio";
 };
 
 export function StudioShell({
 	children,
-	sidebar,
+	history,
 	activePath = "/",
 }: StudioShellProps) {
 	return (
-		<div className="min-h-screen bg-background text-foreground">
-			<header className="sticky top-0 z-20 border-b border-border/80 bg-background/95 backdrop-blur-sm">
-				<div className="mx-auto flex h-14 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
-					<div className="min-w-0">
-						<p className="font-heading text-lg font-semibold tracking-tight text-primary sm:text-xl">
-							Shloka Video Studio
+		<TooltipProvider>
+			<SidebarProvider
+				defaultOpen
+				style={
+					{
+						"--sidebar-width": "20rem",
+						"--sidebar-width-mobile": "20rem",
+					} as CSSProperties
+				}
+			>
+				<Sidebar collapsible="icon" variant="sidebar">
+					<SidebarHeader className="gap-3">
+						<div className="flex items-center gap-2 px-2 py-1.5 group-data-[collapsible=icon]:justify-center">
+							<div className="flex min-w-0 flex-1 flex-col group-data-[collapsible=icon]:hidden">
+								<span className="truncate font-heading text-sm font-semibold tracking-tight text-sidebar-foreground">
+									Shloka Video Studio
+								</span>
+								<span className="truncate text-xs text-sidebar-foreground/70">
+									Devotional shorts workspace
+								</span>
+							</div>
+							<div className="group-data-[collapsible=icon]:hidden">
+								<ThemeToggle />
+							</div>
+						</div>
+
+						<SidebarGroup className="p-0">
+							<SidebarGroupLabel className="group-data-[collapsible=icon]:sr-only">
+								Modes
+							</SidebarGroupLabel>
+							<SidebarGroupContent>
+								<SidebarMenu>
+									<SidebarMenuItem>
+										<SidebarMenuButton
+											isActive={activePath === "/"}
+											tooltip="Shloka Studio"
+											render={<Link to="/" />}
+										>
+											<Sparkles />
+											<span>Shloka Studio</span>
+										</SidebarMenuButton>
+									</SidebarMenuItem>
+									<SidebarMenuItem>
+										<SidebarMenuButton
+											isActive={activePath === "/studio"}
+											tooltip="Model Studio"
+											render={<Link to="/studio" />}
+										>
+											<Clapperboard />
+											<span>Model Studio</span>
+										</SidebarMenuButton>
+									</SidebarMenuItem>
+								</SidebarMenu>
+							</SidebarGroupContent>
+						</SidebarGroup>
+					</SidebarHeader>
+
+					<SidebarSeparator className="mx-0" />
+
+					<SidebarContent>
+						<SidebarGroup className="group-data-[collapsible=icon]:hidden">
+							<SidebarGroupLabel>History</SidebarGroupLabel>
+							<SidebarGroupContent>{history}</SidebarGroupContent>
+						</SidebarGroup>
+					</SidebarContent>
+
+					<SidebarFooter className="group-data-[collapsible=icon]:hidden">
+						<p className="px-2 text-xs text-sidebar-foreground/60">
+							Runs are saved per studio. Pick one to resume, or start a new run.
 						</p>
-						<p className="text-xs text-muted-foreground sm:text-sm">
-							Internal creative workspace for devotional shorts
-						</p>
+					</SidebarFooter>
+					<SidebarRail />
+				</Sidebar>
+
+				<SidebarInset>
+					<header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-3 border-b border-border/80 bg-background/95 px-4 backdrop-blur-sm sm:px-6">
+						<SidebarTrigger />
+						<div className="min-w-0">
+							<p className="truncate font-heading text-base font-semibold tracking-tight sm:text-lg">
+								{activePath === "/studio" ? "Model Studio" : "Shloka Studio"}
+							</p>
+							<p className="truncate text-xs text-muted-foreground sm:text-sm">
+								{activePath === "/studio"
+									? "OpenRouter video models and reference stills"
+									: "Plan → reference stills → OpenRouter video"}
+							</p>
+						</div>
+					</header>
+					<div className="flex flex-1 flex-col gap-6 p-4 sm:p-6">
+						{children}
 					</div>
-					<ThemeToggle />
-				</div>
-			</header>
-
-			<div className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[18rem_minmax(0,1fr)]">
-				<aside className="hidden min-w-0 lg:block">
-					<nav className="space-y-1">
-						<NavItem to="/" active={activePath === "/"}>
-							Shloka Studio
-						</NavItem>
-						<NavItem to="/studio" active={activePath === "/studio"}>
-							Model Studio
-						</NavItem>
-					</nav>
-					<div className="mt-6">{sidebar}</div>
-				</aside>
-
-				<main className="min-w-0">{children}</main>
-			</div>
-		</div>
-	);
-}
-
-function NavItem({
-	to,
-	children,
-	active,
-}: {
-	to: string;
-	children: ReactNode;
-	active?: boolean;
-}) {
-	return (
-		<Button
-			variant={active ? "secondary" : "ghost"}
-			className={cn("w-full justify-start min-h-11", active && "font-medium")}
-			nativeButton={false}
-			render={<Link to={to} />}
-		>
-			{children}
-		</Button>
+				</SidebarInset>
+			</SidebarProvider>
+		</TooltipProvider>
 	);
 }

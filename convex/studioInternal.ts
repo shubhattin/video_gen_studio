@@ -74,10 +74,9 @@ export const appendReferenceImage = internalMutation({
 		await ctx.db.patch(args.runId, {
 			status: "image_ready",
 			referenceImages,
-			firstFrameImageId:
-				args.setAsFirstFrame !== false
-					? args.image.id
-					: (run.firstFrameImageId ?? args.image.id),
+			firstFrameImageId: args.setAsFirstFrame
+				? args.image.id
+				: run.firstFrameImageId,
 			imageCompletedAt: Date.now(),
 			warnings: args.warnings,
 			lastError: undefined,

@@ -1,3 +1,5 @@
+import { useRef, useState } from "react";
+import { Upload } from "lucide-react";
 import { GPT_IMAGE_ESTIMATES_USD } from "#/lib/model-catalog";
 import { Button } from "#/components/ui/button";
 import { Label } from "#/components/ui/label";
@@ -14,6 +16,7 @@ import { cn } from "#/lib/utils";
 export type ReferenceImageItem = {
 	id: string;
 	url?: string | null;
+	source?: "generated" | "uploaded";
 	revisedImagePrompt?: string;
 	createdAt: number;
 };
@@ -24,7 +27,9 @@ type ReferenceImagePanelProps = {
 	onSizeChange: (value: string) => void;
 	onQualityChange: (value: string) => void;
 	onGenerate: () => void;
+	onUpload: (file: File) => Promise<void> | void;
 	generating?: boolean;
+	uploading?: boolean;
 	images: ReferenceImageItem[];
 	firstFrameImageId?: string;
 	lastFrameImageId?: string;
@@ -45,7 +50,9 @@ export function ReferenceImagePanel({
 	onSizeChange,
 	onQualityChange,
 	onGenerate,
+	onUpload,
 	generating,
+	uploading,
 	images,
 	firstFrameImageId,
 	lastFrameImageId,
@@ -59,28 +66,44 @@ export function ReferenceImagePanel({
 	maxInputReferences = 0,
 	disabled,
 }: ReferenceImagePanelProps) {
+	const fileInputRef = useRef<HTMLInputElement>(null);
+	const [dragActive, setDragActive] = useState(false);
 	const estimate =
 		GPT_IMAGE_ESTIMATES_USD["1024x1536"][
 			imageQuality as "low" | "medium" | "high"
 		] ?? GPT_IMAGE_ESTIMATES_USD["1024x1536"].medium;
+	const busy = Boolean(disabled || generating || uploading);
+
+	const handleFiles = async (files: FileList | null) => {
+		const file = files?.[0];
+		if (!file || busy) {
+			return;
+		}
+		await onUpload(file);
+		if (fileInputRef.current) {
+			fileInputRef.current.value = "";
+		}
+	};
 
 	return (
-		<section className="space-y-4 border-t border-border/80 pt-6">
+		<section className="flex flex-col gap-4 border-t border-border/80 pt-6">
 			<div>
 				<h2 className="font-heading text-xl font-semibold">Reference images</h2>
 				<p className="text-sm text-muted-foreground">
-					GPT Image 2 stills. Pick first/last frames and optional style refs.
-					Estimate ~${estimate.toFixed(3)} per {imageQuality} generate.
+					Generate with GPT Image 2 or upload your own. Images stay in the
+					gallery until you assign them — first frame, last frame, or style
+					reference. Unassigned images are kept but not sent to video gen.
+					Generate estimate ~${estimate.toFixed(3)} per {imageQuality}.
 				</p>
 			</div>
 
 			<div className="grid gap-4 sm:grid-cols-2">
-				<div className="space-y-2">
-					<Label>Size</Label>
+				<div className="flex flex-col gap-2">
+					<Label>Size (generate)</Label>
 					<Select
 						value={imageSize}
 						onValueChange={(value) => value && onSizeChange(value)}
-						disabled={disabled}
+						disabled={busy}
 					>
 						<SelectTrigger className="min-h-11">
 							<SelectValue />
@@ -92,12 +115,12 @@ export function ReferenceImagePanel({
 						</SelectContent>
 					</Select>
 				</div>
-				<div className="space-y-2">
-					<Label>Quality</Label>
+				<div className="flex flex-col gap-2">
+					<Label>Quality (generate)</Label>
 					<Select
 						value={imageQuality}
 						onValueChange={(value) => value && onQualityChange(value)}
-						disabled={disabled}
+						disabled={busy}
 					>
 						<SelectTrigger className="min-h-11">
 							<SelectValue />
@@ -112,13 +135,75 @@ export function ReferenceImagePanel({
 				</div>
 			</div>
 
-			<Button
-				className="min-h-11"
-				onClick={onGenerate}
-				disabled={disabled || generating}
+			<div className="flex flex-wrap gap-3">
+				<Button className="min-h-11" onClick={onGenerate} disabled={busy}>
+					{generating ? "Generating image…" : "Generate with GPT Image 2"}
+				</Button>
+				<Button
+					className="min-h-11"
+					variant="outline"
+					disabled={busy}
+					onClick={() => fileInputRef.current?.click()}
+				>
+					<Upload data-icon="inline-start" />
+					{uploading ? "Uploading…" : "Upload image"}
+				</Button>
+				<input
+					ref={fileInputRef}
+					type="file"
+					accept="image/png,image/jpeg,image/webp,image/gif"
+					className="sr-only"
+					disabled={busy}
+					onChange={(event) => {
+						void handleFiles(event.target.files);
+					}}
+				/>
+			</div>
+
+			<div
+				className={cn(
+					"rounded-xl border border-dashed px-4 py-6 text-center text-sm transition-colors",
+					dragActive
+						? "border-primary bg-primary/5 text-foreground"
+						: "border-border/80 text-muted-foreground",
+					busy ? "opacity-60" : "cursor-pointer",
+				)}
+				onDragEnter={(event) => {
+					event.preventDefault();
+					event.stopPropagation();
+					if (!busy) setDragActive(true);
+				}}
+				onDragOver={(event) => {
+					event.preventDefault();
+					event.stopPropagation();
+					if (!busy) setDragActive(true);
+				}}
+				onDragLeave={(event) => {
+					event.preventDefault();
+					event.stopPropagation();
+					setDragActive(false);
+				}}
+				onDrop={(event) => {
+					event.preventDefault();
+					event.stopPropagation();
+					setDragActive(false);
+					void handleFiles(event.dataTransfer.files);
+				}}
+				onClick={() => {
+					if (!busy) fileInputRef.current?.click();
+				}}
+				onKeyDown={(event) => {
+					if (busy) return;
+					if (event.key === "Enter" || event.key === " ") {
+						event.preventDefault();
+						fileInputRef.current?.click();
+					}
+				}}
+				role="button"
+				tabIndex={busy ? -1 : 0}
 			>
-				{generating ? "Generating image…" : "Generate reference image"}
-			</Button>
+				Drop a PNG, JPEG, WebP, or GIF here — or click to browse (max 20MB).
+			</div>
 
 			{images.length > 0 ? (
 				<div className="grid gap-4 sm:grid-cols-2">
@@ -126,12 +211,21 @@ export function ReferenceImagePanel({
 						const isFirst = firstFrameImageId === image.id;
 						const isLast = lastFrameImageId === image.id;
 						const isExtra = extraReferenceImageIds.includes(image.id);
+						const isUnassigned = !isFirst && !isLast && !isExtra;
+						const sourceLabel =
+							image.source === "uploaded"
+								? "Uploaded"
+								: image.source === "generated"
+									? "Generated"
+									: null;
 						return (
 							<div
 								key={image.id}
 								className={cn(
-									"rounded-xl border p-3 space-y-3",
-									isFirst ? "border-primary" : "border-border/80",
+									"flex flex-col gap-3 rounded-xl border p-3",
+									isFirst || isLast || isExtra
+										? "border-primary/60"
+										: "border-border/80",
 								)}
 							>
 								{image.url ? (
@@ -142,18 +236,28 @@ export function ReferenceImagePanel({
 									/>
 								) : null}
 								<div className="flex flex-wrap gap-2">
+									{sourceLabel ? (
+										<Badge variant="outline">{sourceLabel}</Badge>
+									) : null}
+									{isUnassigned ? (
+										<Badge variant="secondary">In gallery</Badge>
+									) : null}
 									{isFirst ? <Badge>First frame</Badge> : null}
 									{isLast ? (
 										<Badge variant="secondary">Last frame</Badge>
 									) : null}
 									{isExtra ? <Badge variant="outline">Style ref</Badge> : null}
 								</div>
+								<p className="text-xs text-muted-foreground">
+									Optional roles — leave unassigned, or pick first / last /
+									style ref.
+								</p>
 								<div className="flex flex-wrap gap-2">
 									<Button
 										size="sm"
 										variant={isFirst ? "default" : "outline"}
 										className="min-h-11"
-										disabled={disabled}
+										disabled={busy}
 										onClick={() =>
 											onSelectFirstFrame(isFirst ? null : image.id)
 										}
@@ -165,7 +269,7 @@ export function ReferenceImagePanel({
 											size="sm"
 											variant={isLast ? "secondary" : "outline"}
 											className="min-h-11"
-											disabled={disabled}
+											disabled={busy}
 											onClick={() =>
 												onSelectLastFrame(isLast ? null : image.id)
 											}
@@ -179,20 +283,25 @@ export function ReferenceImagePanel({
 											variant={isExtra ? "secondary" : "outline"}
 											className="min-h-11"
 											disabled={
-												disabled ||
+												busy ||
 												(!isExtra &&
 													extraReferenceImageIds.length >= maxInputReferences)
 											}
 											onClick={() => onToggleExtraReference(image.id)}
 										>
-											{isExtra ? "Remove ref" : "Add as ref"}
+											{isExtra ? "Remove style ref" : "Add as style ref"}
 										</Button>
-									) : null}
+									) : (
+										<p className="w-full text-xs text-muted-foreground">
+											Current video model has no style-ref slot — use first/last
+											if needed, or keep this in the gallery.
+										</p>
+									)}
 									<Button
 										size="sm"
 										variant="destructive"
 										className="min-h-11"
-										disabled={disabled}
+										disabled={busy}
 										onClick={() => onRemoveImage(image.id)}
 									>
 										Delete

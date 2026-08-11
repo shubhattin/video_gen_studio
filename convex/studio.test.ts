@@ -66,6 +66,41 @@ describe("studio mutations", () => {
 		const run = await t.query(api.studio.getRun, { runId });
 		expect(run).toBeNull();
 	});
+
+	it("attaches an uploaded reference image", async () => {
+		const t = convexTest(schema, modules);
+		const runId = await t.mutation(api.studio.createModelStudioDraft, {
+			modelId: "google/veo-3.1-lite",
+			prompt: "Temple courtyard at dusk",
+		});
+
+		const uploadUrl = await t.mutation(api.studio.generateUploadUrl, {});
+		expect(typeof uploadUrl).toBe("string");
+
+		const storageId = await t.run(async (ctx) => {
+			const blob = new Blob([new Uint8Array([137, 80, 78, 71])], {
+				type: "image/png",
+			});
+			return await ctx.storage.store(blob);
+		});
+
+		const attached = await t.mutation(api.studio.attachUploadedReferenceImage, {
+			runId,
+			storageId,
+			mimeType: "image/png",
+			width: 1024,
+			height: 1536,
+			bytes: 4,
+		});
+
+		const run = await t.query(api.studio.getRun, { runId });
+		expect(run?.status).toBe("image_ready");
+		expect(run?.firstFrameImageId).toBeUndefined();
+		expect(run?.referenceImages).toHaveLength(1);
+		expect(run?.referenceImages?.[0]?.source).toBe("uploaded");
+		expect(run?.referenceImages?.[0]?.meta.mimeType).toBe("image/png");
+		expect(run?.referenceImages?.[0]?.id).toBe(attached.imageId);
+	});
 });
 
 describe("video param validation", () => {
@@ -101,6 +136,38 @@ describe("video param validation", () => {
 				generateAudio: true,
 			}),
 		).toThrow();
+	});
+
+	it("accepts Wan 2.7 and Sora 2 Pro configs", () => {
+		expect(
+			validateVideoParams({
+				modelId: "alibaba/wan-2.7",
+				aspectRatio: "9:16",
+				resolution: "1080p",
+				durationSeconds: 5,
+				generateAudio: true,
+			}).modelId,
+		).toBe("alibaba/wan-2.7");
+
+		expect(
+			validateVideoParams({
+				modelId: "openai/sora-2-pro",
+				aspectRatio: "16:9",
+				resolution: "720p",
+				durationSeconds: 8,
+				generateAudio: true,
+			}).durationSeconds,
+		).toBe(8);
+	});
+
+	it("accepts Grok Imagine Video base model", () => {
+		const params = validateVideoParams({
+			modelId: "x-ai/grok-imagine-video",
+			aspectRatio: "9:16",
+			resolution: "720p",
+			durationSeconds: 6,
+		});
+		expect(params.modelId).toBe("x-ai/grok-imagine-video");
 	});
 });
 

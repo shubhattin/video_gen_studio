@@ -1,6 +1,6 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useAction, useMutation, useQuery } from "convex/react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { GenerationStatus } from "#/components/studio/generation-status";
@@ -14,29 +14,43 @@ import {
 	VideoConfiguration,
 	type VideoConfigState,
 } from "#/components/studio/video-configuration";
+import { VideoModelSelector } from "#/components/studio/video-model-selector";
 import { VideoResult } from "#/components/studio/video-result";
 import { Button } from "#/components/ui/button";
 import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "#/components/ui/select";
-import {
 	MODEL_CAPABILITY_PROFILES,
-	VIDEO_MODEL_IDS,
 	defaultVideoParams,
 	type VideoModelId,
 } from "#/lib/model-catalog";
+import {
+	studioRunSearchSchema,
+	type StudioRunSearch,
+} from "#/lib/studio-run-search";
 import { notifyStudioError, notifyStudioSuccess } from "#/lib/studio-toast";
+import { uploadReferenceImage } from "#/lib/upload-reference-image";
 
 export const Route = createFileRoute("/")({
+	validateSearch: studioRunSearchSchema,
 	component: ShlokaStudioPage,
 });
 
+function clearRunSearch(prev: StudioRunSearch): StudioRunSearch {
+	const { run: _removed, ...rest } = prev;
+	return rest;
+}
+
 function ShlokaStudioPage() {
-	const [runId, setRunId] = useState<Id<"generationRuns"> | null>(null);
+	const navigate = useNavigate({ from: Route.fullPath });
+	const { run: runSearch } = Route.useSearch();
+	const runId = (runSearch as Id<"generationRuns"> | undefined) ?? null;
+
+	const setRunId = (id: Id<"generationRuns"> | null, replace = false) => {
+		void navigate({
+			search: (prev) => (id ? { ...prev, run: id } : clearRunSearch(prev)),
+			replace,
+		});
+	};
+
 	const [shlokaText, setShlokaText] = useState("");
 	const [customInstructions, setCustomInstructions] = useState("");
 	const [imageSize, setImageSize] = useState("1024x1536");
@@ -47,16 +61,68 @@ function ShlokaStudioPage() {
 	const [busyStage, setBusyStage] = useState<string | null>(null);
 
 	const run = useQuery(api.studio.getRun, runId ? { runId } : "skip");
+	const catalog = useQuery(api.studio.getCachedOpenRouterCatalog);
+	const refreshCatalog = useAction(api.studioActions.refreshModelCatalog);
 
 	const createDraft = useMutation(api.studio.createShlokaDraft);
 	const updateDraft = useMutation(api.studio.updateDraft);
 	const removeReferenceImage = useMutation(api.studio.removeReferenceImage);
+	const generateUploadUrl = useMutation(api.studio.generateUploadUrl);
+	const attachUploadedReferenceImage = useMutation(
+		api.studio.attachUploadedReferenceImage,
+	);
 	const planRun = useAction(api.studioActions.planShlokaRun);
 	const generateImage = useAction(api.studioActions.generateReferenceImage);
 	const generateVideo = useAction(api.studioActions.generateVideoForRun);
 
 	useEffect(() => {
+		if (!catalog) {
+			refreshCatalog({}).catch(() => undefined);
+		}
+	}, [catalog, refreshCatalog]);
+
+	const { gatewayById, pricingSkusById } = useMemo(() => {
+		const gateway = new Map<string, { input?: string; output?: string }>();
+		const skus = new Map<string, Record<string, string>>();
+		if (catalog?.models) {
+			for (const model of catalog.models as Array<{
+				id: string;
+				pricing_skus?: Record<string, string>;
+			}>) {
+				if (model.pricing_skus) {
+					skus.set(model.id, model.pricing_skus);
+					gateway.set(model.id, {
+						output: Object.values(model.pricing_skus)[0],
+					});
+				}
+			}
+		}
+		return { gatewayById: gateway, pricingSkusById: skus };
+	}, [catalog]);
+
+	useEffect(() => {
+		if (!runId) {
+			setShlokaText("");
+			setCustomInstructions("");
+			setImageSize("1024x1536");
+			setImageQuality("low");
+			setVideoConfig(defaultVideoParams("google/veo-3.1-lite"));
+			setBusyStage(null);
+			return;
+		}
+		if (run === null) {
+			setRunId(null, true);
+			return;
+		}
 		if (!run) {
+			return;
+		}
+		if (run.provenance === "model-studio") {
+			void navigate({
+				to: "/studio",
+				search: { run: runId },
+				replace: true,
+			});
 			return;
 		}
 		setShlokaText(run.shlokaText ?? "");
@@ -65,7 +131,7 @@ function ShlokaStudioPage() {
 		setImageQuality(run.imageQuality ?? "low");
 		if (run.videoParams) {
 			setVideoConfig({
-				modelId: (run.selectedModelId as VideoModelId) ?? videoConfig.modelId,
+				modelId: (run.selectedModelId as VideoModelId) ?? "google/veo-3.1-lite",
 				aspectRatio: run.videoParams.aspectRatio,
 				resolution: run.videoParams.resolution,
 				durationSeconds: run.videoParams.durationSeconds,
@@ -75,7 +141,7 @@ function ShlokaStudioPage() {
 			});
 		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [run?._id]);
+	}, [runId, run?._id, run === null]);
 
 	const ensureRun = async () => {
 		if (runId) {
@@ -130,6 +196,24 @@ function ShlokaStudioPage() {
 		}
 	};
 
+	const onUploadImage = async (file: File) => {
+		setBusyStage("upload");
+		try {
+			const id = await ensureRun();
+			await uploadReferenceImage({
+				runId: id,
+				file,
+				generateUploadUrl,
+				attachUploadedReferenceImage,
+			});
+			notifyStudioSuccess("Reference image uploaded");
+		} catch (error) {
+			notifyStudioError("Image upload failed", error);
+		} finally {
+			setBusyStage(null);
+		}
+	};
+
 	const onGenerateVideo = async () => {
 		setBusyStage("video");
 		try {
@@ -161,13 +245,14 @@ function ShlokaStudioPage() {
 	return (
 		<StudioShell
 			activePath="/"
-			sidebar={
+			history={
 				<HistoryPanel
+					to="/"
+					provenance="shloka"
 					selectedRunId={runId}
-					onSelect={(id) => setRunId(id)}
 					onDeleted={(id) => {
 						if (runId === id) {
-							setRunId(null);
+							setRunId(null, true);
 						}
 					}}
 				/>
@@ -226,7 +311,9 @@ function ShlokaStudioPage() {
 							onSizeChange={setImageSize}
 							onQualityChange={setImageQuality}
 							onGenerate={onGenerateImage}
+							onUpload={onUploadImage}
 							generating={busyStage === "image"}
+							uploading={busyStage === "upload"}
 							images={images}
 							firstFrameImageId={run?.firstFrameImageId}
 							lastFrameImageId={run?.lastFrameImageId}
@@ -260,32 +347,24 @@ function ShlokaStudioPage() {
 
 				{planReady ? (
 					<div className="flex flex-col gap-4 border-t border-border/80 pt-6">
-						<div className="space-y-2">
+						<div className="flex flex-col gap-2">
 							<h2 className="font-heading text-xl font-semibold">
 								Video model
 							</h2>
-							<Select
-								value={videoConfig.modelId}
+							<p className="text-sm text-muted-foreground">
+								Compact picker with capabilities, limits, and pricing notes.
+							</p>
+							<VideoModelSelector
+								value={videoConfig.modelId as VideoModelId}
+								gatewayPricingById={gatewayById}
+								pricingSkusById={pricingSkusById}
+								disabled={busyStage !== null}
 								onValueChange={(modelId) => {
-									if (!modelId) return;
 									setVideoConfig({
-										...defaultVideoParams(modelId as VideoModelId),
+										...defaultVideoParams(modelId),
 									});
 								}}
-								disabled={busyStage !== null}
-							>
-								<SelectTrigger className="min-h-11 w-full min-w-0 sm:min-w-[28rem] md:min-w-[36rem]">
-									<SelectValue />
-								</SelectTrigger>
-								<SelectContent className="min-w-[var(--anchor-width)] w-[var(--anchor-width)]">
-									{VIDEO_MODEL_IDS.map((modelId) => (
-										<SelectItem key={modelId} value={modelId}>
-											{MODEL_CAPABILITY_PROFILES[modelId].displayName} ·{" "}
-											{modelId}
-										</SelectItem>
-									))}
-								</SelectContent>
-							</Select>
+							/>
 						</div>
 						<StudioErrorAlert
 							error={run?.lastError}

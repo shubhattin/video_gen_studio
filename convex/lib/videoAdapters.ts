@@ -129,7 +129,10 @@ export function adaptOpenRouterVideoRequest(args: {
 	if (validated.negativePrompt?.trim() && profile.supportsNegativePrompt) {
 		if (validated.modelId.startsWith("google/")) {
 			providerParameters.negativePrompt = validated.negativePrompt.trim();
-		} else if (validated.modelId.startsWith("kwaivgi/")) {
+		} else if (
+			validated.modelId.startsWith("kwaivgi/") ||
+			validated.modelId.startsWith("alibaba/")
+		) {
 			providerParameters.negative_prompt = validated.negativePrompt.trim();
 		}
 	}
@@ -145,7 +148,11 @@ export function adaptOpenRouterVideoRequest(args: {
 			? "google-vertex"
 			: validated.modelId.startsWith("kwaivgi/")
 				? "kwaivgi"
-				: validated.modelId.split("/")[0];
+				: validated.modelId.startsWith("openai/")
+					? "openai"
+					: validated.modelId.startsWith("alibaba/")
+						? "alibaba"
+						: validated.modelId.split("/")[0];
 		body.provider = {
 			options: {
 				[providerSlug]: { parameters: providerParameters },
@@ -167,11 +174,10 @@ export function estimateVideoCostUsd(params: VideoParams): number | null {
 	if (!profile.fallbackEstimateUsdPerSecond) {
 		return null;
 	}
-	const audioMultiplier =
-		validated.generateAudio && profile.supportsAudio ? 2 : 1;
-	return (
-		profile.fallbackEstimateUsdPerSecond *
-		validated.durationSeconds *
-		audioMultiplier
-	);
+	const perSecond =
+		validated.generateAudio && profile.supportsAudio
+			? (profile.fallbackEstimateUsdPerSecondWithAudio ??
+				profile.fallbackEstimateUsdPerSecond)
+			: profile.fallbackEstimateUsdPerSecond;
+	return perSecond * validated.durationSeconds;
 }

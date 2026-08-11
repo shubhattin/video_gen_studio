@@ -3,9 +3,9 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { GenerationStatus } from "#/components/studio/generation-status";
-import { ModelCard } from "#/components/studio/model-card";
 import { ReferenceImagePanel } from "#/components/studio/reference-image-panel";
 import { StudioErrorAlert } from "#/components/studio/studio-error-alert";
+import { VideoModelSelector } from "#/components/studio/video-model-selector";
 import {
 	VideoConfiguration,
 	type VideoConfigState,
@@ -14,25 +14,34 @@ import { VideoResult } from "#/components/studio/video-result";
 import { Button } from "#/components/ui/button";
 import {
 	MODEL_CAPABILITY_PROFILES,
-	VIDEO_MODEL_IDS,
 	defaultVideoParams,
 	isVideoModelId,
 	type VideoModelId,
 } from "#/lib/model-catalog";
 import { notifyStudioError, notifyStudioSuccess } from "#/lib/studio-toast";
+import { uploadReferenceImage } from "#/lib/upload-reference-image";
 
-export function ModelStudio() {
+type ModelStudioProps = {
+	runId?: Id<"generationRuns"> | null;
+	onRunIdChange?: (runId: Id<"generationRuns"> | null) => void;
+};
+
+export function ModelStudio({
+	runId: controlledRunId = null,
+	onRunIdChange,
+}: ModelStudioProps) {
 	const catalog = useQuery(api.studio.getCachedOpenRouterCatalog);
 	const refreshCatalog = useAction(api.studioActions.refreshModelCatalog);
 	const createDraft = useMutation(api.studio.createModelStudioDraft);
 	const updateDraft = useMutation(api.studio.updateDraft);
 	const removeReferenceImage = useMutation(api.studio.removeReferenceImage);
+	const generateUploadUrl = useMutation(api.studio.generateUploadUrl);
+	const attachUploadedReferenceImage = useMutation(
+		api.studio.attachUploadedReferenceImage,
+	);
 	const generateImage = useAction(api.studioActions.generateReferenceImage);
 	const generateVideo = useAction(api.studioActions.generateVideoForRun);
 
-	const [activeRunId, setActiveRunId] = useState<Id<"generationRuns"> | null>(
-		null,
-	);
 	const [selectedModel, setSelectedModel] = useState<VideoModelId>(
 		"google/veo-3.1-lite",
 	);
@@ -43,8 +52,10 @@ export function ModelStudio() {
 	const [imageSize, setImageSize] = useState("1024x1536");
 	const [imageQuality, setImageQuality] = useState("low");
 	const [busy, setBusy] = useState(false);
+	const [uploading, setUploading] = useState(false);
 	const [refreshingCatalog, setRefreshingCatalog] = useState(false);
 
+	const activeRunId = controlledRunId;
 	const run = useQuery(
 		api.studio.getRun,
 		activeRunId ? { runId: activeRunId } : "skip",
@@ -57,21 +68,51 @@ export function ModelStudio() {
 		}
 	}, [catalog, refreshCatalog]);
 
-	const gatewayById = useMemo(() => {
-		const map = new Map<string, { input?: string; output?: string }>();
+	useEffect(() => {
+		if (!controlledRunId) {
+			setSelectedModel("google/veo-3.1-lite");
+			setVideoConfig({
+				...defaultVideoParams("google/veo-3.1-lite"),
+				prompt: "",
+			});
+			setImageSize("1024x1536");
+			setImageQuality("low");
+			return;
+		}
+		if (!run || run._id !== controlledRunId) {
+			return;
+		}
+		const modelId = isVideoModelId(run.selectedModelId ?? "")
+			? (run.selectedModelId as VideoModelId)
+			: "google/veo-3.1-lite";
+		setSelectedModel(modelId);
+		setImageSize(run.imageSize ?? "1024x1536");
+		setImageQuality(run.imageQuality ?? "low");
+		setVideoConfig({
+			...defaultVideoParams(modelId),
+			...(run.videoParams ?? {}),
+			modelId,
+			prompt: run.videoPrompt ?? run.videoParams?.prompt ?? "",
+		});
+	}, [controlledRunId, run?._id]);
+
+	const { gatewayById, pricingSkusById } = useMemo(() => {
+		const gateway = new Map<string, { input?: string; output?: string }>();
+		const skus = new Map<string, Record<string, string>>();
 		if (catalog?.models) {
 			for (const model of catalog.models as Array<{
 				id: string;
 				pricing_skus?: Record<string, string>;
 			}>) {
-				map.set(model.id, {
-					output: model.pricing_skus
-						? Object.values(model.pricing_skus)[0]
-						: undefined,
-				});
+				if (model.pricing_skus) {
+					skus.set(model.id, model.pricing_skus);
+					gateway.set(model.id, {
+						output: Object.values(model.pricing_skus)[0],
+					});
+				}
 			}
 		}
-		return map;
+		return { gatewayById: gateway, pricingSkusById: skus };
 	}, [catalog]);
 
 	const ensureDraft = async () => {
@@ -90,7 +131,7 @@ export function ModelStudio() {
 			modelId: selectedModel,
 			prompt: videoConfig.prompt,
 		});
-		setActiveRunId(runId);
+		onRunIdChange?.(runId);
 		await updateDraft({
 			runId,
 			videoParams: { ...videoConfig, modelId: selectedModel },
@@ -127,60 +168,82 @@ export function ModelStudio() {
 		}
 	};
 
+	const onUploadImage = async (file: File) => {
+		setUploading(true);
+		try {
+			const runId = await ensureDraft();
+			await uploadReferenceImage({
+				runId,
+				file,
+				generateUploadUrl,
+				attachUploadedReferenceImage,
+			});
+			notifyStudioSuccess("Reference image uploaded");
+		} catch (error) {
+			notifyStudioError("Image upload failed", error);
+		} finally {
+			setUploading(false);
+		}
+	};
+
 	const images = run?.referenceImages ?? [];
 	const videos = run?.videos ?? [];
 	const extraIds = run?.extraReferenceImageIds ?? [];
 
 	return (
-		<div className="space-y-8">
-			<section className="space-y-2">
-				<h1 className="font-heading text-2xl font-semibold">Model Studio</h1>
-				<p className="text-sm text-muted-foreground">
-					OpenRouter video models with capability-driven controls. Each generate
-					appends another clip to the run.
-				</p>
-				<Button
-					variant="outline"
-					size="sm"
-					className="min-h-11"
-					disabled={refreshingCatalog}
-					onClick={async () => {
-						setRefreshingCatalog(true);
-						try {
-							await refreshCatalog({});
-						} finally {
-							setRefreshingCatalog(false);
-						}
-					}}
-				>
-					{refreshingCatalog
-						? "Refreshing catalog…"
-						: "Refresh OpenRouter catalog"}
-				</Button>
-				{catalog?.fetchedAt ? (
-					<p className="text-xs text-muted-foreground">
-						Catalog updated {new Date(catalog.fetchedAt).toLocaleString()}
+		<div className="flex flex-col gap-8">
+			<section className="flex flex-col gap-3">
+				<div className="flex flex-col gap-2">
+					<h1 className="font-heading text-2xl font-semibold">Model Studio</h1>
+					<p className="text-sm text-muted-foreground">
+						OpenRouter video models with capability-driven controls. Each
+						generate appends another clip to the run.
 					</p>
-				) : null}
+				</div>
+				<div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+					<div className="min-w-0 flex-1 sm:max-w-xl">
+						<p className="mb-2 text-sm font-medium">Video model</p>
+						<VideoModelSelector
+							value={selectedModel}
+							gatewayPricingById={gatewayById}
+							pricingSkusById={pricingSkusById}
+							disabled={busy || uploading}
+							onValueChange={(modelId) => {
+								setSelectedModel(modelId);
+								setVideoConfig({
+									...defaultVideoParams(modelId),
+									prompt: videoConfig.prompt,
+								});
+							}}
+						/>
+					</div>
+					<div className="flex flex-col gap-1">
+						<Button
+							variant="outline"
+							size="sm"
+							className="min-h-11 w-fit"
+							disabled={refreshingCatalog}
+							onClick={async () => {
+								setRefreshingCatalog(true);
+								try {
+									await refreshCatalog({});
+								} finally {
+									setRefreshingCatalog(false);
+								}
+							}}
+						>
+							{refreshingCatalog
+								? "Refreshing catalog…"
+								: "Refresh OpenRouter catalog"}
+						</Button>
+						{catalog?.fetchedAt ? (
+							<p className="text-xs text-muted-foreground">
+								Catalog updated {new Date(catalog.fetchedAt).toLocaleString()}
+							</p>
+						) : null}
+					</div>
+				</div>
 			</section>
-
-			<div className="grid gap-4 lg:grid-cols-3">
-				{VIDEO_MODEL_IDS.map((modelId) => (
-					<ModelCard
-						key={modelId}
-						modelId={modelId}
-						selected={selectedModel === modelId}
-						gatewayPricing={gatewayById.get(modelId)}
-						onSelect={() => {
-							setSelectedModel(modelId);
-							setVideoConfig({
-								...defaultVideoParams(modelId),
-								prompt: videoConfig.prompt,
-							});
-						}}
-					/>
-				))}
-			</div>
 
 			<StudioErrorAlert
 				error={run?.lastError}
@@ -195,7 +258,7 @@ export function ModelStudio() {
 					setVideoConfig(next);
 				}}
 				showPrompt
-				disabled={busy}
+				disabled={busy || uploading}
 			/>
 
 			<StudioErrorAlert
@@ -208,7 +271,9 @@ export function ModelStudio() {
 				onSizeChange={setImageSize}
 				onQualityChange={setImageQuality}
 				onGenerate={onGenerateImage}
+				onUpload={onUploadImage}
 				generating={busy}
+				uploading={uploading}
 				images={images}
 				firstFrameImageId={run?.firstFrameImageId}
 				lastFrameImageId={run?.lastFrameImageId}
@@ -216,7 +281,7 @@ export function ModelStudio() {
 				supportsLastFrame={profile.supportsLastFrame}
 				supportsInputReferences={profile.supportsInputReferences}
 				maxInputReferences={profile.maxInputReferences}
-				disabled={busy}
+				disabled={busy || uploading}
 				onSelectFirstFrame={async (id) => {
 					const runId = await ensureDraft();
 					await updateDraft({ runId, firstFrameImageId: id });
@@ -239,7 +304,11 @@ export function ModelStudio() {
 			/>
 
 			<div className="flex flex-wrap gap-3">
-				<Button className="min-h-11" disabled={busy} onClick={startVideo}>
+				<Button
+					className="min-h-11"
+					disabled={busy || uploading}
+					onClick={startVideo}
+				>
 					{busy ? "Working…" : "Generate video (append)"}
 				</Button>
 			</div>

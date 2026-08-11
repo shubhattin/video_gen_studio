@@ -1,7 +1,8 @@
+import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery } from "convex/react";
 import { formatDistanceToNow } from "date-fns";
-import { MoreHorizontal, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { MoreHorizontal, Plus, Trash2 } from "lucide-react";
+import { useMemo, useState } from "react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import {
@@ -14,18 +15,24 @@ import {
 	AlertDialogHeader,
 	AlertDialogTitle,
 } from "#/components/ui/alert-dialog";
-import { Button } from "#/components/ui/button";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from "#/components/ui/dropdown-menu";
+import {
+	SidebarMenu,
+	SidebarMenuAction,
+	SidebarMenuButton,
+	SidebarMenuItem,
+} from "#/components/ui/sidebar";
+import type { StudioRunSearch } from "#/lib/studio-run-search";
 import { cn } from "#/lib/utils";
 
 type HistoryRun = {
 	_id: Id<"generationRuns">;
-	provenance: string;
+	provenance: "shloka" | "model-studio" | string;
 	status: string;
 	shlokaText?: string;
 	selectedModelId?: string;
@@ -33,22 +40,39 @@ type HistoryRun = {
 	videos?: Array<{ url?: string | null }>;
 };
 
+type StudioPath = "/" | "/studio";
+
 type HistoryPanelProps = {
+	to: StudioPath;
+	provenance?: "shloka" | "model-studio";
 	selectedRunId?: Id<"generationRuns"> | null;
-	onSelect: (runId: Id<"generationRuns">) => void;
 	onDeleted?: (runId: Id<"generationRuns">) => void;
 };
 
+function clearRunSearch(prev: StudioRunSearch): StudioRunSearch {
+	const { run: _removed, ...rest } = prev;
+	return rest;
+}
+
 export function HistoryPanel({
+	to,
+	provenance,
 	selectedRunId,
-	onSelect,
 	onDeleted,
 }: HistoryPanelProps) {
-	const runs = useQuery(api.studio.listRecentRuns, { limit: 12 });
+	const runs = useQuery(api.studio.listRecentRuns, { limit: 24 });
 	const deleteRun = useMutation(api.studio.deleteRun);
 	const [pendingDeleteId, setPendingDeleteId] =
 		useState<Id<"generationRuns"> | null>(null);
 	const [deleting, setDeleting] = useState(false);
+
+	const filteredRuns = useMemo(() => {
+		if (!runs) return undefined;
+		if (!provenance) return runs as HistoryRun[];
+		return (runs as HistoryRun[]).filter(
+			(run) => run.provenance === provenance,
+		);
+	}, [runs, provenance]);
 
 	const confirmDelete = async () => {
 		if (!pendingDeleteId) {
@@ -65,71 +89,86 @@ export function HistoryPanel({
 	};
 
 	return (
-		<div className="space-y-3">
-			<div>
-				<h2 className="text-sm font-medium">Recent runs</h2>
-				<p className="text-xs text-muted-foreground">
-					Latest generations across Shloka and Model Studio
+		<div className="flex min-h-0 flex-col gap-2">
+			<SidebarMenu>
+				<SidebarMenuItem>
+					<SidebarMenuButton
+						tooltip="New run"
+						render={<Link to={to} search={clearRunSearch} replace />}
+					>
+						<Plus />
+						<span>New run</span>
+					</SidebarMenuButton>
+				</SidebarMenuItem>
+			</SidebarMenu>
+
+			{filteredRuns === undefined ? (
+				<p className="px-2 text-sm text-muted-foreground">Loading history…</p>
+			) : filteredRuns.length === 0 ? (
+				<p className="px-2 text-sm text-muted-foreground">
+					{provenance === "shloka"
+						? "No Shloka runs yet."
+						: provenance === "model-studio"
+							? "No Model Studio runs yet."
+							: "No runs yet."}
 				</p>
-			</div>
-			<div className="space-y-2">
-				{runs === undefined ? (
-					<p className="text-sm text-muted-foreground">Loading history…</p>
-				) : runs.length === 0 ? (
-					<p className="text-sm text-muted-foreground">No runs yet.</p>
-				) : (
-					runs.map((run: HistoryRun) => (
-						<div
-							key={run._id}
-							className={cn(
-								"flex items-stretch gap-0.5 overflow-hidden rounded-lg border transition-colors duration-200",
-								selectedRunId === run._id
-									? "border-primary/50 bg-muted/50"
-									: "border-border/80 bg-card",
-							)}
-						>
-							<button
-								type="button"
-								onClick={() => onSelect(run._id)}
-								className="min-h-11 min-w-0 flex-1 px-3 py-3 text-left hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-							>
-								<div className="flex items-center gap-2">
+			) : (
+				<SidebarMenu className="gap-1">
+					{filteredRuns.map((run) => {
+						const title =
+							run.provenance === "shloka"
+								? run.shlokaText?.slice(0, 48) || "Shloka run"
+								: run.selectedModelId || "Model studio";
+						const meta = [
+							formatDistanceToNow(run.createdAt, { addSuffix: true }),
+							run.videos?.length
+								? `${run.videos.length} video${run.videos.length === 1 ? "" : "s"}`
+								: null,
+						]
+							.filter(Boolean)
+							.join(" · ");
+
+						return (
+							<SidebarMenuItem key={run._id}>
+								<SidebarMenuButton
+									isActive={selectedRunId === run._id}
+									className="h-auto items-start py-2"
+									render={
+										<Link
+											to={to}
+											search={(prev) => ({
+												...prev,
+												run: run._id,
+											})}
+										/>
+									}
+								>
 									<span
 										className={cn(
-											"size-2 shrink-0 rounded-full",
+											"mt-1.5 size-2 shrink-0 rounded-full",
 											statusDotClass(run.status),
 										)}
 										title={run.status.replaceAll("_", " ")}
 										aria-label={run.status.replaceAll("_", " ")}
 									/>
-									<span className="truncate text-sm font-medium">
-										{run.provenance === "shloka"
-											? run.shlokaText?.slice(0, 42) || "Shloka run"
-											: run.selectedModelId || "Model studio"}
+									<span className="flex min-w-0 flex-1 flex-col gap-0.5 text-left">
+										<span className="truncate font-medium">{title}</span>
+										<span className="truncate text-xs text-muted-foreground">
+											{meta}
+										</span>
 									</span>
-								</div>
-								<p className="mt-1 truncate pl-4 text-xs text-muted-foreground">
-									{formatDistanceToNow(run.createdAt, { addSuffix: true })}
-									{run.videos?.length
-										? ` · ${run.videos.length} video${run.videos.length === 1 ? "" : "s"}`
-										: ""}
-								</p>
-							</button>
-							<div className="flex shrink-0 items-start pt-1.5 pr-1">
+								</SidebarMenuButton>
 								<DropdownMenu>
 									<DropdownMenuTrigger
 										render={
-											<Button
-												type="button"
-												variant="ghost"
-												size="icon-sm"
-												className="size-9 shrink-0 text-muted-foreground hover:text-foreground"
+											<SidebarMenuAction
+												showOnHover
 												aria-label="Run actions"
 												onClick={(event) => event.stopPropagation()}
 											/>
 										}
 									>
-										<MoreHorizontal className="size-4" />
+										<MoreHorizontal />
 									</DropdownMenuTrigger>
 									<DropdownMenuContent align="end" className="min-w-40">
 										<DropdownMenuItem
@@ -137,16 +176,16 @@ export function HistoryPanel({
 											className="gap-2"
 											onClick={() => setPendingDeleteId(run._id)}
 										>
-											<Trash2 className="size-4" />
+											<Trash2 />
 											Delete run
 										</DropdownMenuItem>
 									</DropdownMenuContent>
 								</DropdownMenu>
-							</div>
-						</div>
-					))
-				)}
-			</div>
+							</SidebarMenuItem>
+						);
+					})}
+				</SidebarMenu>
+			)}
 
 			<AlertDialog
 				open={pendingDeleteId != null}
