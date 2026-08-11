@@ -3,12 +3,11 @@ import { useAction, useMutation, useQuery } from "convex/react";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
-import { GenerationStatus } from "#/components/studio/generation-status";
+import { GenerationProgressDock } from "#/components/studio/generation-progress-dock";
 import { HistoryPanel } from "#/components/studio/history-panel";
 import { ReferenceImagePanel } from "#/components/studio/reference-image-panel";
 import { ShlokaComposer } from "#/components/studio/shloka-composer";
 import { ShlokaPlanPreview } from "#/components/studio/shloka-plan-preview";
-import { StudioErrorAlert } from "#/components/studio/studio-error-alert";
 import { StudioShell } from "#/components/studio/studio-shell";
 import {
 	VideoConfiguration,
@@ -31,6 +30,7 @@ import {
 	studioRunSearchSchema,
 	type StudioRunSearch,
 } from "#/lib/studio-run-search";
+import type { StudioBusyStage } from "#/lib/studio-run-status";
 import { notifyStudioError, notifyStudioSuccess } from "#/lib/studio-toast";
 import { uploadReferenceImage } from "#/lib/upload-reference-image";
 
@@ -66,7 +66,7 @@ function ShlokaStudioPage() {
 	const [videoConfig, setVideoConfig] = useState<VideoConfigState>(
 		defaultVideoParams("google/veo-3.1-lite"),
 	);
-	const [busyStage, setBusyStage] = useState<string | null>(null);
+	const [busyStage, setBusyStage] = useState<StudioBusyStage>(null);
 
 	const run = useQuery(api.studio.getRun, runId ? { runId } : "skip");
 	const catalog = useQuery(api.studio.getCachedOpenRouterCatalog);
@@ -284,10 +284,6 @@ function ShlokaStudioPage() {
 					</p>
 				</section>
 
-				{run ? (
-					<GenerationStatus status={run.status} warnings={run.warnings} />
-				) : null}
-
 				<ShlokaComposer
 					shlokaText={shlokaText}
 					customInstructions={customInstructions}
@@ -317,10 +313,6 @@ function ShlokaStudioPage() {
 							plannerReasoning={run?.plannerReasoning}
 							onRegenerate={() => planRun({ runId: runId!, force: true })}
 							regenerating={busyStage === "planning"}
-						/>
-						<StudioErrorAlert
-							error={run?.lastError}
-							title="Error (image / plan)"
 						/>
 						<ReferenceImagePanel
 							imageSize={imageSize}
@@ -383,10 +375,6 @@ function ShlokaStudioPage() {
 								}}
 							/>
 						</div>
-						<StudioErrorAlert
-							error={run?.lastError}
-							title="Error (video generation)"
-						/>
 						<VideoConfiguration
 							value={videoConfig}
 							onChange={setVideoConfig}
@@ -398,7 +386,7 @@ function ShlokaStudioPage() {
 							onClick={onGenerateVideo}
 						>
 							{busyStage === "video"
-								? "Generating video (OpenRouter poll)…"
+								? "Generating video…"
 								: "Generate video (append)"}
 						</Button>
 					</div>
@@ -406,6 +394,16 @@ function ShlokaStudioPage() {
 
 				<VideoResult videos={videos} />
 			</div>
+			<GenerationProgressDock
+				status={run?.status}
+				busyStage={busyStage}
+				warnings={run?.warnings}
+				contextLabel={
+					busyStage === "video" || run?.status === "video_generating"
+						? videoConfig.modelId
+						: shlokaText.slice(0, 40) || null
+				}
+			/>
 		</StudioShell>
 	);
 }

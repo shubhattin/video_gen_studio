@@ -4,6 +4,7 @@ import {
 	handleTypingBeforeInputEvent,
 } from "lipilekhika/typing";
 import { useEffect, useRef, useState } from "react";
+import { MessageResponse } from "#/components/ai-elements/message";
 import { Button } from "#/components/ui/button";
 import { Label } from "#/components/ui/label";
 import {
@@ -15,6 +16,7 @@ import {
 	PopoverTrigger,
 } from "#/components/ui/popover";
 import { Switch } from "#/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs";
 import { Textarea } from "#/components/ui/textarea";
 import {
 	DEFAULT_PLANNER_SYSTEM_PROMPT,
@@ -42,6 +44,7 @@ export function ShlokaComposer({
 	disabled,
 }: ShlokaComposerProps) {
 	const [lipiEnabled, setLipiEnabled] = useState(true);
+	const [promptTab, setPromptTab] = useState<"view" | "edit">("view");
 	const typingContextRef = useRef(
 		createTypingContext("Devanagari", { useNativeNumerals: true }),
 	);
@@ -68,7 +71,13 @@ export function ShlokaComposer({
 								: " Using built-in default."}
 						</p>
 					</div>
-					<Popover>
+					<Popover
+						onOpenChange={(open) => {
+							if (open) {
+								setPromptTab("view");
+							}
+						}}
+					>
 						<PopoverTrigger
 							render={
 								<Button
@@ -79,7 +88,7 @@ export function ShlokaComposer({
 								/>
 							}
 						>
-							{isCustomSystemPrompt ? "Edit custom" : "Edit default"}
+							{isCustomSystemPrompt ? "View custom" : "View default"}
 						</PopoverTrigger>
 						<PopoverContent
 							align="end"
@@ -93,31 +102,58 @@ export function ShlokaComposer({
 									text.
 								</PopoverDescription>
 							</PopoverHeader>
-							<Textarea
-								value={plannerSystemPrompt}
-								onChange={(event) =>
-									onPlannerSystemPromptChange(event.target.value)
-								}
-								className="min-h-64 max-h-[50vh] resize-y font-mono text-xs leading-relaxed"
-								disabled={disabled}
-								aria-label="Planner system prompt"
-							/>
-							<div className="flex justify-end">
-								<Button
-									type="button"
-									variant="ghost"
-									size="sm"
-									disabled={
-										disabled ||
-										plannerSystemPrompt === DEFAULT_PLANNER_SYSTEM_PROMPT
+							<Tabs
+								value={promptTab}
+								onValueChange={(value) => {
+									if (value === "view" || value === "edit") {
+										setPromptTab(value);
 									}
-									onClick={() =>
-										onPlannerSystemPromptChange(DEFAULT_PLANNER_SYSTEM_PROMPT)
-									}
-								>
-									Reset to default
-								</Button>
-							</div>
+								}}
+								className="gap-3"
+							>
+								<TabsList>
+									<TabsTrigger value="view">View</TabsTrigger>
+									<TabsTrigger value="edit" disabled={disabled}>
+										Edit
+									</TabsTrigger>
+								</TabsList>
+								<TabsContent value="view" className="mt-0">
+									<div className="max-h-[50vh] overflow-y-auto rounded-lg border border-border/80 bg-muted/20 p-4">
+										<MessageResponse className="text-sm leading-relaxed [&_strong]:font-semibold [&_em]:italic [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-xs [&_h2]:mt-4 [&_h2]:mb-2 [&_h2]:font-heading [&_h2]:text-base [&_h2]:font-semibold [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_li]:my-1 [&_p]:my-2 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+											{plannerSystemPrompt}
+										</MessageResponse>
+									</div>
+								</TabsContent>
+								<TabsContent value="edit" className="mt-0 space-y-3">
+									<Textarea
+										value={plannerSystemPrompt}
+										onChange={(event) =>
+											onPlannerSystemPromptChange(event.target.value)
+										}
+										className="min-h-64 max-h-[50vh] resize-y font-mono text-xs leading-relaxed"
+										disabled={disabled}
+										aria-label="Planner system prompt"
+									/>
+									<div className="flex justify-end">
+										<Button
+											type="button"
+											variant="ghost"
+											size="sm"
+											disabled={
+												disabled ||
+												plannerSystemPrompt === DEFAULT_PLANNER_SYSTEM_PROMPT
+											}
+											onClick={() =>
+												onPlannerSystemPromptChange(
+													DEFAULT_PLANNER_SYSTEM_PROMPT,
+												)
+											}
+										>
+											Reset to default
+										</Button>
+									</div>
+								</TabsContent>
+							</Tabs>
 						</PopoverContent>
 					</Popover>
 				</div>

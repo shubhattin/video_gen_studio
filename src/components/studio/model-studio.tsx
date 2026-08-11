@@ -2,9 +2,8 @@ import { useAction, useMutation, useQuery } from "convex/react";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
-import { GenerationStatus } from "#/components/studio/generation-status";
+import { GenerationProgressDock } from "#/components/studio/generation-progress-dock";
 import { ReferenceImagePanel } from "#/components/studio/reference-image-panel";
-import { StudioErrorAlert } from "#/components/studio/studio-error-alert";
 import { VideoModelSelector } from "#/components/studio/video-model-selector";
 import {
 	VideoConfiguration,
@@ -18,6 +17,7 @@ import {
 	isVideoModelId,
 	type VideoModelId,
 } from "#/lib/model-catalog";
+import type { StudioBusyStage } from "#/lib/studio-run-status";
 import { notifyStudioError, notifyStudioSuccess } from "#/lib/studio-toast";
 import { uploadReferenceImage } from "#/lib/upload-reference-image";
 
@@ -51,8 +51,7 @@ export function ModelStudio({
 	}));
 	const [imageSize, setImageSize] = useState("1024x1536");
 	const [imageQuality, setImageQuality] = useState("low");
-	const [busy, setBusy] = useState(false);
-	const [uploading, setUploading] = useState(false);
+	const [busyStage, setBusyStage] = useState<StudioBusyStage>(null);
 	const [refreshingCatalog, setRefreshingCatalog] = useState(false);
 
 	const activeRunId = controlledRunId;
@@ -143,7 +142,7 @@ export function ModelStudio({
 	};
 
 	const startVideo = async () => {
-		setBusy(true);
+		setBusyStage("video");
 		try {
 			const runId = await ensureDraft();
 			await generateVideo({ runId });
@@ -151,12 +150,12 @@ export function ModelStudio({
 		} catch (error) {
 			notifyStudioError("Video generation failed", error);
 		} finally {
-			setBusy(false);
+			setBusyStage(null);
 		}
 	};
 
 	const onGenerateImage = async () => {
-		setBusy(true);
+		setBusyStage("image");
 		try {
 			const runId = await ensureDraft();
 			await generateImage({ runId });
@@ -164,12 +163,12 @@ export function ModelStudio({
 		} catch (error) {
 			notifyStudioError("Image generation failed", error);
 		} finally {
-			setBusy(false);
+			setBusyStage(null);
 		}
 	};
 
 	const onUploadImage = async (file: File) => {
-		setUploading(true);
+		setBusyStage("upload");
 		try {
 			const runId = await ensureDraft();
 			await uploadReferenceImage({
@@ -182,13 +181,14 @@ export function ModelStudio({
 		} catch (error) {
 			notifyStudioError("Image upload failed", error);
 		} finally {
-			setUploading(false);
+			setBusyStage(null);
 		}
 	};
 
 	const images = run?.referenceImages ?? [];
 	const videos = run?.videos ?? [];
 	const extraIds = run?.extraReferenceImageIds ?? [];
+	const isBusy = busyStage !== null;
 
 	return (
 		<div className="flex flex-col gap-8">
@@ -207,7 +207,7 @@ export function ModelStudio({
 							value={selectedModel}
 							gatewayPricingById={gatewayById}
 							pricingSkusById={pricingSkusById}
-							disabled={busy || uploading}
+							disabled={isBusy}
 							onValueChange={(modelId) => {
 								setSelectedModel(modelId);
 								setVideoConfig({
@@ -245,10 +245,6 @@ export function ModelStudio({
 				</div>
 			</section>
 
-			<StudioErrorAlert
-				error={run?.lastError}
-				title="Error (video prompt / generate)"
-			/>
 			<VideoConfiguration
 				value={{ ...videoConfig, modelId: selectedModel }}
 				onChange={(next) => {
@@ -258,13 +254,9 @@ export function ModelStudio({
 					setVideoConfig(next);
 				}}
 				showPrompt
-				disabled={busy || uploading}
+				disabled={isBusy}
 			/>
 
-			<StudioErrorAlert
-				error={run?.lastError}
-				title="Error (reference image)"
-			/>
 			<ReferenceImagePanel
 				imageSize={imageSize}
 				imageQuality={imageQuality}
@@ -272,8 +264,8 @@ export function ModelStudio({
 				onQualityChange={setImageQuality}
 				onGenerate={onGenerateImage}
 				onUpload={onUploadImage}
-				generating={busy}
-				uploading={uploading}
+				generating={busyStage === "image"}
+				uploading={busyStage === "upload"}
 				images={images}
 				firstFrameImageId={run?.firstFrameImageId}
 				lastFrameImageId={run?.lastFrameImageId}
@@ -281,7 +273,7 @@ export function ModelStudio({
 				supportsLastFrame={profile.supportsLastFrame}
 				supportsInputReferences={profile.supportsInputReferences}
 				maxInputReferences={profile.maxInputReferences}
-				disabled={busy || uploading}
+				disabled={isBusy}
 				onSelectFirstFrame={async (id) => {
 					const runId = await ensureDraft();
 					await updateDraft({ runId, firstFrameImageId: id });
@@ -306,19 +298,21 @@ export function ModelStudio({
 			<div className="flex flex-wrap gap-3">
 				<Button
 					className="min-h-11"
-					disabled={busy || uploading}
+					disabled={isBusy}
 					onClick={startVideo}
 				>
-					{busy ? "Working…" : "Generate video (append)"}
+					{busyStage === "video" ? "Generating video…" : "Generate video (append)"}
 				</Button>
 			</div>
 
-			{run ? (
-				<>
-					<GenerationStatus status={run.status} warnings={run.warnings} />
-					<VideoResult videos={videos} />
-				</>
-			) : null}
+			{run ? <VideoResult videos={videos} /> : null}
+
+			<GenerationProgressDock
+				status={run?.status}
+				busyStage={busyStage}
+				warnings={run?.warnings}
+				contextLabel={selectedModel}
+			/>
 		</div>
 	);
 }

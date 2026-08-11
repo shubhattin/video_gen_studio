@@ -28,6 +28,11 @@ import {
 	SidebarMenuButton,
 	SidebarMenuItem,
 } from "#/components/ui/sidebar";
+import {
+	isActiveRunStatus,
+	runStatusPillClass,
+	runStatusPillLabel,
+} from "#/lib/studio-run-status";
 import { cn } from "#/lib/utils";
 
 type HistoryRun = {
@@ -98,6 +103,7 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 						]
 							.filter(Boolean)
 							.join(" · ");
+						const active = isActiveRunStatus(run.status);
 
 						return (
 							<SidebarMenuItem key={run._id}>
@@ -114,15 +120,7 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 										/>
 									}
 								>
-									<span
-										className={cn(
-											"mt-1.5 size-2 shrink-0 rounded-full",
-											statusDotClass(run.status),
-										)}
-										title={run.status.replaceAll("_", " ")}
-										aria-label={run.status.replaceAll("_", " ")}
-									/>
-									<span className="flex min-w-0 flex-1 flex-col gap-1 text-left">
+									<span className="flex min-w-0 flex-1 flex-col gap-1.5 text-left">
 										<span className="flex min-w-0 items-center gap-1.5">
 											<Badge
 												variant="outline"
@@ -135,8 +133,20 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 												)}
 												{shloka ? "Shloka" : "Model"}
 											</Badge>
-											<span className="truncate font-medium">{title}</span>
+											<span
+												className={cn(
+													"inline-flex h-5 shrink-0 items-center gap-1 rounded-full border px-1.5 text-[10px] font-medium",
+													runStatusPillClass(run.status),
+												)}
+												title={run.status.replaceAll("_", " ")}
+											>
+												{active ? (
+													<span className="size-1.5 animate-pulse rounded-full bg-current" />
+												) : null}
+												{runStatusPillLabel(run.status)}
+											</span>
 										</span>
+										<span className="truncate text-sm font-medium">{title}</span>
 										<span className="truncate text-xs text-muted-foreground">
 											{meta}
 										</span>
@@ -201,21 +211,4 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 			</AlertDialog>
 		</div>
 	);
-}
-
-function statusDotClass(status: string) {
-	if (status === "completed") {
-		return "bg-emerald-500";
-	}
-	if (status === "failed") {
-		return "bg-destructive";
-	}
-	if (
-		status === "planning" ||
-		status === "image_generating" ||
-		status === "video_generating"
-	) {
-		return "bg-amber-500";
-	}
-	return "bg-muted-foreground/50";
 }
