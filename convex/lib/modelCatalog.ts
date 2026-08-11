@@ -1,8 +1,13 @@
 export const VIDEO_MODEL_IDS = [
+	"alibaba/wan-2.6",
 	"alibaba/wan-2.7",
 	"bytedance/seedance-2.0",
+	"bytedance/seedance-2.0-fast",
+	"bytedance/seedance-2.5",
 	"google/veo-3.1",
+	"google/veo-3.1-fast",
 	"google/veo-3.1-lite",
+	"kwaivgi/kling-v3.0-pro",
 	"kwaivgi/kling-v3.0-std",
 	"openai/sora-2-pro",
 	"runway/gen-4.5",
@@ -11,6 +16,28 @@ export const VIDEO_MODEL_IDS = [
 ] as const;
 
 export type VideoModelId = (typeof VIDEO_MODEL_IDS)[number];
+
+export type VideoModelFamily =
+	| "google"
+	| "bytedance"
+	| "kling"
+	| "alibaba"
+	| "xai"
+	| "openai"
+	| "runway";
+
+export const VIDEO_MODEL_FAMILY_META: Record<
+	VideoModelFamily,
+	{ label: string; order: number }
+> = {
+	google: { label: "Google", order: 1 },
+	bytedance: { label: "ByteDance", order: 2 },
+	kling: { label: "Kling", order: 3 },
+	alibaba: { label: "Alibaba", order: 4 },
+	xai: { label: "xAI", order: 5 },
+	openai: { label: "OpenAI / Sora", order: 6 },
+	runway: { label: "Runway", order: 7 },
+};
 
 export const PLANNER_MODEL_ID = "openai/gpt-5.6-terra";
 export const REFERENCE_IMAGE_MODEL_ID = "gpt-image-2";
@@ -34,6 +61,7 @@ export interface ModelCapabilityProfile {
 	id: VideoModelId;
 	displayName: string;
 	description: string;
+	family: VideoModelFamily;
 	requiresFirstFrame: boolean;
 	supportsTextToVideo: boolean;
 	supportsFirstFrame: boolean;
@@ -57,6 +85,12 @@ export interface ModelCapabilityProfile {
 	fallbackEstimateUsdPerSecondWithAudio?: number;
 }
 
+function range(from: number, to: number): number[] {
+	const out: number[] = [];
+	for (let n = from; n <= to; n += 1) out.push(n);
+	return out;
+}
+
 export const MODEL_CAPABILITY_PROFILES: Record<
 	VideoModelId,
 	ModelCapabilityProfile
@@ -65,6 +99,7 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 		id: "google/veo-3.1-lite",
 		displayName: "Veo 3.1 Lite",
 		description: "Faster/cheaper Veo 3.1 variant for draft shorts.",
+		family: "google",
 		requiresFirstFrame: false,
 		supportsTextToVideo: true,
 		supportsFirstFrame: true,
@@ -88,11 +123,43 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 		fallbackEstimateUsdPerSecond: 0.05,
 		fallbackEstimateUsdPerSecondWithAudio: 0.08,
 	},
+	"google/veo-3.1-fast": {
+		id: "google/veo-3.1-fast",
+		displayName: "Veo 3.1 Fast",
+		description:
+			"Google Veo 3.1 Fast — quicker cinematic generation with optional audio.",
+		family: "google",
+		requiresFirstFrame: false,
+		supportsTextToVideo: true,
+		supportsFirstFrame: true,
+		supportsLastFrame: true,
+		supportsInputReferences: false,
+		maxInputReferences: 0,
+		aspectRatios: ["16:9", "9:16"],
+		resolutions: ["720p", "1080p", "4K"],
+		supportedDurations: [4, 6, 8],
+		supportsAudio: true,
+		supportsSeed: true,
+		supportsNegativePrompt: true,
+		passthroughParams: [
+			"personGeneration",
+			"aspectRatio",
+			"negativePrompt",
+			"conditioningScale",
+			"enhancePrompt",
+		],
+		maxPromptChars: 4000,
+		pricingNotes:
+			"~$0.08–0.10/s silent · ~$0.10–0.12/s with audio (higher at 4K).",
+		fallbackEstimateUsdPerSecond: 0.1,
+		fallbackEstimateUsdPerSecondWithAudio: 0.12,
+	},
 	"x-ai/grok-imagine-video": {
 		id: "x-ai/grok-imagine-video",
 		displayName: "Grok Imagine Video",
 		description:
 			"xAI Grok Imagine Video — fast text/image/reference video (1–15s, 480p/720p).",
+		family: "xai",
 		requiresFirstFrame: false,
 		supportsTextToVideo: true,
 		supportsFirstFrame: true,
@@ -101,7 +168,7 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 		maxInputReferences: 7,
 		aspectRatios: ["16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3"],
 		resolutions: ["480p", "720p"],
-		supportedDurations: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+		supportedDurations: range(1, 15),
 		supportsAudio: false,
 		supportsSeed: false,
 		supportsNegativePrompt: false,
@@ -110,11 +177,35 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 		pricingNotes: "~$0.05/s at 480p · ~$0.07/s at 720p (OpenRouter).",
 		fallbackEstimateUsdPerSecond: 0.05,
 	},
+	"bytedance/seedance-2.0-fast": {
+		id: "bytedance/seedance-2.0-fast",
+		displayName: "Seedance 2.0 Fast",
+		description:
+			"ByteDance Seedance 2.0 Fast — cheaper/faster Seedance for drafts.",
+		family: "bytedance",
+		requiresFirstFrame: false,
+		supportsTextToVideo: true,
+		supportsFirstFrame: true,
+		supportsLastFrame: true,
+		supportsInputReferences: true,
+		maxInputReferences: 4,
+		aspectRatios: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "9:21"],
+		resolutions: ["480p", "720p"],
+		supportedDurations: range(4, 15),
+		supportsAudio: true,
+		supportsSeed: true,
+		supportsNegativePrompt: false,
+		passthroughParams: ["watermark"],
+		maxPromptChars: 4000,
+		pricingNotes: "~$0.04/s (token-based OpenRouter pricing).",
+		fallbackEstimateUsdPerSecond: 0.04035,
+	},
 	"bytedance/seedance-2.0": {
 		id: "bytedance/seedance-2.0",
 		displayName: "Seedance 2.0",
 		description:
 			"ByteDance Seedance 2.0 — character consistency and multi-reference guidance.",
+		family: "bytedance",
 		requiresFirstFrame: false,
 		supportsTextToVideo: true,
 		supportsFirstFrame: true,
@@ -123,7 +214,7 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 		maxInputReferences: 4,
 		aspectRatios: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "9:21"],
 		resolutions: ["480p", "720p", "1080p", "4K"],
-		supportedDurations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+		supportedDurations: range(4, 15),
 		supportsAudio: true,
 		supportsSeed: true,
 		supportsNegativePrompt: false,
@@ -132,10 +223,34 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 		pricingNotes: "Token-based OpenRouter pricing (~$0.07+/s depending on size).",
 		fallbackEstimateUsdPerSecond: 0.07,
 	},
+	"bytedance/seedance-2.5": {
+		id: "bytedance/seedance-2.5",
+		displayName: "Seedance 2.5",
+		description:
+			"ByteDance Seedance 2.5 — longer clips (up to 30s) with strong consistency.",
+		family: "bytedance",
+		requiresFirstFrame: false,
+		supportsTextToVideo: true,
+		supportsFirstFrame: true,
+		supportsLastFrame: true,
+		supportsInputReferences: true,
+		maxInputReferences: 4,
+		aspectRatios: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"],
+		resolutions: ["480p", "720p"],
+		supportedDurations: range(4, 30),
+		supportsAudio: true,
+		supportsSeed: true,
+		supportsNegativePrompt: false,
+		passthroughParams: ["watermark", "output_format"],
+		maxPromptChars: 4000,
+		pricingNotes: "~$0.103/s (token-based OpenRouter pricing).",
+		fallbackEstimateUsdPerSecond: 0.1028,
+	},
 	"kwaivgi/kling-v3.0-std": {
 		id: "kwaivgi/kling-v3.0-std",
 		displayName: "Kling v3.0 Std",
 		description: "Kuaishou Kling v3.0 standard — 720p with optional audio.",
+		family: "kling",
 		requiresFirstFrame: false,
 		supportsTextToVideo: true,
 		supportsFirstFrame: true,
@@ -144,7 +259,7 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 		maxInputReferences: 0,
 		aspectRatios: ["16:9", "9:16", "1:1"],
 		resolutions: ["720p"],
-		supportedDurations: [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+		supportedDurations: range(3, 15),
 		supportsAudio: true,
 		supportsSeed: false,
 		supportsNegativePrompt: true,
@@ -154,11 +269,36 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 		fallbackEstimateUsdPerSecond: 0.084,
 		fallbackEstimateUsdPerSecondWithAudio: 0.126,
 	},
+	"kwaivgi/kling-v3.0-pro": {
+		id: "kwaivgi/kling-v3.0-pro",
+		displayName: "Kling v3.0 Pro",
+		description:
+			"Kuaishou Kling v3.0 Pro — higher-quality 720p video with optional audio.",
+		family: "kling",
+		requiresFirstFrame: false,
+		supportsTextToVideo: true,
+		supportsFirstFrame: true,
+		supportsLastFrame: true,
+		supportsInputReferences: false,
+		maxInputReferences: 0,
+		aspectRatios: ["16:9", "9:16", "1:1"],
+		resolutions: ["720p"],
+		supportedDurations: range(3, 15),
+		supportsAudio: true,
+		supportsSeed: false,
+		supportsNegativePrompt: true,
+		passthroughParams: ["negative_prompt", "cfg_scale"],
+		maxPromptChars: 2500,
+		pricingNotes: "$0.112/s video · $0.168/s with audio.",
+		fallbackEstimateUsdPerSecond: 0.112,
+		fallbackEstimateUsdPerSecondWithAudio: 0.168,
+	},
 	"x-ai/grok-imagine-video-1.5": {
 		id: "x-ai/grok-imagine-video-1.5",
 		displayName: "Grok Imagine Video 1.5",
 		description:
 			"xAI Grok Imagine Video 1.5 — stronger motion/physics, up to 1080p.",
+		family: "xai",
 		requiresFirstFrame: false,
 		supportsTextToVideo: true,
 		supportsFirstFrame: true,
@@ -167,7 +307,7 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 		maxInputReferences: 2,
 		aspectRatios: ["16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3"],
 		resolutions: ["480p", "720p", "1080p"],
-		supportedDurations: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+		supportedDurations: range(1, 15),
 		supportsAudio: false,
 		supportsSeed: false,
 		supportsNegativePrompt: false,
@@ -176,11 +316,43 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 		pricingNotes: "~$0.08/s at 480p · ~$0.14/s at 720p · ~$0.25/s at 1080p.",
 		fallbackEstimateUsdPerSecond: 0.08,
 	},
+	"alibaba/wan-2.6": {
+		id: "alibaba/wan-2.6",
+		displayName: "Wan 2.6",
+		description:
+			"Alibaba Wan 2.6 — text/image-to-video (OpenRouter; Wan 2.5 is not listed).",
+		family: "alibaba",
+		requiresFirstFrame: false,
+		supportsTextToVideo: true,
+		supportsFirstFrame: true,
+		supportsLastFrame: false,
+		supportsInputReferences: false,
+		maxInputReferences: 0,
+		aspectRatios: ["16:9", "9:16"],
+		resolutions: ["720p", "1080p"],
+		supportedDurations: [5, 10],
+		supportsAudio: true,
+		supportsSeed: true,
+		supportsNegativePrompt: true,
+		passthroughParams: [
+			"negative_prompt",
+			"enable_prompt_expansion",
+			"shot_type",
+			"audio",
+			"size",
+		],
+		maxPromptChars: 4000,
+		pricingNotes:
+			"~$0.04/s 480p text · ~$0.08/s 720p text · higher for image-to-video / 1080p.",
+		fallbackEstimateUsdPerSecond: 0.05,
+		fallbackEstimateUsdPerSecondWithAudio: 0.05,
+	},
 	"alibaba/wan-2.7": {
 		id: "alibaba/wan-2.7",
 		displayName: "Wan 2.7",
 		description:
 			"Alibaba Wan 2.7 — text/image-to-video with first/last frames and style refs.",
+		family: "alibaba",
 		requiresFirstFrame: false,
 		supportsTextToVideo: true,
 		supportsFirstFrame: true,
@@ -189,7 +361,7 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 		maxInputReferences: 4,
 		aspectRatios: ["16:9", "9:16", "1:1", "4:3", "3:4"],
 		resolutions: ["720p", "1080p"],
-		supportedDurations: [2, 3, 4, 5, 6, 7, 8, 9, 10],
+		supportedDurations: range(2, 10),
 		supportsAudio: true,
 		supportsSeed: true,
 		supportsNegativePrompt: true,
@@ -204,6 +376,7 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 		displayName: "Veo 3.1",
 		description:
 			"Google Veo 3.1 — cinematic text/image-to-video with optional audio.",
+		family: "google",
 		requiresFirstFrame: false,
 		supportsTextToVideo: true,
 		supportsFirstFrame: true,
@@ -232,6 +405,7 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 		displayName: "Sora 2 Pro",
 		description:
 			"OpenAI Sora 2 Pro — production-quality text-to-video with synced audio (OpenRouter).",
+		family: "openai",
 		requiresFirstFrame: false,
 		supportsTextToVideo: true,
 		supportsFirstFrame: false,
@@ -255,6 +429,7 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 		displayName: "Gen-4.5",
 		description:
 			"Runway Gen-4.5 — cinematic text/image-to-video with strong motion and prompt adherence.",
+		family: "runway",
 		requiresFirstFrame: false,
 		supportsTextToVideo: true,
 		supportsFirstFrame: true,
@@ -263,7 +438,7 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 		maxInputReferences: 0,
 		aspectRatios: ["16:9", "9:16"],
 		resolutions: ["720p"],
-		supportedDurations: [2, 3, 4, 5, 6, 7, 8, 9, 10],
+		supportedDurations: range(2, 10),
 		supportsAudio: false,
 		supportsSeed: true,
 		supportsNegativePrompt: false,
@@ -290,6 +465,10 @@ export const OPENROUTER_TERRA_ESTIMATE = {
 
 export function isVideoModelId(value: string): value is VideoModelId {
 	return (VIDEO_MODEL_IDS as readonly string[]).includes(value);
+}
+
+export function familyForVideoModel(modelId: VideoModelId): VideoModelFamily {
+	return MODEL_CAPABILITY_PROFILES[modelId].family;
 }
 
 /**
@@ -367,4 +546,46 @@ export function sortVideoModelsByPrice(
 			MODEL_CAPABILITY_PROFILES[b].displayName,
 		);
 	});
+}
+
+/** Group models by family; within each family sort cheapest-first. Families ordered by cheapest member. */
+export function groupVideoModelsByFamily(
+	modelIds: readonly VideoModelId[] = VIDEO_MODEL_IDS,
+	pricingByModelId?: Partial<
+		Record<string, Record<string, string> | null | undefined>
+	>,
+): Array<{ family: VideoModelFamily; label: string; modelIds: VideoModelId[] }> {
+	const byFamily = new Map<VideoModelFamily, VideoModelId[]>();
+	for (const id of modelIds) {
+		const family = familyForVideoModel(id);
+		const list = byFamily.get(family) ?? [];
+		list.push(id);
+		byFamily.set(family, list);
+	}
+
+	const groups = [...byFamily.entries()].map(([family, ids]) => {
+		const sorted = sortVideoModelsByPrice(ids, pricingByModelId);
+		const cheapest = resolveVideoModelSortPrice(
+			sorted[0]!,
+			pricingByModelId?.[sorted[0]!],
+		);
+		return {
+			family,
+			label: VIDEO_MODEL_FAMILY_META[family].label,
+			modelIds: sorted,
+			cheapest,
+			order: VIDEO_MODEL_FAMILY_META[family].order,
+		};
+	});
+
+	groups.sort((a, b) => {
+		if (a.cheapest !== b.cheapest) return a.cheapest - b.cheapest;
+		return a.order - b.order;
+	});
+
+	return groups.map(({ family, label, modelIds: ids }) => ({
+		family,
+		label,
+		modelIds: ids,
+	}));
 }

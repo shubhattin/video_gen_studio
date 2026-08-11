@@ -56,9 +56,6 @@ export function StudioShell({
 									Devotional shorts workspace
 								</span>
 							</div>
-							<div className="group-data-[collapsible=icon]:hidden">
-								<ThemeToggle />
-							</div>
 						</div>
 
 						<SidebarGroup className="p-0">
@@ -101,11 +98,8 @@ export function StudioShell({
 						</SidebarGroup>
 					</SidebarContent>
 
-					<SidebarFooter className="group-data-[collapsible=icon]:hidden">
-						<p className="px-2 text-xs text-sidebar-foreground/60">
-							All runs in one list. Mode buttons start a new run; pick a history
-							item to resume.
-						</p>
+					<SidebarFooter className="flex flex-row items-center justify-end gap-1 px-2 py-2 group-data-[collapsible=icon]:justify-center">
+						<ThemeToggle compact />
 					</SidebarFooter>
 					<SidebarRail />
 				</Sidebar>

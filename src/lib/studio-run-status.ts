@@ -1,9 +1,4 @@
-export type StudioBusyStage =
-	| "planning"
-	| "image"
-	| "upload"
-	| "video"
-	| null;
+export type StudioBusyStage = "planning" | "image" | "upload" | "video" | null;
 
 export type StudioRunStatus =
 	| "draft"
@@ -186,7 +181,11 @@ export function pipelineProgress(args: {
 	if (status === "plan_ready") {
 		return { value: 34, stepIndex: 0 };
 	}
-	if (busyStage === "image" || busyStage === "upload" || status === "image_generating") {
+	if (
+		busyStage === "image" ||
+		busyStage === "upload" ||
+		status === "image_generating"
+	) {
 		return { value: 52, stepIndex: 1 };
 	}
 	if (status === "image_ready") {

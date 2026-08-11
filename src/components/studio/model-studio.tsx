@@ -296,12 +296,10 @@ export function ModelStudio({
 			/>
 
 			<div className="flex flex-wrap gap-3">
-				<Button
-					className="min-h-11"
-					disabled={isBusy}
-					onClick={startVideo}
-				>
-					{busyStage === "video" ? "Generating video…" : "Generate video (append)"}
+				<Button className="min-h-11" disabled={isBusy} onClick={startVideo}>
+					{busyStage === "video"
+						? "Generating video…"
+						: "Generate video (append)"}
 				</Button>
 			</div>
 

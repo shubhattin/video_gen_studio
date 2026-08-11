@@ -18,7 +18,7 @@ const options: Array<{
 	{ value: "dark", label: "Dark", icon: Moon },
 ];
 
-export function ThemeToggle() {
+export function ThemeToggle({ compact = false }: { compact?: boolean }) {
 	const { preference, setPreference } = useTheme();
 	const active =
 		options.find((option) => option.value === preference) ?? options[0];
@@ -27,9 +27,16 @@ export function ThemeToggle() {
 		<DropdownMenu>
 			<DropdownMenuTrigger
 				render={
-					<Button variant="outline" size="sm" className="min-h-11 gap-2">
+					<Button
+						variant="ghost"
+						size={compact ? "icon-sm" : "sm"}
+						className={compact ? undefined : "min-h-11 gap-2"}
+						aria-label={`Theme: ${active.label}`}
+					>
 						<active.icon className="size-4" />
-						<span className="hidden sm:inline">{active.label}</span>
+						{compact ? null : (
+							<span className="hidden sm:inline">{active.label}</span>
+						)}
 					</Button>
 				}
 			/>

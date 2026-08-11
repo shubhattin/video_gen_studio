@@ -146,7 +146,9 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 												{runStatusPillLabel(run.status)}
 											</span>
 										</span>
-										<span className="truncate text-sm font-medium">{title}</span>
+										<span className="truncate text-sm font-medium">
+											{title}
+										</span>
 										<span className="truncate text-xs text-muted-foreground">
 											{meta}
 										</span>
