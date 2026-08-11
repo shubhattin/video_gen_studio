@@ -4,29 +4,49 @@ import {
 	handleTypingBeforeInputEvent,
 } from "lipilekhika/typing";
 import { useEffect, useRef, useState } from "react";
+import { Button } from "#/components/ui/button";
 import { Label } from "#/components/ui/label";
+import {
+	Popover,
+	PopoverContent,
+	PopoverDescription,
+	PopoverHeader,
+	PopoverTitle,
+	PopoverTrigger,
+} from "#/components/ui/popover";
 import { Switch } from "#/components/ui/switch";
 import { Textarea } from "#/components/ui/textarea";
+import {
+	DEFAULT_PLANNER_SYSTEM_PROMPT,
+	normalizePlannerSystemPromptForStorage,
+} from "#/lib/planner-prompt";
 import { cn } from "#/lib/utils";
 
 type ShlokaComposerProps = {
 	shlokaText: string;
 	customInstructions: string;
+	plannerSystemPrompt: string;
 	onShlokaChange: (value: string) => void;
 	onInstructionsChange: (value: string) => void;
+	onPlannerSystemPromptChange: (value: string) => void;
 	disabled?: boolean;
 };
 
 export function ShlokaComposer({
 	shlokaText,
 	customInstructions,
+	plannerSystemPrompt,
 	onShlokaChange,
 	onInstructionsChange,
+	onPlannerSystemPromptChange,
 	disabled,
 }: ShlokaComposerProps) {
 	const [lipiEnabled, setLipiEnabled] = useState(true);
 	const typingContextRef = useRef(
 		createTypingContext("Devanagari", { useNativeNumerals: true }),
+	);
+	const isCustomSystemPrompt = Boolean(
+		normalizePlannerSystemPromptForStorage(plannerSystemPrompt),
 	);
 
 	useEffect(() => {
@@ -37,6 +57,72 @@ export function ShlokaComposer({
 
 	return (
 		<section className="space-y-6">
+			<div className="space-y-2">
+				<div className="flex flex-wrap items-center justify-between gap-2">
+					<div>
+						<p className="text-sm font-medium">System prompt</p>
+						<p className="text-sm text-muted-foreground">
+							Planner instructions for image + video plan generation.
+							{isCustomSystemPrompt
+								? " Customized."
+								: " Using built-in default."}
+						</p>
+					</div>
+					<Popover>
+						<PopoverTrigger
+							render={
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									disabled={disabled}
+								/>
+							}
+						>
+							{isCustomSystemPrompt ? "Edit custom" : "Edit default"}
+						</PopoverTrigger>
+						<PopoverContent
+							align="end"
+							className="w-[min(36rem,calc(100vw-2rem))] gap-3 p-4"
+						>
+							<PopoverHeader>
+								<PopoverTitle>Planner system prompt</PopoverTitle>
+								<PopoverDescription>
+									Only saved on the run when it differs from the built-in
+									default. Structured plan fields come from the schema, not this
+									text.
+								</PopoverDescription>
+							</PopoverHeader>
+							<Textarea
+								value={plannerSystemPrompt}
+								onChange={(event) =>
+									onPlannerSystemPromptChange(event.target.value)
+								}
+								className="min-h-64 max-h-[50vh] resize-y font-mono text-xs leading-relaxed"
+								disabled={disabled}
+								aria-label="Planner system prompt"
+							/>
+							<div className="flex justify-end">
+								<Button
+									type="button"
+									variant="ghost"
+									size="sm"
+									disabled={
+										disabled ||
+										plannerSystemPrompt === DEFAULT_PLANNER_SYSTEM_PROMPT
+									}
+									onClick={() =>
+										onPlannerSystemPromptChange(DEFAULT_PLANNER_SYSTEM_PROMPT)
+									}
+								>
+									Reset to default
+								</Button>
+							</div>
+						</PopoverContent>
+					</Popover>
+				</div>
+			</div>
+
 			<div className="space-y-2">
 				<div className="flex items-center justify-between gap-3">
 					<div>
@@ -78,7 +164,7 @@ export function ShlokaComposer({
 							typingContextRef.current,
 						)
 					}
-					placeholder="Type in Roman or paste Devanagari…"
+					placeholder="Enter or paste Devanagari shloka…"
 					className={cn("min-h-32 text-base leading-relaxed")}
 					disabled={disabled}
 					aria-required="true"

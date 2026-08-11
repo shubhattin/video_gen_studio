@@ -86,6 +86,8 @@ export default defineSchema({
 		parentRunId: v.optional(v.id("generationRuns")),
 		shlokaText: v.optional(v.string()),
 		customInstructions: v.optional(v.string()),
+		/** Custom planner system prompt; omit to use the built-in default. */
+		plannerSystemPrompt: v.optional(v.string()),
 		plannerModel: v.optional(v.string()),
 		plannerReasoning: v.optional(v.string()),
 		imagePrompt: v.optional(v.string()),

@@ -11,6 +11,7 @@
 import type * as http from "../http.js";
 import type * as lib_modelCatalog from "../lib/modelCatalog.js";
 import type * as lib_openrouterVideo from "../lib/openrouterVideo.js";
+import type * as lib_plannerPrompt from "../lib/plannerPrompt.js";
 import type * as lib_providers from "../lib/providers.js";
 import type * as lib_schemas from "../lib/schemas.js";
 import type * as lib_videoAdapters from "../lib/videoAdapters.js";
@@ -29,6 +30,7 @@ declare const fullApi: ApiFromModules<{
   http: typeof http;
   "lib/modelCatalog": typeof lib_modelCatalog;
   "lib/openrouterVideo": typeof lib_openrouterVideo;
+  "lib/plannerPrompt": typeof lib_plannerPrompt;
   "lib/providers": typeof lib_providers;
   "lib/schemas": typeof lib_schemas;
   "lib/videoAdapters": typeof lib_videoAdapters;

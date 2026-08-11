@@ -71,9 +71,7 @@ export function StudioShell({
 										<SidebarMenuButton
 											isActive={activePath === "/"}
 											tooltip="New Shloka run"
-											render={
-												<Link to="/" search={emptyStudioSearch} />
-											}
+											render={<Link to="/" search={emptyStudioSearch} />}
 										>
 											<Sparkles />
 											<span>Shloka Studio</span>
@@ -83,9 +81,7 @@ export function StudioShell({
 										<SidebarMenuButton
 											isActive={activePath === "/studio"}
 											tooltip="New Model Studio run"
-											render={
-												<Link to="/studio" search={emptyStudioSearch} />
-											}
+											render={<Link to="/studio" search={emptyStudioSearch} />}
 										>
 											<Clapperboard />
 											<span>Model Studio</span>

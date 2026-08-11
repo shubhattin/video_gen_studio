@@ -23,6 +23,11 @@ import {
 	type VideoModelId,
 } from "#/lib/model-catalog";
 import {
+	DEFAULT_PLANNER_SYSTEM_PROMPT,
+	normalizePlannerSystemPromptForStorage,
+	resolvePlannerSystemPrompt,
+} from "#/lib/planner-prompt";
+import {
 	studioRunSearchSchema,
 	type StudioRunSearch,
 } from "#/lib/studio-run-search";
@@ -53,6 +58,9 @@ function ShlokaStudioPage() {
 
 	const [shlokaText, setShlokaText] = useState("");
 	const [customInstructions, setCustomInstructions] = useState("");
+	const [plannerSystemPrompt, setPlannerSystemPrompt] = useState(
+		DEFAULT_PLANNER_SYSTEM_PROMPT,
+	);
 	const [imageSize, setImageSize] = useState("1024x1536");
 	const [imageQuality, setImageQuality] = useState("low");
 	const [videoConfig, setVideoConfig] = useState<VideoConfigState>(
@@ -104,6 +112,7 @@ function ShlokaStudioPage() {
 		if (!runId) {
 			setShlokaText("");
 			setCustomInstructions("");
+			setPlannerSystemPrompt(DEFAULT_PLANNER_SYSTEM_PROMPT);
 			setImageSize("1024x1536");
 			setImageQuality("low");
 			setVideoConfig(defaultVideoParams("google/veo-3.1-lite"));
@@ -127,6 +136,7 @@ function ShlokaStudioPage() {
 		}
 		setShlokaText(run.shlokaText ?? "");
 		setCustomInstructions(run.customInstructions ?? "");
+		setPlannerSystemPrompt(resolvePlannerSystemPrompt(run.plannerSystemPrompt));
 		setImageSize(run.imageSize ?? "1024x1536");
 		setImageQuality(run.imageQuality ?? "low");
 		if (run.videoParams) {
@@ -144,10 +154,13 @@ function ShlokaStudioPage() {
 	}, [runId, run?._id, run === null]);
 
 	const ensureRun = async () => {
+		const storedPlannerSystemPrompt =
+			normalizePlannerSystemPromptForStorage(plannerSystemPrompt) ?? null;
 		if (runId) {
 			await updateDraft({
 				runId,
 				customInstructions,
+				plannerSystemPrompt: storedPlannerSystemPrompt,
 				imageSize,
 				imageQuality,
 				selectedModelId: videoConfig.modelId,
@@ -158,10 +171,14 @@ function ShlokaStudioPage() {
 		const id = await createDraft({
 			shlokaText,
 			customInstructions,
+			...(storedPlannerSystemPrompt
+				? { plannerSystemPrompt: storedPlannerSystemPrompt }
+				: {}),
 		});
 		setRunId(id);
 		await updateDraft({
 			runId: id,
+			plannerSystemPrompt: storedPlannerSystemPrompt,
 			imageSize,
 			imageQuality,
 			selectedModelId: videoConfig.modelId,
@@ -274,8 +291,10 @@ function ShlokaStudioPage() {
 				<ShlokaComposer
 					shlokaText={shlokaText}
 					customInstructions={customInstructions}
+					plannerSystemPrompt={plannerSystemPrompt}
 					onShlokaChange={setShlokaText}
 					onInstructionsChange={setCustomInstructions}
+					onPlannerSystemPromptChange={setPlannerSystemPrompt}
 					disabled={busyStage !== null}
 				/>
 

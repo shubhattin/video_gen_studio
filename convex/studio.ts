@@ -7,6 +7,7 @@ import {
 	VIDEO_MODEL_IDS,
 	type VideoModelId,
 } from "./lib/modelCatalog";
+import { normalizePlannerSystemPromptForStorage } from "./lib/plannerPrompt";
 import { defaultImageConfig, defaultVideoParams } from "./lib/schemas";
 import { videoParamsValidator } from "./schema";
 
@@ -141,6 +142,7 @@ export const createShlokaDraft = mutation({
 	args: {
 		shlokaText: v.string(),
 		customInstructions: v.optional(v.string()),
+		plannerSystemPrompt: v.optional(v.string()),
 	},
 	returns: v.id("generationRuns"),
 	handler: async (ctx, args) => {
@@ -151,12 +153,16 @@ export const createShlokaDraft = mutation({
 		const now = Date.now();
 		const imageConfig = defaultImageConfig();
 		const defaultModel: VideoModelId = "google/veo-3.1-lite";
+		const plannerSystemPrompt = normalizePlannerSystemPromptForStorage(
+			args.plannerSystemPrompt,
+		);
 		return await ctx.db.insert("generationRuns", {
 			provenance: "shloka",
 			status: "draft",
 			revisionNumber: 1,
 			shlokaText,
 			customInstructions: args.customInstructions?.trim() || undefined,
+			...(plannerSystemPrompt ? { plannerSystemPrompt } : {}),
 			selectedModelId: defaultModel,
 			imageSize: imageConfig.size,
 			imageQuality: imageConfig.quality,
@@ -205,6 +211,7 @@ export const updateDraft = mutation({
 	args: {
 		runId: v.id("generationRuns"),
 		customInstructions: v.optional(v.string()),
+		plannerSystemPrompt: v.optional(v.union(v.string(), v.null())),
 		imageSize: v.optional(v.string()),
 		imageQuality: v.optional(v.string()),
 		selectedModelId: v.optional(v.string()),
@@ -223,11 +230,16 @@ export const updateDraft = mutation({
 		if (run.status === "video_generating" || run.status === "planning") {
 			throw new Error("Run is busy. Wait for the current stage to finish.");
 		}
+		const plannerSystemPrompt =
+			args.plannerSystemPrompt === undefined
+				? run.plannerSystemPrompt
+				: normalizePlannerSystemPromptForStorage(args.plannerSystemPrompt);
 		await ctx.db.patch(args.runId, {
 			customInstructions:
 				args.customInstructions !== undefined
 					? args.customInstructions.trim() || undefined
 					: run.customInstructions,
+			plannerSystemPrompt,
 			imageSize: args.imageSize ?? run.imageSize,
 			imageQuality: args.imageQuality ?? run.imageQuality,
 			selectedModelId: args.selectedModelId ?? run.selectedModelId,
