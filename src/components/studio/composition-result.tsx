@@ -17,7 +17,13 @@ export type CompositionClipResult = {
 };
 
 type CompositionResultProps = {
-	status: "planned" | "generating" | "completed" | "failed" | "cancelled";
+	status:
+		| "planned"
+		| "generating"
+		| "awaiting_terminal_frame"
+		| "completed"
+		| "failed"
+		| "cancelled";
 	clips: CompositionClipResult[];
 	totalDurationSeconds: number;
 	onDownloadMerged?: () => void;
@@ -68,8 +74,9 @@ export function CompositionResult({
 						</Badge>
 					</div>
 					<p className="text-sm text-muted-foreground">
-						{completed.length}/{clips.length} clips ready ·{" "}
-						{totalDurationSeconds}s planned
+						{status === "awaiting_terminal_frame"
+							? "Capturing continuity frame from the last clip…"
+							: `${completed.length}/${clips.length} clips ready · ${totalDurationSeconds}s planned`}
 					</p>
 				</div>
 				{onDownloadMerged &&

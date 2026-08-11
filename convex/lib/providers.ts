@@ -42,6 +42,13 @@ export function getOpenRouterProvider() {
 	});
 }
 
+export function isVideoProcessorConfigured() {
+	return Boolean(
+		normalizeSecret(env.VIDEO_PROCESSOR_URL) &&
+			normalizeSecret(env.VIDEO_PROCESSOR_SHARED_SECRET),
+	);
+}
+
 export function getVideoProcessorUrl() {
 	return requireEnv("VIDEO_PROCESSOR_URL", env.VIDEO_PROCESSOR_URL).replace(
 		/\/$/,

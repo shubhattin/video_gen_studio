@@ -25,6 +25,7 @@ import { VideoModelSelector } from "#/components/studio/video-model-selector";
 import { VideoResult } from "#/components/studio/video-result";
 import { Button } from "#/components/ui/button";
 import { downloadMergedComposition } from "#/lib/merge-composition-videos";
+import { useCompositionTerminalFrameHandoff } from "#/hooks/use-composition-terminal-frame-handoff";
 import {
 	defaultVideoParams,
 	MODEL_CAPABILITY_PROFILES,
@@ -103,6 +104,13 @@ function ShlokaStudioPage() {
 	const generateVideo = useAction(api.studioActions.generateVideoForRun);
 	const startComposition = useMutation(api.studio.startComposition);
 	const cancelComposition = useMutation(api.studio.cancelComposition);
+
+	useCompositionTerminalFrameHandoff({
+		runId,
+		compositionJob,
+		onError: (error) =>
+			notifyStudioError("Continuity frame capture failed", error),
+	});
 
 	useEffect(() => {
 		if (!catalog) {
@@ -378,7 +386,9 @@ function ShlokaStudioPage() {
 					durationSeconds={videoConfig.durationSeconds}
 					onChange={setComposition}
 					disabled={
-						busyStage !== null || compositionJob?.status === "generating"
+						busyStage !== null ||
+							compositionJob?.status === "generating" ||
+							compositionJob?.status === "awaiting_terminal_frame"
 					}
 				/>
 
@@ -547,7 +557,8 @@ function ShlokaStudioPage() {
 									: `Generate ${composition.multiplier} clips`}
 							</Button>
 						) : null}
-						{compositionJob.status === "generating" ? (
+						{compositionJob.status === "generating" ||
+						compositionJob.status === "awaiting_terminal_frame" ? (
 							<Button
 								className="min-h-11"
 								variant="outline"

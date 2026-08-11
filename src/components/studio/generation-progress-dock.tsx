@@ -55,14 +55,9 @@ export function GenerationProgressDock({
 									<Spinner className="size-4" />
 								</div>
 								<div className="min-w-0 flex-1">
-									<div className="flex items-baseline justify-between gap-3">
-										<p className="truncate font-heading text-sm font-semibold tracking-tight">
-											{copy.title}
-										</p>
-										<span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-											{Math.round(value)}%
-										</span>
-									</div>
+									<p className="truncate font-heading text-sm font-semibold tracking-tight">
+										{copy.title}
+									</p>
 									<p className="mt-0.5 truncate text-xs text-muted-foreground">
 										{contextLabel?.trim()
 											? `${copy.detail} · ${contextLabel}`

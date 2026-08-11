@@ -18,6 +18,7 @@ import {
 	getOpenRouterProvider,
 	getVideoProcessorSecret,
 	getVideoProcessorUrl,
+	isVideoProcessorConfigured,
 } from "./lib/providers";
 import {
 	downloadOpenRouterVideo,
@@ -34,21 +35,26 @@ import {
 } from "./lib/schemas";
 import {
 	MODEL_STUDIO_PLANNER_SYSTEM_PROMPT,
+	buildShlokaPlannerSystemPrompt,
 	multiClipPlannerInstructions,
-	resolvePlannerSystemPrompt,
 } from "./lib/plannerPrompt";
 import { adaptOpenRouterVideoRequest } from "./lib/videoAdapters";
 
 function buildPlannerPrompt(
 	shlokaText: string,
 	customInstructions: string | undefined,
+	mode: "single-clip" | "multi-clip",
 ) {
+	const outputHint =
+		mode === "multi-clip"
+			? "Produce imagePrompt + overallDescription + ordered clips for a portrait 9:16 multi-clip short rooted in this shloka."
+			: "Produce imagePrompt + videoScenes for a portrait 9:16 short rooted in this shloka.";
 	return [
 		`Shloka (preserve meaning; do not replace with an invented translation unless asked):\n"""\n${shlokaText}\n"""`,
 		customInstructions?.trim()
 			? `Custom instructions (follow closely):\n"""\n${customInstructions.trim()}\n"""`
 			: "Custom instructions: none. Default to warm Indian devotional atmosphere.",
-		"Produce imagePrompt + videoScenes for a portrait 9:16 short rooted in this shloka.",
+		outputHint,
 	].join("\n\n");
 }
 
@@ -69,25 +75,29 @@ function compositionPlannerExtension(run: {
 	) {
 		return null;
 	}
-	return multiClipPlannerInstructions({
+	return {
 		mode: run.compositionMode,
 		clipCount: run.compositionClipCount,
 		clipDurationSeconds: run.videoParams.durationSeconds,
 		maxPromptChars: MODEL_CAPABILITY_PROFILES[run.videoParams.modelId]
 			.maxPromptChars,
-	});
+	};
 }
 
-/** Appended at image gen time so Seedance/etc. do not treat refs as real-person photos. */
-const IMAGE_STYLE_SAFETY_SUFFIX =
-	"Stylized Indian miniature / temple-mural illustration, painted characters only, not a photograph of a real person, no photoreal skin, no celebrity likeness.";
+/** Prepended at image gen time so gpt-image-2 / Seedance refs stay illustrated. */
+const IMAGE_STYLE_SAFETY_PREFIX =
+	"Stylized Indian miniature painting and temple-mural illustration, painted characters only, warm temple gold and marigold accents, not a photograph of a real person, no photoreal skin, no celebrity likeness.";
 
 function withImageStyleSafety(prompt: string) {
 	const trimmed = prompt.trim();
-	if (/not a (photo|photograph)|miniature painting|temple mural|stylized/i.test(trimmed)) {
+	if (
+		/stylized indian miniature|temple[- ]mural|not a (photo|photograph) of a real person/i.test(
+			trimmed,
+		)
+	) {
 		return trimmed;
 	}
-	return `${trimmed} ${IMAGE_STYLE_SAFETY_SUFFIX}`;
+	return `${IMAGE_STYLE_SAFETY_PREFIX} ${trimmed}`;
 }
 
 function buildVideoPromptFromScenes(
@@ -195,13 +205,20 @@ export const planShlokaRun = action({
 
 		try {
 			const openrouter = getOpenRouterProvider();
-			const compositionInstructions = compositionPlannerExtension(run);
-			if (compositionInstructions) {
+			const composition = compositionPlannerExtension(run);
+			if (composition) {
 				const result = await generateText({
 					model: openrouter(PLANNER_MODEL_ID),
 					reasoning: "medium",
-					system: `${resolvePlannerSystemPrompt(run.plannerSystemPrompt)}\n\n${compositionInstructions}`,
-					prompt: buildPlannerPrompt(run.shlokaText, run.customInstructions),
+					system: buildShlokaPlannerSystemPrompt({
+						stored: run.plannerSystemPrompt,
+						composition,
+					}),
+					prompt: buildPlannerPrompt(
+						run.shlokaText,
+						run.customInstructions,
+						"multi-clip",
+					),
 					output: Output.object({ schema: compositionPlannerOutputSchema }),
 				});
 				const plan = result.output;
@@ -220,8 +237,15 @@ export const planShlokaRun = action({
 				const result = await generateText({
 					model: openrouter(PLANNER_MODEL_ID),
 					reasoning: "medium",
-					system: resolvePlannerSystemPrompt(run.plannerSystemPrompt),
-					prompt: buildPlannerPrompt(run.shlokaText, run.customInstructions),
+					system: buildShlokaPlannerSystemPrompt({
+						stored: run.plannerSystemPrompt,
+						composition: null,
+					}),
+					prompt: buildPlannerPrompt(
+						run.shlokaText,
+						run.customInstructions,
+						"single-clip",
+					),
 					output: Output.object({ schema: normalPlannerOutputSchema }),
 				});
 				const plan = result.output;
@@ -265,8 +289,8 @@ export const planModelStudioComposition = action({
 		if (!run || !prompt) {
 			throw new Error("A video prompt is required before planning.");
 		}
-		const compositionInstructions = compositionPlannerExtension(run);
-		if (!compositionInstructions) {
+		const composition = compositionPlannerExtension(run);
+		if (!composition) {
 			throw new Error("Enable multi-clip composition before planning.");
 		}
 		const planningKey = `model-composition-plan-${args.runId}-${run.revisionNumber}`;
@@ -285,7 +309,7 @@ export const planModelStudioComposition = action({
 			const result = await generateText({
 				model: getOpenRouterProvider()(PLANNER_MODEL_ID),
 				reasoning: "medium",
-				system: `${MODEL_STUDIO_PLANNER_SYSTEM_PROMPT}\n\n${compositionInstructions}`,
+				system: `${MODEL_STUDIO_PLANNER_SYSTEM_PROMPT}\n\n${multiClipPlannerInstructions(composition)}`,
 				prompt: buildModelStudioPlannerPrompt(prompt),
 				output: Output.object({ schema: compositionPlannerOutputSchema }),
 			});
@@ -658,16 +682,22 @@ export const generateNextCompositionClip = internalAction({
 			);
 			generatedStorageId = storageId;
 			let terminalFrameStorageId: Id<"_storage"> | undefined;
-			if (clip.clipIndex < job.clipCount - 1) {
-				try {
-					terminalFrameStorageId = await extractTerminalFrame(ctx, storageId);
-					extractedTerminalFrameStorageId = terminalFrameStorageId;
-				} catch (error) {
-					referenceWarnings.push(
-						error instanceof Error
-							? `${error.message} The next clip will use text continuity.`
-							: "Terminal-frame extraction failed. The next clip will use text continuity.",
-					);
+			let awaitTerminalFrame = false;
+			if (clip.clipIndex < job.clipCount - 1 && job.mode === "continuation") {
+				if (isVideoProcessorConfigured()) {
+					try {
+						terminalFrameStorageId = await extractTerminalFrame(ctx, storageId);
+						extractedTerminalFrameStorageId = terminalFrameStorageId;
+					} catch (error) {
+						referenceWarnings.push(
+							error instanceof Error
+								? `${error.message} Extracting the continuity frame in the browser instead.`
+								: "Server terminal-frame extraction failed. Extracting in the browser instead.",
+						);
+						awaitTerminalFrame = true;
+					}
+				} else {
+					awaitTerminalFrame = true;
 				}
 			}
 			const warnings = [
@@ -701,6 +731,7 @@ export const generateNextCompositionClip = internalAction({
 				},
 				terminalFrameStorageId,
 				warnings: warnings.length > 0 ? warnings : undefined,
+				awaitTerminalFrame,
 			});
 			generatedStorageId = undefined;
 			extractedTerminalFrameStorageId = undefined;

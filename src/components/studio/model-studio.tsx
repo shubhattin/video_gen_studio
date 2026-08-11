@@ -20,6 +20,7 @@ import { VideoModelSelector } from "#/components/studio/video-model-selector";
 import { VideoResult } from "#/components/studio/video-result";
 import { Button } from "#/components/ui/button";
 import { downloadMergedComposition } from "#/lib/merge-composition-videos";
+import { useCompositionTerminalFrameHandoff } from "#/hooks/use-composition-terminal-frame-handoff";
 import {
 	defaultVideoParams,
 	isVideoModelId,
@@ -84,6 +85,13 @@ export function ModelStudio({
 		activeRunId ? { runId: activeRunId } : "skip",
 	);
 	const profile = MODEL_CAPABILITY_PROFILES[selectedModel];
+
+	useCompositionTerminalFrameHandoff({
+		runId: activeRunId,
+		compositionJob,
+		onError: (error) =>
+			notifyStudioError("Continuity frame capture failed", error),
+	});
 
 	useEffect(() => {
 		if (!catalog) {
@@ -287,6 +295,7 @@ export function ModelStudio({
 		Boolean(run?.videos?.length) ||
 		run?.status === "video_generating" ||
 		compositionJob?.status === "generating" ||
+		compositionJob?.status === "awaiting_terminal_frame" ||
 		Boolean(
 			compositionJob?.clips.some((clip: { video?: unknown }) => clip.video),
 		);
@@ -368,7 +377,11 @@ export function ModelStudio({
 				modelId={selectedModel}
 				durationSeconds={videoConfig.durationSeconds}
 				onChange={setComposition}
-				disabled={isBusy || compositionJob?.status === "generating"}
+				disabled={
+					isBusy ||
+					compositionJob?.status === "generating" ||
+					compositionJob?.status === "awaiting_terminal_frame"
+				}
 			/>
 
 			<ReferenceImagePanel
@@ -433,7 +446,8 @@ export function ModelStudio({
 									: `Generate ${composition.multiplier} clips`}
 							</Button>
 						) : null}
-						{compositionJob?.status === "generating" ? (
+						{compositionJob?.status === "generating" ||
+						compositionJob?.status === "awaiting_terminal_frame" ? (
 							<Button
 								className="min-h-11"
 								variant="outline"

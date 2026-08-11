@@ -86,6 +86,7 @@ export const compositionModeValidator = v.union(
 export const compositionJobStatusValidator = v.union(
 	v.literal("planned"),
 	v.literal("generating"),
+	v.literal("awaiting_terminal_frame"),
 	v.literal("completed"),
 	v.literal("failed"),
 	v.literal("cancelled"),

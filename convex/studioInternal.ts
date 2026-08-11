@@ -229,7 +229,12 @@ export const claimNextCompositionClip = internalMutation({
 	returns: v.union(v.null(), v.any()),
 	handler: async (ctx, args) => {
 		const job = await ctx.db.get(args.jobId);
-		if (!job || job.status === "cancelled" || job.status === "failed") {
+		if (
+			!job ||
+			job.status === "cancelled" ||
+			job.status === "failed" ||
+			job.status === "awaiting_terminal_frame"
+		) {
 			return null;
 		}
 		const clips = await ctx.db
@@ -297,6 +302,9 @@ export const completeCompositionClip = internalMutation({
 		video: generatedVideoValidator,
 		terminalFrameStorageId: v.optional(v.id("_storage")),
 		warnings: v.optional(v.array(v.string())),
+		/** When false, pause for browser terminal-frame extraction. */
+		scheduleNext: v.optional(v.boolean()),
+		awaitTerminalFrame: v.optional(v.boolean()),
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
@@ -325,8 +333,73 @@ export const completeCompositionClip = internalMutation({
 			warnings: args.warnings,
 			updatedAt: now,
 		});
+		const awaitTerminalFrame =
+			args.awaitTerminalFrame === true && !args.terminalFrameStorageId;
 		await ctx.db.patch(job._id, {
+			status: awaitTerminalFrame ? "awaiting_terminal_frame" : job.status,
 			actualCostUsd: (job.actualCostUsd ?? 0) + (args.video.actualCostUsd ?? 0),
+			currentClipIndex: awaitTerminalFrame ? clip.clipIndex : job.currentClipIndex,
+			updatedAt: now,
+		});
+		if (awaitTerminalFrame) {
+			await ctx.db.patch(job.runId, {
+				status: "video_generating",
+				updatedAt: now,
+			});
+			return null;
+		}
+		if (args.scheduleNext === false) {
+			return null;
+		}
+		await ctx.scheduler.runAfter(
+			0,
+			internal.studioActions.generateNextCompositionClip,
+			{ jobId: job._id },
+		);
+		return null;
+	},
+});
+
+export const attachCompositionTerminalFrame = internalMutation({
+	args: {
+		jobId: v.id("compositionJobs"),
+		clipId: v.id("compositionClips"),
+		terminalFrameStorageId: v.id("_storage"),
+	},
+	returns: v.null(),
+	handler: async (ctx, args) => {
+		const [job, clip] = await Promise.all([
+			ctx.db.get(args.jobId),
+			ctx.db.get(args.clipId),
+		]);
+		if (!job || !clip || clip.jobId !== job._id) {
+			throw new Error("Composition clip was not found.");
+		}
+		if (job.status === "cancelled") {
+			await ctx.storage.delete(args.terminalFrameStorageId);
+			return null;
+		}
+		if (job.status !== "awaiting_terminal_frame") {
+			throw new Error("Composition is not waiting for a terminal frame.");
+		}
+		if (clip.status !== "completed") {
+			throw new Error("Clip must be completed before attaching a terminal frame.");
+		}
+		if (clip.terminalFrameStorageId) {
+			await ctx.storage.delete(args.terminalFrameStorageId);
+			return null;
+		}
+		const now = Date.now();
+		await ctx.db.patch(clip._id, {
+			terminalFrameStorageId: args.terminalFrameStorageId,
+			updatedAt: now,
+		});
+		await ctx.db.patch(job._id, {
+			status: "generating",
+			updatedAt: now,
+		});
+		await ctx.db.patch(job.runId, {
+			status: "video_generating",
 			updatedAt: now,
 		});
 		await ctx.scheduler.runAfter(

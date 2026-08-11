@@ -417,6 +417,40 @@ export const cancelComposition = mutation({
 	},
 });
 
+export const submitCompositionTerminalFrame = mutation({
+	args: {
+		runId: v.id("generationRuns"),
+		clipId: v.id("compositionClips"),
+		storageId: v.id("_storage"),
+	},
+	returns: v.null(),
+	handler: async (ctx, args) => {
+		const job = await ctx.db
+			.query("compositionJobs")
+			.withIndex("by_runId", (q) => q.eq("runId", args.runId))
+			.unique();
+		if (!job) {
+			await ctx.storage.delete(args.storageId);
+			throw new Error("Composition job was not found.");
+		}
+		if (job.status !== "awaiting_terminal_frame") {
+			await ctx.storage.delete(args.storageId);
+			throw new Error("Composition is not waiting for a continuity frame.");
+		}
+		const clip = await ctx.db.get(args.clipId);
+		if (!clip || clip.jobId !== job._id) {
+			await ctx.storage.delete(args.storageId);
+			throw new Error("Composition clip was not found.");
+		}
+		await ctx.runMutation(internal.studioInternal.attachCompositionTerminalFrame, {
+			jobId: job._id,
+			clipId: args.clipId,
+			terminalFrameStorageId: args.storageId,
+		});
+		return null;
+	},
+});
+
 export const deleteRun = mutation({
 	args: {
 		runId: v.id("generationRuns"),

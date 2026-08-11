@@ -98,8 +98,9 @@ export function ShlokaComposer({
 								<PopoverTitle>Planner system prompt</PopoverTitle>
 								<PopoverDescription>
 									Only saved on the run when it differs from the built-in
-									default. Structured plan fields come from the schema, not this
-									text.
+									default. Output shape (single vs multi-clip fields) is
+									appended automatically at plan time — keep this text focused
+									on creative direction.
 								</PopoverDescription>
 							</PopoverHeader>
 							<Tabs

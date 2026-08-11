@@ -171,34 +171,34 @@ export function ShlokaPlanPreview({
 						</div>
 					) : (
 						<div className="max-h-[min(28rem,55vh)] space-y-3 overflow-y-auto overscroll-contain pr-1">
-						{videoScenes?.map((scene) => (
-							<div
-								key={scene.sceneNumber}
-								className="rounded-lg border border-border/80 p-4"
-							>
-								<p className="text-sm font-medium">
-									Scene {scene.sceneNumber}: {scene.intent}
-								</p>
-								<dl className="mt-2 grid gap-1 text-sm text-muted-foreground">
-									<div>
-										<dt className="font-medium text-foreground">Subjects</dt>
-										<dd>{scene.subjects}</dd>
-									</div>
-									<div>
-										<dt className="font-medium text-foreground">
-											Composition
-										</dt>
-										<dd>{scene.composition}</dd>
-									</div>
-									<div>
-										<dt className="font-medium text-foreground">Motion</dt>
-										<dd>{scene.actionMotion}</dd>
-									</div>
-									<div>
-										<dt className="font-medium text-foreground">Avoid</dt>
-										<dd>{scene.negativeConstraints}</dd>
-									</div>
-								</dl>
+							{videoScenes?.map((scene) => (
+								<div
+									key={scene.sceneNumber}
+									className="rounded-lg border border-border/80 p-4"
+								>
+									<p className="text-sm font-medium">
+										Scene {scene.sceneNumber}: {scene.intent}
+									</p>
+									<dl className="mt-2 grid gap-1 text-sm text-muted-foreground">
+										<div>
+											<dt className="font-medium text-foreground">Subjects</dt>
+											<dd>{scene.subjects}</dd>
+										</div>
+										<div>
+											<dt className="font-medium text-foreground">
+												Composition
+											</dt>
+											<dd>{scene.composition}</dd>
+										</div>
+										<div>
+											<dt className="font-medium text-foreground">Motion</dt>
+											<dd>{scene.actionMotion}</dd>
+										</div>
+										<div>
+											<dt className="font-medium text-foreground">Avoid</dt>
+											<dd>{scene.negativeConstraints}</dd>
+										</div>
+									</dl>
 								</div>
 							))}
 						</div>
