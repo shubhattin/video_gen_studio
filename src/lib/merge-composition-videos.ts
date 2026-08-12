@@ -1,13 +1,26 @@
 import wasmUrl from "@ffmpeg/core/wasm?url";
 import coreUrl from "@ffmpeg/core?url";
+import { studioMediaProxyUrl } from "#/lib/studio-media-proxy";
 
 type MergeVideoSource = {
 	url?: string | null;
+	objectKey?: string | null;
+	runId?: string | null;
 };
 
 type MergeOptions = {
 	onProgress?: (progress: number) => void;
 };
+
+function resolveFetchUrl(source: MergeVideoSource): string | null {
+	if (source.runId && source.objectKey) {
+		return studioMediaProxyUrl({
+			runId: source.runId,
+			objectKey: source.objectKey,
+		});
+	}
+	return source.url ?? null;
+}
 
 function triggerDownload(blob: Blob) {
 	const objectUrl = URL.createObjectURL(blob);
@@ -26,7 +39,7 @@ export async function downloadMergedComposition(
 	options: MergeOptions = {},
 ) {
 	const sources = videos
-		.map((video) => video.url)
+		.map((video) => resolveFetchUrl(video))
 		.filter((url): url is string => Boolean(url));
 	if (sources.length === 0) {
 		throw new Error("No completed clips are available to merge.");

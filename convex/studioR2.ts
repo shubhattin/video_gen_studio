@@ -314,3 +314,13 @@ export const getDownloadUrl = action({
 		});
 	},
 });
+
+export const createInternalReadUrl = internalAction({
+	args: {
+		objectKey: v.string(),
+	},
+	returns: v.string(),
+	handler: async (_ctx, args) => {
+		return await createPresignedGetUrl({ objectKey: args.objectKey });
+	},
+});

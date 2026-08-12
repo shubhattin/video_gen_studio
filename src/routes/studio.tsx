@@ -6,6 +6,7 @@ import type { Id } from "@convex/_generated/dataModel";
 import { ModelStudio } from "#/components/studio/model-studio";
 import { HistoryPanel } from "#/components/studio/history-panel";
 import { StudioShell } from "#/components/studio/studio-shell";
+import { StudioRunSkeleton } from "#/components/studio/studio-run-skeleton";
 import {
 	studioRunSearchSchema,
 	type StudioRunSearch,
@@ -76,12 +77,16 @@ function ModelStudioPage() {
 				/>
 			}
 		>
-			<div className="rounded-2xl border border-border/80 bg-card p-5 sm:p-8">
-				<ModelStudio
-					runId={selectedRunId}
-					onRunIdChange={(id) => setSelectedRunId(id)}
-				/>
-			</div>
+			{selectedRunId && run === undefined ? (
+				<StudioRunSkeleton />
+			) : (
+				<div className="rounded-2xl border border-border/80 bg-card p-5 sm:p-8">
+					<ModelStudio
+						runId={selectedRunId}
+						onRunIdChange={(id) => setSelectedRunId(id)}
+					/>
+				</div>
+			)}
 		</StudioShell>
 	);
 }

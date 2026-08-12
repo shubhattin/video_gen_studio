@@ -72,6 +72,10 @@ export function getR2Client() {
 			accessKeyId: config.accessKeyId,
 			secretAccessKey: config.secretAccessKey,
 		},
+		// Avoid x-amz-checksum-mode on presigned GETs — browsers can't satisfy it and
+		// R2/S3 often omit CORS headers on the resulting error responses.
+		requestChecksumCalculation: "WHEN_REQUIRED",
+		responseChecksumValidation: "WHEN_REQUIRED",
 	});
 	cachedClientKey = clientKey;
 	return { client: cachedClient, bucket: config.bucket, config };

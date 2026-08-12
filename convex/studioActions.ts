@@ -380,7 +380,7 @@ export const generateReferenceImage = action({
 
 		const imageConfig = imageConfigSchema.parse({
 			size: run.imageSize ?? "1024x1536",
-			quality: run.imageQuality ?? "low",
+			quality: run.imageQuality ?? "medium",
 		});
 
 		await ctx.runMutation(internal.studioInternal.setRunStatus, {

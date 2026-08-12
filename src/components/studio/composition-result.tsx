@@ -1,4 +1,10 @@
-import { Download, Loader2, Play } from "lucide-react";
+import {
+	ChevronLeft,
+	ChevronRight,
+	Download,
+	Loader2,
+	Play,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
@@ -50,6 +56,8 @@ export function CompositionResult({
 	);
 	const [activeIndex, setActiveIndex] = useState(0);
 	const active = completed[activeIndex];
+	const canGoPrev = activeIndex > 0;
+	const canGoNext = activeIndex < completed.length - 1;
 
 	useEffect(() => {
 		setActiveIndex((current) =>
@@ -108,17 +116,69 @@ export function CompositionResult({
 						playsInline
 						preload="auto"
 						onEnded={() => {
-							if (activeIndex < completed.length - 1) {
-								setActiveIndex(activeIndex + 1);
+							if (canGoNext) {
+								setActiveIndex((index) => index + 1);
 							}
 						}}
 						className="mx-auto max-h-[min(70vh,560px)] w-full object-contain"
 					>
 						<track kind="captions" srcLang="en" label="Captions unavailable" />
 					</video>
-					<p className="border-t border-white/15 px-3 py-2 text-sm text-white/75">
-						Playing clip {active.clipIndex + 1} of {clips.length}
-					</p>
+					<div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/15 px-3 py-2.5">
+						<p className="text-sm text-white/75">
+							Clip {active.clipIndex + 1} of {clips.length}
+						</p>
+						<div className="flex items-center gap-1.5">
+							<Button
+								type="button"
+								size="icon-sm"
+								variant="ghost"
+								disabled={!canGoPrev}
+								aria-label="Previous clip"
+								className="text-white hover:bg-white/10 hover:text-white disabled:text-white/30"
+								onClick={() =>
+									setActiveIndex((index) => Math.max(0, index - 1))
+								}
+							>
+								<ChevronLeft />
+							</Button>
+							{completed.map((clip, index) => {
+								const isActive = index === activeIndex;
+								return (
+									<button
+										key={clip._id}
+										type="button"
+										aria-label={`Play clip ${clip.clipIndex + 1}`}
+										aria-current={isActive ? "true" : undefined}
+										onClick={() => setActiveIndex(index)}
+										className={cn(
+											"flex size-8 items-center justify-center rounded-md border text-sm font-medium transition-colors",
+											isActive
+												? "border-white bg-white text-black"
+												: "border-white/30 bg-transparent text-white/80 hover:border-white/60 hover:bg-white/10",
+										)}
+									>
+										{clip.clipIndex + 1}
+									</button>
+								);
+							})}
+							<Button
+								type="button"
+								size="icon-sm"
+								variant="ghost"
+								disabled={!canGoNext}
+								aria-label="Next clip"
+								className="text-white hover:bg-white/10 hover:text-white disabled:text-white/30"
+								onClick={() =>
+									setActiveIndex((index) =>
+										Math.min(completed.length - 1, index + 1),
+									)
+								}
+							>
+								<ChevronRight />
+							</Button>
+						</div>
+					</div>
 				</div>
 			) : (
 				<div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">

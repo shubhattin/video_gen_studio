@@ -1,8 +1,6 @@
 import { Download, Info, Loader2 } from "lucide-react";
 import { useState } from "react";
-import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
-import { useAction } from "convex/react";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
 import {
@@ -13,6 +11,7 @@ import {
 	PopoverTitle,
 	PopoverTrigger,
 } from "#/components/ui/popover";
+import { studioMediaProxyUrl } from "#/lib/studio-media-proxy";
 import { cn } from "#/lib/utils";
 
 export type VideoResultItem = {
@@ -117,7 +116,6 @@ function VideoClipCard({
 	versionLabel: string;
 	isLatest: boolean;
 }) {
-	const getDownloadUrl = useAction(api.studioR2.getDownloadUrl);
 	const [downloading, setDownloading] = useState(false);
 	const canDownload = Boolean(video.objectKey || video.url);
 	const duration =
@@ -266,11 +264,10 @@ function VideoClipCard({
 							try {
 								let sourceUrl = video.url;
 								if (runId && video.objectKey) {
-									sourceUrl = await getDownloadUrl({
+									// Prefer Convex proxy so browser fetch does not depend on R2 CORS.
+									sourceUrl = studioMediaProxyUrl({
 										runId,
 										objectKey: video.objectKey,
-										filename,
-										contentType: video.meta?.mimeType,
 									});
 								}
 								if (!sourceUrl) {

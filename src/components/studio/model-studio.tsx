@@ -71,7 +71,7 @@ export function ModelStudio({
 		prompt: "",
 	}));
 	const [imageSize, setImageSize] = useState("1024x1536");
-	const [imageQuality, setImageQuality] = useState("low");
+	const [imageQuality, setImageQuality] = useState("medium");
 	const [busyStage, setBusyStage] = useState<StudioBusyStage>(null);
 	const [refreshingCatalog, setRefreshingCatalog] = useState(false);
 	const [mergingComposition, setMergingComposition] = useState(false);
@@ -137,7 +137,7 @@ export function ModelStudio({
 				prompt: "",
 			});
 			setImageSize("1024x1536");
-			setImageQuality("low");
+			setImageQuality("medium");
 			setComposition({
 				enabled: false,
 				mode: "continuation",
@@ -153,7 +153,7 @@ export function ModelStudio({
 			: "google/veo-3.1-lite";
 		setSelectedModel(modelId);
 		setImageSize(run.imageSize ?? "1024x1536");
-		setImageQuality(run.imageQuality ?? "low");
+		setImageQuality(run.imageQuality ?? "medium");
 		setVideoConfig({
 			...defaultVideoParams(modelId),
 			...(run.videoParams ?? {}),
@@ -268,13 +268,17 @@ export function ModelStudio({
 	};
 
 	const onDownloadComposition = async () => {
-		if (!compositionJobWithUrls) return;
+		if (!compositionJobWithUrls || !activeRunId) return;
 		setMergingComposition(true);
 		try {
 			await downloadMergedComposition(
 				compositionJobWithUrls.clips.map(
-					(clip: { video?: { url?: string | null } }) => ({
+					(clip: {
+						video?: { url?: string | null; objectKey?: string | null };
+					}) => ({
 						url: clip.video?.url,
+						objectKey: clip.video?.objectKey,
+						runId: activeRunId,
 					}),
 				),
 			);
