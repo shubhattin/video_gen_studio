@@ -48,13 +48,19 @@ type CompositionAttemptControlsProps = {
 	scenes?: SceneClip[];
 	/** Fallback config when the active attempt summary is incomplete. */
 	activeConfig?: CompositionAttemptSummary | null;
+	/** Show a disabled “next plan” tab while a replan is in flight. */
+	isPlanningNext?: boolean;
 	className?: string;
 };
+
+const PLANNING_TAB_ID = "__planning_next__";
 
 function statusLabel(status: string) {
 	switch (status) {
 		case "awaiting_terminal_frame":
 			return "handoff";
+		case "planning":
+			return "planning";
 		default:
 			return status.replaceAll("_", " ");
 	}
@@ -226,9 +232,10 @@ export function CompositionAttemptControls({
 	disabled,
 	scenes = [],
 	activeConfig,
+	isPlanningNext = false,
 	className,
 }: CompositionAttemptControlsProps) {
-	if (attempts.length === 0 && !activeConfig) {
+	if (attempts.length === 0 && !activeConfig && !isPlanningNext) {
 		return null;
 	}
 
@@ -239,11 +246,21 @@ export function CompositionAttemptControls({
 		ordered.find((item) => item._id === activeJobId) ??
 		activeConfig ??
 		ordered[ordered.length - 1];
-	const activeValue = active?._id ?? ordered[0]?._id;
+	const nextAttemptNumber =
+		(ordered.reduce((acc, item) => Math.max(acc, item.attemptNumber), 0) ||
+			active?.attemptNumber ||
+			0) + 1;
+	const showTabStrip = ordered.length > 1 || isPlanningNext;
+	const activeValue = isPlanningNext
+		? PLANNING_TAB_ID
+		: (active?._id ?? ordered[0]?._id);
 	const modelLabel = shortModelId(active?.videoParams?.modelId);
 	const clipLabel =
 		active?.clipCount != null ? `${active.clipCount} clips` : null;
-	const metaBits = [modelLabel, clipLabel, active?.mode].filter(Boolean);
+	const metaBits = isPlanningNext
+		? [`Planning plan ${nextAttemptNumber}…`]
+		: [modelLabel, clipLabel, active?.mode].filter(Boolean);
+	const switchLocked = disabled || isPlanningNext;
 
 	return (
 		<section
@@ -258,19 +275,30 @@ export function CompositionAttemptControls({
 						Composition plans
 					</h2>
 					<p className="text-sm text-muted-foreground">
-						{ordered.length > 1
-							? "Switch plans to compare scripts, config, and generated clips."
-							: "Each replan keeps a separate attempt you can revisit."}
+						{isPlanningNext
+							? `Creating plan ${nextAttemptNumber}. Previous plans stay available when this finishes.`
+							: showTabStrip
+								? "Switch plans to compare scripts, config, and generated clips."
+								: "Each replan keeps a separate attempt you can revisit."}
 					</p>
 				</div>
-				<AttemptDetailsPopover active={active} scenes={scenes} />
+				{!isPlanningNext ? (
+					<AttemptDetailsPopover active={active} scenes={scenes} />
+				) : null}
 			</div>
 
-			{ordered.length > 1 && activeValue ? (
+			{showTabStrip && activeValue ? (
 				<Tabs
 					value={activeValue}
 					onValueChange={(value) => {
-						if (disabled || !value || value === activeValue) return;
+						if (
+							switchLocked ||
+							!value ||
+							value === PLANNING_TAB_ID ||
+							value === active?._id
+						) {
+							return;
+						}
 						onSelectAttempt?.(value);
 					}}
 					className="gap-3"
@@ -279,15 +307,18 @@ export function CompositionAttemptControls({
 						variant="line"
 						className={cn(
 							"h-auto max-w-full flex-wrap justify-start gap-1",
-							disabled && "pointer-events-none opacity-60",
+							switchLocked && "pointer-events-none",
 						)}
 					>
 						{ordered.map((attempt) => (
 							<TabsTrigger
 								key={attempt._id}
 								value={attempt._id}
-								disabled={disabled}
-								className="flex-none flex-col items-start gap-0.5 px-3 py-2"
+								disabled={switchLocked}
+								className={cn(
+									"flex-none flex-col items-start gap-0.5 px-3 py-2",
+									isPlanningNext && "opacity-60",
+								)}
 							>
 								<span className="flex items-center gap-1.5">
 									<span className="font-medium">
@@ -314,6 +345,23 @@ export function CompositionAttemptControls({
 								</span>
 							</TabsTrigger>
 						))}
+						{isPlanningNext ? (
+							<TabsTrigger
+								value={PLANNING_TAB_ID}
+								disabled
+								className="flex-none flex-col items-start gap-0.5 border-amber-500/30 px-3 py-2 text-amber-800 data-active:bg-amber-500/10 dark:text-amber-200"
+							>
+								<span className="flex items-center gap-1.5">
+									<span className="font-medium">Plan {nextAttemptNumber}</span>
+									<Badge className="h-5 border-amber-500/40 bg-amber-500/15 px-1.5 text-[10px] font-normal text-amber-800 capitalize dark:text-amber-200">
+										planning
+									</Badge>
+								</span>
+								<span className="text-[11px] font-normal text-amber-800/80 dark:text-amber-200/80">
+									Generating scripts…
+								</span>
+							</TabsTrigger>
+						) : null}
 					</TabsList>
 				</Tabs>
 			) : active?.attemptNumber ? (
@@ -331,10 +379,23 @@ export function CompositionAttemptControls({
 			) : null}
 
 			{metaBits.length > 0 ? (
-				<p className="text-xs text-muted-foreground">{metaBits.join(" · ")}</p>
+				<p
+					className={cn(
+						"text-xs",
+						isPlanningNext
+							? "text-amber-800 dark:text-amber-200"
+							: "text-muted-foreground",
+					)}
+				>
+					{metaBits.join(" · ")}
+				</p>
 			) : null}
 
-			{disabled ? (
+			{isPlanningNext ? (
+				<p className="text-xs text-muted-foreground">
+					Previous plan clips stay visible below until the new plan is ready.
+				</p>
+			) : disabled ? (
 				<p className="text-xs text-muted-foreground">
 					Plan switching is paused while this composition is generating.
 				</p>

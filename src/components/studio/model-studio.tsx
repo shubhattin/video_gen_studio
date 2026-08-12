@@ -315,6 +315,11 @@ export function ModelStudio({
 		compositionJob?.status === "generating" ||
 		compositionJob?.status === "awaiting_terminal_frame";
 
+	const isPlanningNextComposition =
+		composition.enabled &&
+		(busyStage === "planning" || run?.status === "planning") &&
+		(compositionAttempts?.length ?? 0) > 0;
+
 	const onSelectCompositionAttempt = (jobId: string) => {
 		if (!activeRunId) return;
 		void selectCompositionJob({
@@ -498,27 +503,33 @@ export function ModelStudio({
 				)}
 			</div>
 
-			{composition.enabled && compositionJob ? (
+			{composition.enabled &&
+			(compositionJob || isPlanningNextComposition) ? (
 				<CompositionAttemptControls
 					attempts={compositionAttempts ?? []}
-					activeJobId={compositionJob._id}
-					activeConfig={{
-						_id: compositionJob._id,
-						attemptNumber: compositionJob.attemptNumber ?? 1,
-						status: compositionJob.status,
-						mode: compositionJob.mode,
-						clipCount: compositionJob.clipCount,
-						videoParams: compositionJob.videoParams,
-						overallDescription: compositionJob.overallDescription,
-						plannerModel: compositionJob.plannerModel,
-						plannerReasoning: compositionJob.plannerReasoning,
-						estimatedCostUsd: compositionJob.estimatedCostUsd,
-						actualCostUsd: compositionJob.actualCostUsd,
-						createdAt: compositionJob.createdAt,
-					}}
+					activeJobId={compositionJob?._id}
+					activeConfig={
+						compositionJob
+							? {
+									_id: compositionJob._id,
+									attemptNumber: compositionJob.attemptNumber ?? 1,
+									status: compositionJob.status,
+									mode: compositionJob.mode,
+									clipCount: compositionJob.clipCount,
+									videoParams: compositionJob.videoParams,
+									overallDescription: compositionJob.overallDescription,
+									plannerModel: compositionJob.plannerModel,
+									plannerReasoning: compositionJob.plannerReasoning,
+									estimatedCostUsd: compositionJob.estimatedCostUsd,
+									actualCostUsd: compositionJob.actualCostUsd,
+									createdAt: compositionJob.createdAt,
+								}
+							: null
+					}
 					disabled={compositionSwitchDisabled}
+					isPlanningNext={isPlanningNextComposition}
 					onSelectAttempt={onSelectCompositionAttempt}
-					scenes={(compositionJob.clips ?? []).map(
+					scenes={(compositionJob?.clips ?? []).map(
 						(clip: {
 							clipIndex: number;
 							scenePrompt: string;
@@ -535,21 +546,34 @@ export function ModelStudio({
 			) : null}
 
 			{compositionJobWithUrls ? (
-				<CompositionResult
-					status={compositionJobWithUrls.status}
-					clips={compositionJobWithUrls.clips as CompositionClipResult[]}
-					totalDurationSeconds={compositionJobWithUrls.totalDurationSeconds}
-					aspectRatio={compositionJobWithUrls.videoParams?.aspectRatio}
-					mergeSources={(compositionJobWithUrls.clips ?? []).map(
-						(clip: {
-							video?: { url?: string | null; objectKey?: string | null };
-						}) => ({
-							url: clip.video?.url,
-							objectKey: clip.video?.objectKey,
-							runId: activeRunId,
-						}),
-					)}
-				/>
+				<div
+					className={
+						isPlanningNextComposition
+							? "opacity-70 transition-opacity"
+							: undefined
+					}
+				>
+					{isPlanningNextComposition ? (
+						<p className="mb-2 text-xs text-amber-800 dark:text-amber-200">
+							Showing previous plan clips while the next plan is generated.
+						</p>
+					) : null}
+					<CompositionResult
+						status={compositionJobWithUrls.status}
+						clips={compositionJobWithUrls.clips as CompositionClipResult[]}
+						totalDurationSeconds={compositionJobWithUrls.totalDurationSeconds}
+						aspectRatio={compositionJobWithUrls.videoParams?.aspectRatio}
+						mergeSources={(compositionJobWithUrls.clips ?? []).map(
+							(clip: {
+								video?: { url?: string | null; objectKey?: string | null };
+							}) => ({
+								url: clip.video?.url,
+								objectKey: clip.video?.objectKey,
+								runId: activeRunId,
+							}),
+						)}
+					/>
+				</div>
 			) : null}
 
 			{run ? <VideoResult runId={activeRunId} videos={videos} /> : null}

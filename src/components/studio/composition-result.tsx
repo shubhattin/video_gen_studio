@@ -95,7 +95,9 @@ export function CompositionResult({
 		[usableMergeSources],
 	);
 	const [activeIndex, setActiveIndex] = useState(0);
-	const [merging, setMerging] = useState(false);
+	const [mergeAction, setMergeAction] = useState<"view" | "download" | null>(
+		null,
+	);
 	const [mergeProgress, setMergeProgress] = useState<number | null>(null);
 	const [viewingMerged, setViewingMerged] = useState(false);
 	const [mergedUrl, setMergedUrl] = useState<string | null>(null);
@@ -128,7 +130,6 @@ export function CompositionResult({
 			setMergedUrl(cached.objectUrl);
 			return cached;
 		}
-		setMerging(true);
 		setMergeProgress(0);
 		try {
 			const merged = await mergeCompositionVideos(usableMergeSources, {
@@ -138,12 +139,12 @@ export function CompositionResult({
 			setMergedUrl(merged.objectUrl);
 			return merged;
 		} finally {
-			setMerging(false);
 			setMergeProgress(null);
 		}
 	};
 
 	const onViewFullVideo = async () => {
+		setMergeAction("view");
 		try {
 			const hadCache = Boolean(getCachedMergedComposition(cacheKey));
 			await ensureMerged();
@@ -153,10 +154,13 @@ export function CompositionResult({
 			}
 		} catch (error) {
 			notifyStudioError("Could not build full video", error);
+		} finally {
+			setMergeAction(null);
 		}
 	};
 
 	const onDownloadMerged = async () => {
+		setMergeAction("download");
 		try {
 			const hadCache = Boolean(getCachedMergedComposition(cacheKey));
 			const merged = await ensureMerged();
@@ -166,6 +170,8 @@ export function CompositionResult({
 			);
 		} catch (error) {
 			notifyStudioError("Merged download failed", error);
+		} finally {
+			setMergeAction(null);
 		}
 	};
 
@@ -174,6 +180,7 @@ export function CompositionResult({
 	}
 
 	const hasCachedMerge = Boolean(mergedUrl);
+	const merging = mergeAction != null;
 	const mergeLabel =
 		mergeProgress != null ? `Merging… ${mergeProgress}%` : "Merging…";
 
@@ -203,12 +210,12 @@ export function CompositionResult({
 							disabled={merging}
 							onClick={() => void onViewFullVideo()}
 						>
-							{merging && !hasCachedMerge ? (
+							{mergeAction === "view" ? (
 								<Loader2 className="animate-spin" data-icon="inline-start" />
 							) : (
 								<Film data-icon="inline-start" />
 							)}
-							{merging && !hasCachedMerge
+							{mergeAction === "view"
 								? mergeLabel
 								: viewingMerged
 									? "Playing full video"
@@ -220,12 +227,12 @@ export function CompositionResult({
 							disabled={merging}
 							onClick={() => void onDownloadMerged()}
 						>
-							{merging ? (
+							{mergeAction === "download" ? (
 								<Loader2 className="animate-spin" data-icon="inline-start" />
 							) : (
 								<Download data-icon="inline-start" />
 							)}
-							{merging
+							{mergeAction === "download"
 								? mergeLabel
 								: hasCachedMerge
 									? "Download MP4"

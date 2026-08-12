@@ -364,12 +364,19 @@ function ShlokaStudioPage() {
 		MODEL_CAPABILITY_PROFILES[videoConfig.modelId as VideoModelId];
 
 	const planReady =
+		run?.status === "planning" ||
 		run?.status === "plan_ready" ||
 		run?.status === "image_generating" ||
 		run?.status === "image_ready" ||
 		run?.status === "video_generating" ||
 		run?.status === "completed" ||
-		run?.status === "failed";
+		run?.status === "failed" ||
+		busyStage === "planning";
+
+	const isPlanningNextComposition =
+		composition.enabled &&
+		(busyStage === "planning" || run?.status === "planning") &&
+		(compositionAttempts?.length ?? 0) > 0;
 
 	const extraIds = run?.extraReferenceImageIds ?? [];
 	const isRunLoading = Boolean(runId) && run === undefined;
@@ -471,27 +478,34 @@ function ShlokaStudioPage() {
 
 						{planReady ? (
 							<div className="flex flex-col gap-4">
-								{composition.enabled && compositionJob ? (
+								{composition.enabled &&
+								(compositionJob || isPlanningNextComposition) ? (
 									<CompositionAttemptControls
 										attempts={compositionAttempts ?? []}
-										activeJobId={compositionJob._id}
-										activeConfig={{
-											_id: compositionJob._id,
-											attemptNumber: compositionJob.attemptNumber ?? 1,
-											status: compositionJob.status,
-											mode: compositionJob.mode,
-											clipCount: compositionJob.clipCount,
-											videoParams: compositionJob.videoParams,
-											overallDescription: compositionJob.overallDescription,
-											plannerModel: compositionJob.plannerModel,
-											plannerReasoning: compositionJob.plannerReasoning,
-											estimatedCostUsd: compositionJob.estimatedCostUsd,
-											actualCostUsd: compositionJob.actualCostUsd,
-											createdAt: compositionJob.createdAt,
-										}}
+										activeJobId={compositionJob?._id}
+										activeConfig={
+											compositionJob
+												? {
+														_id: compositionJob._id,
+														attemptNumber: compositionJob.attemptNumber ?? 1,
+														status: compositionJob.status,
+														mode: compositionJob.mode,
+														clipCount: compositionJob.clipCount,
+														videoParams: compositionJob.videoParams,
+														overallDescription:
+															compositionJob.overallDescription,
+														plannerModel: compositionJob.plannerModel,
+														plannerReasoning: compositionJob.plannerReasoning,
+														estimatedCostUsd: compositionJob.estimatedCostUsd,
+														actualCostUsd: compositionJob.actualCostUsd,
+														createdAt: compositionJob.createdAt,
+													}
+												: null
+										}
 										disabled={compositionSwitchDisabled}
+										isPlanningNext={isPlanningNextComposition}
 										onSelectAttempt={onSelectCompositionAttempt}
-										scenes={(compositionJob.clips ?? []).map(
+										scenes={(compositionJob?.clips ?? []).map(
 											(clip: {
 												clipIndex: number;
 												scenePrompt: string;
@@ -646,23 +660,42 @@ function ShlokaStudioPage() {
 						) : null}
 
 						{compositionJobWithUrls ? (
-							<CompositionResult
-								status={compositionJobWithUrls.status}
-								clips={compositionJobWithUrls.clips as CompositionClipResult[]}
-								totalDurationSeconds={
-									compositionJobWithUrls.totalDurationSeconds
+							<div
+								className={
+									isPlanningNextComposition
+										? "opacity-70 transition-opacity"
+										: undefined
 								}
-								aspectRatio={compositionJobWithUrls.videoParams?.aspectRatio}
-								mergeSources={(compositionJobWithUrls.clips ?? []).map(
-									(clip: {
-										video?: { url?: string | null; objectKey?: string | null };
-									}) => ({
-										url: clip.video?.url,
-										objectKey: clip.video?.objectKey,
-										runId,
-									}),
-								)}
-							/>
+							>
+								{isPlanningNextComposition ? (
+									<p className="mb-2 text-xs text-amber-800 dark:text-amber-200">
+										Showing previous plan clips while the next plan is
+										generated.
+									</p>
+								) : null}
+								<CompositionResult
+									status={compositionJobWithUrls.status}
+									clips={
+										compositionJobWithUrls.clips as CompositionClipResult[]
+									}
+									totalDurationSeconds={
+										compositionJobWithUrls.totalDurationSeconds
+									}
+									aspectRatio={compositionJobWithUrls.videoParams?.aspectRatio}
+									mergeSources={(compositionJobWithUrls.clips ?? []).map(
+										(clip: {
+											video?: {
+												url?: string | null;
+												objectKey?: string | null;
+											};
+										}) => ({
+											url: clip.video?.url,
+											objectKey: clip.video?.objectKey,
+											runId,
+										}),
+									)}
+								/>
+							</div>
 						) : null}
 
 						<VideoResult runId={runId} videos={videos} />
