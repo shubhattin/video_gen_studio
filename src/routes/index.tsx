@@ -7,6 +7,7 @@ import {
 	type CompositionClipResult,
 	CompositionResult,
 } from "#/components/studio/composition-result";
+import { CompositionAttemptControls } from "#/components/studio/composition-attempt-controls";
 import { GenerationProgressDock } from "#/components/studio/generation-progress-dock";
 import { HistoryPanel } from "#/components/studio/history-panel";
 import {
@@ -145,6 +146,20 @@ function ShlokaStudioPage() {
 			notifyStudioError("Continuity frame capture failed", error),
 	});
 
+	const compositionSwitchDisabled =
+		busyStage !== null ||
+		compositionJob?.status === "generating" ||
+		compositionJob?.status === "awaiting_terminal_frame";
+
+	const onSelectCompositionAttempt = (jobId: string) => {
+		if (!runId) return;
+		void selectCompositionJob({
+			runId,
+			jobId: jobId as Id<"compositionJobs">,
+		}).catch((error) =>
+			notifyStudioError("Could not switch composition plan", error),
+		);
+	};
 	useEffect(() => {
 		if (!catalog) {
 			refreshCatalog({}).catch(() => undefined);
@@ -456,6 +471,41 @@ function ShlokaStudioPage() {
 
 						{planReady ? (
 							<div className="flex flex-col gap-4">
+								{composition.enabled && compositionJob ? (
+									<CompositionAttemptControls
+										attempts={compositionAttempts ?? []}
+										activeJobId={compositionJob._id}
+										activeConfig={{
+											_id: compositionJob._id,
+											attemptNumber: compositionJob.attemptNumber ?? 1,
+											status: compositionJob.status,
+											mode: compositionJob.mode,
+											clipCount: compositionJob.clipCount,
+											videoParams: compositionJob.videoParams,
+											overallDescription: compositionJob.overallDescription,
+											plannerModel: compositionJob.plannerModel,
+											plannerReasoning: compositionJob.plannerReasoning,
+											estimatedCostUsd: compositionJob.estimatedCostUsd,
+											actualCostUsd: compositionJob.actualCostUsd,
+											createdAt: compositionJob.createdAt,
+										}}
+										disabled={compositionSwitchDisabled}
+										onSelectAttempt={onSelectCompositionAttempt}
+										scenes={(compositionJob.clips ?? []).map(
+											(clip: {
+												clipIndex: number;
+												scenePrompt: string;
+												continuityInstructions?: string;
+												transition?: string;
+											}) => ({
+												clipIndex: clip.clipIndex,
+												scenePrompt: clip.scenePrompt,
+												continuityInstructions: clip.continuityInstructions,
+												transition: clip.transition,
+											}),
+										)}
+									/>
+								) : null}
 								<ShlokaPlanPreview
 									imagePrompt={run?.imagePrompt}
 									videoScenes={run?.videoScenes}
@@ -474,8 +524,12 @@ function ShlokaStudioPage() {
 											compositionJob.mode === "continuation" &&
 											clip.clipIndex > 0,
 									}))}
-									plannerModel={run?.plannerModel}
-									plannerReasoning={run?.plannerReasoning}
+									plannerModel={
+										compositionJob?.plannerModel ?? run?.plannerModel
+									}
+									plannerReasoning={
+										compositionJob?.plannerReasoning ?? run?.plannerReasoning
+									}
 									onRegenerate={
 										runId
 											? () => {
@@ -608,39 +662,6 @@ function ShlokaStudioPage() {
 										runId,
 									}),
 								)}
-								attempts={compositionAttempts ?? []}
-								activeJobId={compositionJobWithUrls._id}
-								activeConfig={{
-									_id: compositionJobWithUrls._id,
-									attemptNumber: compositionJobWithUrls.attemptNumber ?? 1,
-									status: compositionJobWithUrls.status,
-									mode: compositionJobWithUrls.mode,
-									clipCount: compositionJobWithUrls.clipCount,
-									videoParams: compositionJobWithUrls.videoParams,
-									overallDescription: compositionJobWithUrls.overallDescription,
-									plannerModel: compositionJobWithUrls.plannerModel,
-									plannerReasoning: compositionJobWithUrls.plannerReasoning,
-									estimatedCostUsd: compositionJobWithUrls.estimatedCostUsd,
-									actualCostUsd: compositionJobWithUrls.actualCostUsd,
-									createdAt: compositionJobWithUrls.createdAt,
-								}}
-								attemptControlsDisabled={
-									busyStage !== null ||
-									compositionJobWithUrls.status === "generating" ||
-									compositionJobWithUrls.status === "awaiting_terminal_frame"
-								}
-								onSelectAttempt={(jobId) => {
-									if (!runId) return;
-									void selectCompositionJob({
-										runId,
-										jobId: jobId as Id<"compositionJobs">,
-									}).catch((error) =>
-										notifyStudioError(
-											"Could not switch composition attempt",
-											error,
-										),
-									);
-								}}
 							/>
 						) : null}
 

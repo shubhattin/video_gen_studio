@@ -12,10 +12,6 @@ import {
 import { notifyStudioError, notifyStudioSuccess } from "#/lib/studio-toast";
 import { cn } from "#/lib/utils";
 import {
-	CompositionAttemptControls,
-	type CompositionAttemptSummary,
-} from "./composition-attempt-controls";
-import {
 	CompositionClipPlayer,
 	type CompositionPlayerClip,
 } from "./composition-clip-player";
@@ -45,11 +41,6 @@ type CompositionResultProps = {
 	totalDurationSeconds: number;
 	aspectRatio?: string | null;
 	mergeSources: MergeVideoSource[];
-	attempts?: CompositionAttemptSummary[];
-	activeJobId?: string | null;
-	activeConfig?: CompositionAttemptSummary | null;
-	onSelectAttempt?: (jobId: string) => void;
-	attemptControlsDisabled?: boolean;
 };
 
 function statusLabel(status: CompositionClipResult["status"]) {
@@ -75,11 +66,6 @@ export function CompositionResult({
 	totalDurationSeconds,
 	aspectRatio,
 	mergeSources,
-	attempts = [],
-	activeJobId,
-	activeConfig,
-	onSelectAttempt,
-	attemptControlsDisabled,
 }: CompositionResultProps) {
 	const completed = useMemo(
 		() =>
@@ -208,19 +194,6 @@ export function CompositionResult({
 							? "Waiting for this browser to capture the continuity frame… Keep the tab open."
 							: `${completed.length}/${clips.length} clips ready · ${totalDurationSeconds}s planned`}
 					</p>
-					<CompositionAttemptControls
-						attempts={attempts}
-						activeJobId={activeJobId}
-						activeConfig={activeConfig}
-						onSelectAttempt={onSelectAttempt}
-						disabled={attemptControlsDisabled}
-						scenes={clips.map((clip) => ({
-							clipIndex: clip.clipIndex,
-							scenePrompt: clip.scenePrompt,
-							continuityInstructions: clip.continuityInstructions,
-							transition: clip.transition,
-						}))}
-					/>
 				</div>
 				{allClipsReady ? (
 					<div className="flex flex-wrap gap-2">

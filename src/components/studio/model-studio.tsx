@@ -6,6 +6,7 @@ import {
 	type CompositionClipResult,
 	CompositionResult,
 } from "#/components/studio/composition-result";
+import { CompositionAttemptControls } from "#/components/studio/composition-attempt-controls";
 import { GenerationProgressDock } from "#/components/studio/generation-progress-dock";
 import {
 	type CompositionSettings,
@@ -309,6 +310,21 @@ export function ModelStudio({
 		compositionJob?.status === "generating" ||
 		compositionJob?.status === "awaiting_terminal_frame";
 
+	const compositionSwitchDisabled =
+		isBusy ||
+		compositionJob?.status === "generating" ||
+		compositionJob?.status === "awaiting_terminal_frame";
+
+	const onSelectCompositionAttempt = (jobId: string) => {
+		if (!activeRunId) return;
+		void selectCompositionJob({
+			runId: activeRunId,
+			jobId: jobId as Id<"compositionJobs">,
+		}).catch((error) =>
+			notifyStudioError("Could not switch composition plan", error),
+		);
+	};
+
 	return (
 		<div className="flex flex-col gap-8">
 			<section className="flex flex-col gap-3">
@@ -482,6 +498,42 @@ export function ModelStudio({
 				)}
 			</div>
 
+			{composition.enabled && compositionJob ? (
+				<CompositionAttemptControls
+					attempts={compositionAttempts ?? []}
+					activeJobId={compositionJob._id}
+					activeConfig={{
+						_id: compositionJob._id,
+						attemptNumber: compositionJob.attemptNumber ?? 1,
+						status: compositionJob.status,
+						mode: compositionJob.mode,
+						clipCount: compositionJob.clipCount,
+						videoParams: compositionJob.videoParams,
+						overallDescription: compositionJob.overallDescription,
+						plannerModel: compositionJob.plannerModel,
+						plannerReasoning: compositionJob.plannerReasoning,
+						estimatedCostUsd: compositionJob.estimatedCostUsd,
+						actualCostUsd: compositionJob.actualCostUsd,
+						createdAt: compositionJob.createdAt,
+					}}
+					disabled={compositionSwitchDisabled}
+					onSelectAttempt={onSelectCompositionAttempt}
+					scenes={(compositionJob.clips ?? []).map(
+						(clip: {
+							clipIndex: number;
+							scenePrompt: string;
+							continuityInstructions?: string;
+							transition?: string;
+						}) => ({
+							clipIndex: clip.clipIndex,
+							scenePrompt: clip.scenePrompt,
+							continuityInstructions: clip.continuityInstructions,
+							transition: clip.transition,
+						}),
+					)}
+				/>
+			) : null}
+
 			{compositionJobWithUrls ? (
 				<CompositionResult
 					status={compositionJobWithUrls.status}
@@ -497,36 +549,6 @@ export function ModelStudio({
 							runId: activeRunId,
 						}),
 					)}
-					attempts={compositionAttempts ?? []}
-					activeJobId={compositionJobWithUrls._id}
-					activeConfig={{
-						_id: compositionJobWithUrls._id,
-						attemptNumber: compositionJobWithUrls.attemptNumber ?? 1,
-						status: compositionJobWithUrls.status,
-						mode: compositionJobWithUrls.mode,
-						clipCount: compositionJobWithUrls.clipCount,
-						videoParams: compositionJobWithUrls.videoParams,
-						overallDescription: compositionJobWithUrls.overallDescription,
-						plannerModel: compositionJobWithUrls.plannerModel,
-						plannerReasoning: compositionJobWithUrls.plannerReasoning,
-						estimatedCostUsd: compositionJobWithUrls.estimatedCostUsd,
-						actualCostUsd: compositionJobWithUrls.actualCostUsd,
-						createdAt: compositionJobWithUrls.createdAt,
-					}}
-					attemptControlsDisabled={
-						isBusy ||
-						compositionJobWithUrls.status === "generating" ||
-						compositionJobWithUrls.status === "awaiting_terminal_frame"
-					}
-					onSelectAttempt={(jobId) => {
-						if (!activeRunId) return;
-						void selectCompositionJob({
-							runId: activeRunId,
-							jobId: jobId as Id<"compositionJobs">,
-						}).catch((error) =>
-							notifyStudioError("Could not switch composition attempt", error),
-						);
-					}}
 				/>
 			) : null}
 
