@@ -64,10 +64,10 @@ export function ModelStudio({
 	const selectCompositionJob = useMutation(api.studio.selectCompositionJob);
 
 	const [selectedModel, setSelectedModel] = useState<VideoModelId>(
-		"bytedance/seedance-2.0",
+		"bytedance/seedance-2.0-fast",
 	);
 	const [videoConfig, setVideoConfig] = useState<VideoConfigState>(() => ({
-		...defaultVideoParams("bytedance/seedance-2.0"),
+		...defaultVideoParams("bytedance/seedance-2.0-fast"),
 		prompt: "",
 	}));
 	const [imageSize, setImageSize] = useState("1024x1536");
@@ -134,9 +134,9 @@ export function ModelStudio({
 	// biome-ignore lint/correctness/useExhaustiveDependencies: Hydrate the local draft only when the selected run changes.
 	useEffect(() => {
 		if (!controlledRunId) {
-			setSelectedModel("bytedance/seedance-2.0");
+			setSelectedModel("bytedance/seedance-2.0-fast");
 			setVideoConfig({
-				...defaultVideoParams("bytedance/seedance-2.0"),
+				...defaultVideoParams("bytedance/seedance-2.0-fast"),
 				prompt: "",
 			});
 			setImageSize("1024x1536");
@@ -153,7 +153,7 @@ export function ModelStudio({
 		}
 		const modelId = isVideoModelId(run.selectedModelId ?? "")
 			? (run.selectedModelId as VideoModelId)
-			: "bytedance/seedance-2.0";
+			: "bytedance/seedance-2.0-fast";
 		setSelectedModel(modelId);
 		setImageSize(run.imageSize ?? "1024x1536");
 		setImageQuality(run.imageQuality ?? "medium");

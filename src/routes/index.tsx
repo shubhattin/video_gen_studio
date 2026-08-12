@@ -78,7 +78,7 @@ function ShlokaStudioPage() {
 	const [imageSize, setImageSize] = useState("1024x1536");
 	const [imageQuality, setImageQuality] = useState("medium");
 	const [videoConfig, setVideoConfig] = useState<VideoConfigState>(
-		defaultVideoParams("bytedance/seedance-2.0"),
+		defaultVideoParams("bytedance/seedance-2.0-fast"),
 	);
 	const [busyStage, setBusyStage] = useState<StudioBusyStage>(null);
 	const [composition, setComposition] = useState<CompositionSettings>({
@@ -178,7 +178,7 @@ function ShlokaStudioPage() {
 			setPlannerSystemPrompt(DEFAULT_PLANNER_SYSTEM_PROMPT);
 			setImageSize("1024x1536");
 			setImageQuality("medium");
-			setVideoConfig(defaultVideoParams("bytedance/seedance-2.0"));
+			setVideoConfig(defaultVideoParams("bytedance/seedance-2.0-fast"));
 			setComposition({
 				enabled: false,
 				mode: "continuation",
@@ -209,7 +209,7 @@ function ShlokaStudioPage() {
 		setImageQuality(run.imageQuality ?? "medium");
 		if (run.videoParams) {
 			setVideoConfig({
-				modelId: (run.selectedModelId as VideoModelId) ?? "bytedance/seedance-2.0",
+				modelId: (run.selectedModelId as VideoModelId) ?? "bytedance/seedance-2.0-fast",
 				aspectRatio: run.videoParams.aspectRatio,
 				resolution: run.videoParams.resolution,
 				durationSeconds: run.videoParams.durationSeconds,
