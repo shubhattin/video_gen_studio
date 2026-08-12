@@ -11,7 +11,6 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as StudioRouteImport } from './routes/studio'
-import { Route as ApiExtractTerminalFrameRouteImport } from './routes/api/extract-terminal-frame'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -23,40 +22,31 @@ const StudioRoute = StudioRouteImport.update({
   path: '/studio',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiExtractTerminalFrameRoute = ApiExtractTerminalFrameRouteImport.update({
-  id: '/api/extract-terminal-frame',
-  path: '/api/extract-terminal-frame',
-  getParentRoute: () => rootRouteImport,
-} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/studio': typeof StudioRoute
-  '/api/extract-terminal-frame': typeof ApiExtractTerminalFrameRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/studio': typeof StudioRoute
-  '/api/extract-terminal-frame': typeof ApiExtractTerminalFrameRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/studio': typeof StudioRoute
-  '/api/extract-terminal-frame': typeof ApiExtractTerminalFrameRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/studio' | '/api/extract-terminal-frame'
+  fullPaths: '/' | '/studio'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/studio' | '/api/extract-terminal-frame'
-  id: '__root__' | '/' | '/studio' | '/api/extract-terminal-frame'
+  to: '/' | '/studio'
+  id: '__root__' | '/' | '/studio'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   StudioRoute: typeof StudioRoute
-  ApiExtractTerminalFrameRoute: typeof ApiExtractTerminalFrameRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -75,20 +65,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StudioRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/extract-terminal-frame': {
-      id: '/api/extract-terminal-frame'
-      path: '/api/extract-terminal-frame'
-      fullPath: '/api/extract-terminal-frame'
-      preLoaderRoute: typeof ApiExtractTerminalFrameRouteImport
-      parentRoute: typeof rootRouteImport
-    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   StudioRoute: StudioRoute,
-  ApiExtractTerminalFrameRoute: ApiExtractTerminalFrameRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

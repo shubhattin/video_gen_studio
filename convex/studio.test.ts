@@ -198,11 +198,60 @@ describe("studio mutations", () => {
 			runId,
 		});
 		expect(composition?.status).toBe("planned");
+		expect(composition?.attemptNumber).toBe(1);
 		expect(composition?.clips).toHaveLength(2);
 		expect(composition?.clips.map((clip: { clipIndex: number }) => clip.clipIndex)).toEqual([
 			0,
 			1,
 		]);
+
+		const runAfterFirst = await t.query(api.studio.getRun, { runId });
+		expect(runAfterFirst?.activeCompositionJobId).toBe(composition?._id);
+
+		await t.mutation(internal.studioInternal.commitCompositionPlan, {
+			runId,
+			plannerModel: "openai/gpt-5.6-terra",
+			plannerReasoning: "high",
+			imagePrompt: "A second illustrated temple path at dusk",
+			overallDescription: "A dusk revisit of the same temple walk.",
+			clips: [
+				{
+					clipIndex: 0,
+					globalDescription: "A dusk revisit of the same temple walk.",
+					scenePrompt: "Dusk approach to the temple with cooler light.",
+					continuityInstructions: "Keep the same devotee and shawl.",
+					transition: "End at the gate under blue hour sky.",
+				},
+				{
+					clipIndex: 1,
+					globalDescription: "A dusk revisit of the same temple walk.",
+					scenePrompt: "Continue into the courtyard at dusk.",
+					continuityInstructions: "Preserve pose, shawl, and architecture.",
+					transition: "Resolve on the diya flame.",
+				},
+			],
+			planningKey: "composition-plan-test-2",
+		});
+
+		const attempts = await t.query(api.studio.listCompositionJobsForRun, {
+			runId,
+		});
+		expect(attempts).toHaveLength(2);
+		expect(attempts.map((job: { attemptNumber: number }) => job.attemptNumber).sort()).toEqual([
+			1, 2,
+		]);
+
+		const active = await t.query(api.studio.getCompositionForRun, { runId });
+		expect(active?.attemptNumber).toBe(2);
+		expect(active?.overallDescription).toContain("dusk");
+
+		await t.mutation(api.studio.selectCompositionJob, {
+			runId,
+			jobId: composition!._id,
+		});
+		const selected = await t.query(api.studio.getCompositionForRun, { runId });
+		expect(selected?._id).toBe(composition?._id);
+		expect(selected?.attemptNumber).toBe(1);
 	});
 });
 

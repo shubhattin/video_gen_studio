@@ -141,6 +141,8 @@ export default defineSchema({
 		planningCompletedAt: v.optional(v.number()),
 		imageCompletedAt: v.optional(v.number()),
 		videoCompletedAt: v.optional(v.number()),
+		/** Selected multi-clip composition attempt for this run. */
+		activeCompositionJobId: v.optional(v.id("compositionJobs")),
 		createdAt: v.number(),
 		updatedAt: v.number(),
 	})
@@ -156,6 +158,8 @@ export default defineSchema({
 
 	compositionJobs: defineTable({
 		runId: v.id("generationRuns"),
+		/** 1-based attempt number within the run. Older rows may omit this (treat as 1). */
+		attemptNumber: v.optional(v.number()),
 		mode: compositionModeValidator,
 		status: compositionJobStatusValidator,
 		videoParams: videoParamsValidator,
@@ -165,11 +169,14 @@ export default defineSchema({
 		actualCostUsd: v.optional(v.number()),
 		currentClipIndex: v.optional(v.number()),
 		overallDescription: v.optional(v.string()),
+		plannerModel: v.optional(v.string()),
+		plannerReasoning: v.optional(v.string()),
 		lastError: v.optional(v.string()),
 		createdAt: v.number(),
 		updatedAt: v.number(),
 	})
 		.index("by_runId", ["runId"])
+		.index("by_runId_and_createdAt", ["runId", "createdAt"])
 		.index("by_status_and_updatedAt", ["status", "updatedAt"]),
 
 	compositionClips: defineTable({

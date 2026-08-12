@@ -78,7 +78,7 @@ function ShlokaStudioPage() {
 	const [imageSize, setImageSize] = useState("1024x1536");
 	const [imageQuality, setImageQuality] = useState("medium");
 	const [videoConfig, setVideoConfig] = useState<VideoConfigState>(
-		defaultVideoParams("google/veo-3.1-lite"),
+		defaultVideoParams("bytedance/seedance-2.0"),
 	);
 	const [busyStage, setBusyStage] = useState<StudioBusyStage>(null);
 	const [composition, setComposition] = useState<CompositionSettings>({
@@ -90,6 +90,10 @@ function ShlokaStudioPage() {
 	const run = useQuery(api.studio.getRun, runId ? { runId } : "skip");
 	const compositionJob = useQuery(
 		api.studio.getCompositionForRun,
+		runId ? { runId } : "skip",
+	);
+	const compositionAttempts = useQuery(
+		api.studio.listCompositionJobsForRun,
 		runId ? { runId } : "skip",
 	);
 	const catalog = useQuery(api.studio.getCachedOpenRouterCatalog);
@@ -109,6 +113,7 @@ function ShlokaStudioPage() {
 	const generateVideo = useAction(api.studioActions.generateVideoForRun);
 	const startComposition = useMutation(api.studio.startComposition);
 	const cancelComposition = useMutation(api.studio.cancelComposition);
+	const selectCompositionJob = useMutation(api.studio.selectCompositionJob);
 
 	const rawImages = run?.referenceImages ?? [];
 	const rawVideos = run?.videos ?? [];
@@ -173,7 +178,7 @@ function ShlokaStudioPage() {
 			setPlannerSystemPrompt(DEFAULT_PLANNER_SYSTEM_PROMPT);
 			setImageSize("1024x1536");
 			setImageQuality("medium");
-			setVideoConfig(defaultVideoParams("google/veo-3.1-lite"));
+			setVideoConfig(defaultVideoParams("bytedance/seedance-2.0"));
 			setComposition({
 				enabled: false,
 				mode: "continuation",
@@ -204,7 +209,7 @@ function ShlokaStudioPage() {
 		setImageQuality(run.imageQuality ?? "medium");
 		if (run.videoParams) {
 			setVideoConfig({
-				modelId: (run.selectedModelId as VideoModelId) ?? "google/veo-3.1-lite",
+				modelId: (run.selectedModelId as VideoModelId) ?? "bytedance/seedance-2.0",
 				aspectRatio: run.videoParams.aspectRatio,
 				resolution: run.videoParams.resolution,
 				durationSeconds: run.videoParams.durationSeconds,
@@ -442,7 +447,9 @@ function ShlokaStudioPage() {
 								{busyStage === "planning"
 									? "Planning…"
 									: composition.enabled
-										? "Generate multi-clip plan"
+										? (compositionAttempts?.length ?? 0) > 0
+											? "Plan another multi-clip attempt"
+											: "Generate multi-clip plan"
 										: "Generate creative plan"}
 							</Button>
 						</div>
@@ -601,6 +608,39 @@ function ShlokaStudioPage() {
 										runId,
 									}),
 								)}
+								attempts={compositionAttempts ?? []}
+								activeJobId={compositionJobWithUrls._id}
+								activeConfig={{
+									_id: compositionJobWithUrls._id,
+									attemptNumber: compositionJobWithUrls.attemptNumber ?? 1,
+									status: compositionJobWithUrls.status,
+									mode: compositionJobWithUrls.mode,
+									clipCount: compositionJobWithUrls.clipCount,
+									videoParams: compositionJobWithUrls.videoParams,
+									overallDescription: compositionJobWithUrls.overallDescription,
+									plannerModel: compositionJobWithUrls.plannerModel,
+									plannerReasoning: compositionJobWithUrls.plannerReasoning,
+									estimatedCostUsd: compositionJobWithUrls.estimatedCostUsd,
+									actualCostUsd: compositionJobWithUrls.actualCostUsd,
+									createdAt: compositionJobWithUrls.createdAt,
+								}}
+								attemptControlsDisabled={
+									busyStage !== null ||
+									compositionJobWithUrls.status === "generating" ||
+									compositionJobWithUrls.status === "awaiting_terminal_frame"
+								}
+								onSelectAttempt={(jobId) => {
+									if (!runId) return;
+									void selectCompositionJob({
+										runId,
+										jobId: jobId as Id<"compositionJobs">,
+									}).catch((error) =>
+										notifyStudioError(
+											"Could not switch composition attempt",
+											error,
+										),
+									);
+								}}
 							/>
 						) : null}
 

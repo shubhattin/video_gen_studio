@@ -22,7 +22,8 @@ type CompositionHandoffJob = {
 
 /**
  * When continuation mode pauses for a terminal frame, extract it in the browser
- * and resume the composition. Convex cloud cannot reach localhost FFmpeg.
+ * (WASM FFmpeg) and resume the composition. Next-clip generation stays paused
+ * until this client handoff completes — keep the studio tab open.
  */
 export function useCompositionTerminalFrameHandoff(args: {
 	runId?: Id<"generationRuns"> | null;

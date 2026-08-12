@@ -1,6 +1,7 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { mutation, query, type QueryCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
+import type { Doc } from "./_generated/dataModel";
 import {
 	MODEL_CAPABILITY_PROFILES,
 	VIDEO_MODEL_IDS,
@@ -9,6 +10,25 @@ import {
 import { normalizePlannerSystemPromptForStorage } from "./lib/plannerPrompt";
 import { defaultImageConfig, defaultVideoParams } from "./lib/schemas";
 import { compositionModeValidator, videoParamsValidator } from "./schema";
+import {
+	listCompositionJobsForRunCtx,
+	resolveActiveCompositionJob,
+} from "./studioQueries";
+
+async function compositionWithClips(
+	ctx: QueryCtx,
+	job: Doc<"compositionJobs">,
+) {
+	const clips = await ctx.db
+		.query("compositionClips")
+		.withIndex("by_jobId_and_clipIndex", (q) => q.eq("jobId", job._id))
+		.order("asc")
+		.take(6);
+	return {
+		...job,
+		clips,
+	};
+}
 
 export const getRun = query({
 	args: {
@@ -23,25 +43,73 @@ export const getRun = query({
 export const getCompositionForRun = query({
 	args: {
 		runId: v.id("generationRuns"),
+		jobId: v.optional(v.id("compositionJobs")),
 	},
 	returns: v.union(v.null(), v.any()),
 	handler: async (ctx, args) => {
-		const job = await ctx.db
-			.query("compositionJobs")
-			.withIndex("by_runId", (q) => q.eq("runId", args.runId))
-			.unique();
+		let job = null;
+		if (args.jobId) {
+			const selected = await ctx.db.get(args.jobId);
+			if (selected && selected.runId === args.runId) {
+				job = selected;
+			}
+		}
+		if (!job) {
+			job = await resolveActiveCompositionJob(ctx, args.runId);
+		}
 		if (!job) {
 			return null;
 		}
-		const clips = await ctx.db
-			.query("compositionClips")
-			.withIndex("by_jobId_and_clipIndex", (q) => q.eq("jobId", job._id))
-			.order("asc")
-			.take(6);
-		return {
-			...job,
-			clips,
-		};
+		return await compositionWithClips(ctx, job);
+	},
+});
+
+export const listCompositionJobsForRun = query({
+	args: {
+		runId: v.id("generationRuns"),
+	},
+	returns: v.array(v.any()),
+	handler: async (ctx, args) => {
+		const jobs = await listCompositionJobsForRunCtx(ctx, args.runId);
+		return jobs.map((job) => ({
+			_id: job._id,
+			attemptNumber: job.attemptNumber ?? 1,
+			status: job.status,
+			mode: job.mode,
+			clipCount: job.clipCount,
+			videoParams: job.videoParams,
+			overallDescription: job.overallDescription,
+			plannerModel: job.plannerModel,
+			plannerReasoning: job.plannerReasoning,
+			estimatedCostUsd: job.estimatedCostUsd,
+			actualCostUsd: job.actualCostUsd,
+			createdAt: job.createdAt,
+			updatedAt: job.updatedAt,
+			lastError: job.lastError,
+		}));
+	},
+});
+
+export const selectCompositionJob = mutation({
+	args: {
+		runId: v.id("generationRuns"),
+		jobId: v.id("compositionJobs"),
+	},
+	returns: v.null(),
+	handler: async (ctx, args) => {
+		const run = await ctx.db.get(args.runId);
+		if (!run) {
+			throw new Error("Run not found.");
+		}
+		const job = await ctx.db.get(args.jobId);
+		if (!job || job.runId !== args.runId) {
+			throw new Error("Composition attempt not found for this run.");
+		}
+		await ctx.db.patch(args.runId, {
+			activeCompositionJobId: args.jobId,
+			updatedAt: Date.now(),
+		});
+		return null;
 	},
 });
 
@@ -104,7 +172,7 @@ export const createShlokaDraft = mutation({
 		}
 		const now = Date.now();
 		const imageConfig = defaultImageConfig();
-		const defaultModel: VideoModelId = "google/veo-3.1-lite";
+		const defaultModel: VideoModelId = "bytedance/seedance-2.0";
 		const plannerSystemPrompt = normalizePlannerSystemPromptForStorage(
 			args.plannerSystemPrompt,
 		);
@@ -185,26 +253,11 @@ export const updateDraft = mutation({
 		if (run.status === "video_generating" || run.status === "planning") {
 			throw new Error("Run is busy. Wait for the current stage to finish.");
 		}
-		const compositionJob = await ctx.db
-			.query("compositionJobs")
-			.withIndex("by_runId", (q) => q.eq("runId", args.runId))
-			.unique();
-		const compositionHasVideo = compositionJob
-			? Boolean(
-					(
-						await ctx.db
-							.query("compositionClips")
-							.withIndex("by_jobId_and_clipIndex", (q) =>
-								q.eq("jobId", compositionJob._id),
-							)
-							.take(6)
-					).some((clip) => clip.video),
-				)
-			: false;
 		const requestedModelId = args.selectedModelId ?? args.videoParams?.modelId;
 		const currentModelId = run.selectedModelId ?? run.videoParams?.modelId;
+		// Single-clip videos lock the model; composition attempts may use different models.
 		if (
-			(run.videos?.length || compositionHasVideo) &&
+			(run.videos?.length ?? 0) > 0 &&
 			requestedModelId &&
 			currentModelId &&
 			requestedModelId !== currentModelId
@@ -280,13 +333,20 @@ export const updateDraft = mutation({
 export const startComposition = mutation({
 	args: {
 		runId: v.id("generationRuns"),
+		jobId: v.optional(v.id("compositionJobs")),
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
-		const job = await ctx.db
-			.query("compositionJobs")
-			.withIndex("by_runId", (q) => q.eq("runId", args.runId))
-			.unique();
+		let job = null;
+		if (args.jobId) {
+			const selected = await ctx.db.get(args.jobId);
+			if (selected && selected.runId === args.runId) {
+				job = selected;
+			}
+		}
+		if (!job) {
+			job = await resolveActiveCompositionJob(ctx, args.runId);
+		}
 		if (!job) {
 			throw new Error(
 				"Generate a multi-clip plan before starting the composition.",
@@ -300,6 +360,10 @@ export const startComposition = mutation({
 				jobId: job._id,
 			});
 		}
+		await ctx.db.patch(args.runId, {
+			activeCompositionJobId: job._id,
+			updatedAt: Date.now(),
+		});
 		await ctx.scheduler.runAfter(
 			0,
 			internal.studioActions.generateNextCompositionClip,
@@ -312,13 +376,20 @@ export const startComposition = mutation({
 export const cancelComposition = mutation({
 	args: {
 		runId: v.id("generationRuns"),
+		jobId: v.optional(v.id("compositionJobs")),
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
-		const job = await ctx.db
-			.query("compositionJobs")
-			.withIndex("by_runId", (q) => q.eq("runId", args.runId))
-			.unique();
+		let job = null;
+		if (args.jobId) {
+			const selected = await ctx.db.get(args.jobId);
+			if (selected && selected.runId === args.runId) {
+				job = selected;
+			}
+		}
+		if (!job) {
+			job = await resolveActiveCompositionJob(ctx, args.runId);
+		}
 		if (!job || job.status === "completed") {
 			return null;
 		}
@@ -347,11 +418,8 @@ export const deleteRun = mutation({
 			return null;
 		}
 		const keysToDelete: string[] = [];
-		const compositionJob = await ctx.db
-			.query("compositionJobs")
-			.withIndex("by_runId", (q) => q.eq("runId", args.runId))
-			.unique();
-		if (compositionJob) {
+		const compositionJobs = await listCompositionJobsForRunCtx(ctx, args.runId);
+		for (const compositionJob of compositionJobs) {
 			const compositionClips = await ctx.db
 				.query("compositionClips")
 				.withIndex("by_jobId_and_clipIndex", (q) =>

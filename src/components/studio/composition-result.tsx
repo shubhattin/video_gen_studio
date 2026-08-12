@@ -12,6 +12,10 @@ import {
 import { notifyStudioError, notifyStudioSuccess } from "#/lib/studio-toast";
 import { cn } from "#/lib/utils";
 import {
+	CompositionAttemptControls,
+	type CompositionAttemptSummary,
+} from "./composition-attempt-controls";
+import {
 	CompositionClipPlayer,
 	type CompositionPlayerClip,
 } from "./composition-clip-player";
@@ -22,6 +26,7 @@ export type CompositionClipResult = {
 	clipIndex: number;
 	status: "pending" | "generating" | "completed" | "failed" | "cancelled";
 	scenePrompt: string;
+	continuityInstructions?: string;
 	transition: string;
 	warnings?: string[];
 	lastError?: string;
@@ -40,6 +45,11 @@ type CompositionResultProps = {
 	totalDurationSeconds: number;
 	aspectRatio?: string | null;
 	mergeSources: MergeVideoSource[];
+	attempts?: CompositionAttemptSummary[];
+	activeJobId?: string | null;
+	activeConfig?: CompositionAttemptSummary | null;
+	onSelectAttempt?: (jobId: string) => void;
+	attemptControlsDisabled?: boolean;
 };
 
 function statusLabel(status: CompositionClipResult["status"]) {
@@ -65,6 +75,11 @@ export function CompositionResult({
 	totalDurationSeconds,
 	aspectRatio,
 	mergeSources,
+	attempts = [],
+	activeJobId,
+	activeConfig,
+	onSelectAttempt,
+	attemptControlsDisabled,
 }: CompositionResultProps) {
 	const completed = useMemo(
 		() =>
@@ -179,8 +194,8 @@ export function CompositionResult({
 	return (
 		<section className="flex flex-col gap-4 border-t border-border/80 pt-6">
 			<div className="flex flex-wrap items-end justify-between gap-3">
-				<div>
-					<div className="flex items-center gap-2">
+				<div className="flex min-w-0 flex-col gap-2">
+					<div className="flex flex-wrap items-center gap-2">
 						<h2 className="font-heading text-xl font-semibold">
 							Composed video
 						</h2>
@@ -190,9 +205,22 @@ export function CompositionResult({
 					</div>
 					<p className="text-sm text-muted-foreground">
 						{status === "awaiting_terminal_frame"
-							? "Capturing continuity frame from the last clip…"
+							? "Waiting for this browser to capture the continuity frame… Keep the tab open."
 							: `${completed.length}/${clips.length} clips ready · ${totalDurationSeconds}s planned`}
 					</p>
+					<CompositionAttemptControls
+						attempts={attempts}
+						activeJobId={activeJobId}
+						activeConfig={activeConfig}
+						onSelectAttempt={onSelectAttempt}
+						disabled={attemptControlsDisabled}
+						scenes={clips.map((clip) => ({
+							clipIndex: clip.clipIndex,
+							scenePrompt: clip.scenePrompt,
+							continuityInstructions: clip.continuityInstructions,
+							transition: clip.transition,
+						}))}
+					/>
 				</div>
 				{allClipsReady ? (
 					<div className="flex flex-wrap gap-2">

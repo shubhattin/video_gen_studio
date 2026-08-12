@@ -16,9 +16,6 @@ import {
 	getOpenAIProvider,
 	getOpenRouterApiKey,
 	getOpenRouterProvider,
-	getVideoProcessorSecret,
-	getVideoProcessorUrl,
-	isVideoProcessorConfigured,
 } from "./lib/providers";
 import {
 	downloadOpenRouterVideo,
@@ -155,35 +152,6 @@ function newMediaId(prefix: string) {
 
 async function signedReadUrl(objectKey: string) {
 	return await createPresignedGetUrl({ objectKey });
-}
-
-async function extractTerminalFrame(args: {
-	runId: string;
-	videoObjectKey: string;
-}) {
-	const sourceUrl = await signedReadUrl(args.videoObjectKey);
-	const response = await fetch(
-		`${getVideoProcessorUrl()}/api/extract-terminal-frame`,
-		{
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				"x-video-processor-secret": getVideoProcessorSecret(),
-			},
-			body: JSON.stringify({ sourceUrl }),
-			signal: AbortSignal.timeout(90_000),
-		},
-	);
-	if (!response.ok) {
-		throw new Error(`Terminal-frame extraction failed (${response.status}).`);
-	}
-	const mimeType = response.headers.get("content-type") ?? "image/jpeg";
-	return await storeBytes({
-		runId: args.runId,
-		kind: "frames",
-		bytes: new Uint8Array(await response.arrayBuffer()),
-		mimeType,
-	});
 }
 
 export const planShlokaRun = action({
@@ -618,7 +586,6 @@ export const generateNextCompositionClip = internalAction({
 			previousTerminalFrameObjectKey?: string;
 		};
 		let generatedObjectKey: string | undefined;
-		let extractedTerminalFrameObjectKey: string | undefined;
 		try {
 			if (!isVideoModelId(job.videoParams.modelId)) {
 				throw new Error("Composition uses an unsupported video model.");
@@ -693,28 +660,10 @@ export const generateNextCompositionClip = internalAction({
 				mimeType: downloaded.mimeType,
 			});
 			generatedObjectKey = objectKey;
-			let terminalFrameObjectKey: string | undefined;
-			let awaitTerminalFrame = false;
-			if (clip.clipIndex < job.clipCount - 1 && job.mode === "continuation") {
-				if (isVideoProcessorConfigured()) {
-					try {
-						terminalFrameObjectKey = await extractTerminalFrame({
-							runId: job.runId,
-							videoObjectKey: objectKey,
-						});
-						extractedTerminalFrameObjectKey = terminalFrameObjectKey;
-					} catch (error) {
-						referenceWarnings.push(
-							error instanceof Error
-								? `${error.message} Extracting the continuity frame in the browser instead.`
-								: "Server terminal-frame extraction failed. Extracting in the browser instead.",
-						);
-						awaitTerminalFrame = true;
-					}
-				} else {
-					awaitTerminalFrame = true;
-				}
-			}
+			// Continuation mid-clips pause for browser-side FFmpeg frame extraction.
+			// Next clip generation resumes only after the client uploads the frame.
+			const awaitTerminalFrame =
+				clip.clipIndex < job.clipCount - 1 && job.mode === "continuation";
 			const warnings = [
 				...adapted.warnings,
 				...referenceWarnings,
@@ -744,19 +693,13 @@ export const generateNextCompositionClip = internalAction({
 					warnings: warnings.length > 0 ? warnings : undefined,
 					createdAt: Date.now(),
 				},
-				terminalFrameObjectKey,
 				warnings: warnings.length > 0 ? warnings : undefined,
 				awaitTerminalFrame,
 			});
 			generatedObjectKey = undefined;
-			extractedTerminalFrameObjectKey = undefined;
 		} catch (error) {
-			const keys = [
-				generatedObjectKey,
-				extractedTerminalFrameObjectKey,
-			].filter((key): key is string => Boolean(key));
-			if (keys.length > 0) {
-				await deleteR2Objects(keys);
+			if (generatedObjectKey) {
+				await deleteR2Objects([generatedObjectKey]);
 			}
 			await ctx.runMutation(internal.studioInternal.failCompositionClip, {
 				jobId: args.jobId,

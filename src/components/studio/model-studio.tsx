@@ -61,12 +61,13 @@ export function ModelStudio({
 	);
 	const startComposition = useMutation(api.studio.startComposition);
 	const cancelComposition = useMutation(api.studio.cancelComposition);
+	const selectCompositionJob = useMutation(api.studio.selectCompositionJob);
 
 	const [selectedModel, setSelectedModel] = useState<VideoModelId>(
-		"google/veo-3.1-lite",
+		"bytedance/seedance-2.0",
 	);
 	const [videoConfig, setVideoConfig] = useState<VideoConfigState>(() => ({
-		...defaultVideoParams("google/veo-3.1-lite"),
+		...defaultVideoParams("bytedance/seedance-2.0"),
 		prompt: "",
 	}));
 	const [imageSize, setImageSize] = useState("1024x1536");
@@ -86,6 +87,10 @@ export function ModelStudio({
 	);
 	const compositionJob = useQuery(
 		api.studio.getCompositionForRun,
+		activeRunId ? { runId: activeRunId } : "skip",
+	);
+	const compositionAttempts = useQuery(
+		api.studio.listCompositionJobsForRun,
 		activeRunId ? { runId: activeRunId } : "skip",
 	);
 	const profile = MODEL_CAPABILITY_PROFILES[selectedModel];
@@ -129,9 +134,9 @@ export function ModelStudio({
 	// biome-ignore lint/correctness/useExhaustiveDependencies: Hydrate the local draft only when the selected run changes.
 	useEffect(() => {
 		if (!controlledRunId) {
-			setSelectedModel("google/veo-3.1-lite");
+			setSelectedModel("bytedance/seedance-2.0");
 			setVideoConfig({
-				...defaultVideoParams("google/veo-3.1-lite"),
+				...defaultVideoParams("bytedance/seedance-2.0"),
 				prompt: "",
 			});
 			setImageSize("1024x1536");
@@ -148,7 +153,7 @@ export function ModelStudio({
 		}
 		const modelId = isVideoModelId(run.selectedModelId ?? "")
 			? (run.selectedModelId as VideoModelId)
-			: "google/veo-3.1-lite";
+			: "bytedance/seedance-2.0";
 		setSelectedModel(modelId);
 		setImageSize(run.imageSize ?? "1024x1536");
 		setImageQuality(run.imageQuality ?? "medium");
@@ -302,10 +307,7 @@ export function ModelStudio({
 		Boolean(run?.videos?.length) ||
 		run?.status === "video_generating" ||
 		compositionJob?.status === "generating" ||
-		compositionJob?.status === "awaiting_terminal_frame" ||
-		Boolean(
-			compositionJob?.clips.some((clip: { video?: unknown }) => clip.video),
-		);
+		compositionJob?.status === "awaiting_terminal_frame";
 
 	return (
 		<div className="flex flex-col gap-8">
@@ -335,7 +337,9 @@ export function ModelStudio({
 						/>
 						{isModelLocked ? (
 							<p className="mt-2 text-xs text-muted-foreground">
-								The video model is fixed after generation begins for this run.
+								{run?.videos?.length
+									? "The video model is fixed after single-clip generation begins for this run."
+									: "Model is locked while this composition attempt is generating."}
 							</p>
 						) : null}
 					</div>
@@ -439,7 +443,9 @@ export function ModelStudio({
 						>
 							{busyStage === "planning"
 								? "Planning composition…"
-								: "Generate composition plan"}
+								: (compositionAttempts?.length ?? 0) > 0
+									? "Plan another attempt"
+									: "Generate composition plan"}
 						</Button>
 						{compositionJob?.status === "planned" ||
 						compositionJob?.status === "failed" ? (
@@ -491,6 +497,36 @@ export function ModelStudio({
 							runId: activeRunId,
 						}),
 					)}
+					attempts={compositionAttempts ?? []}
+					activeJobId={compositionJobWithUrls._id}
+					activeConfig={{
+						_id: compositionJobWithUrls._id,
+						attemptNumber: compositionJobWithUrls.attemptNumber ?? 1,
+						status: compositionJobWithUrls.status,
+						mode: compositionJobWithUrls.mode,
+						clipCount: compositionJobWithUrls.clipCount,
+						videoParams: compositionJobWithUrls.videoParams,
+						overallDescription: compositionJobWithUrls.overallDescription,
+						plannerModel: compositionJobWithUrls.plannerModel,
+						plannerReasoning: compositionJobWithUrls.plannerReasoning,
+						estimatedCostUsd: compositionJobWithUrls.estimatedCostUsd,
+						actualCostUsd: compositionJobWithUrls.actualCostUsd,
+						createdAt: compositionJobWithUrls.createdAt,
+					}}
+					attemptControlsDisabled={
+						isBusy ||
+						compositionJobWithUrls.status === "generating" ||
+						compositionJobWithUrls.status === "awaiting_terminal_frame"
+					}
+					onSelectAttempt={(jobId) => {
+						if (!activeRunId) return;
+						void selectCompositionJob({
+							runId: activeRunId,
+							jobId: jobId as Id<"compositionJobs">,
+						}).catch((error) =>
+							notifyStudioError("Could not switch composition attempt", error),
+						);
+					}}
 				/>
 			) : null}
 

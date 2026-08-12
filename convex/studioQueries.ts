@@ -1,5 +1,42 @@
 import { v } from "convex/values";
-import { internalQuery } from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
+import {
+	internalQuery,
+	type MutationCtx,
+	type QueryCtx,
+} from "./_generated/server";
+
+type DbCtx = QueryCtx | MutationCtx;
+
+export async function listCompositionJobsForRunCtx(
+	ctx: DbCtx,
+	runId: Id<"generationRuns">,
+) {
+	const jobs = await ctx.db
+		.query("compositionJobs")
+		.withIndex("by_runId_and_createdAt", (q) => q.eq("runId", runId))
+		.order("desc")
+		.take(50);
+	return jobs;
+}
+
+export async function resolveActiveCompositionJob(
+	ctx: DbCtx,
+	runId: Id<"generationRuns">,
+): Promise<Doc<"compositionJobs"> | null> {
+	const run = await ctx.db.get(runId);
+	if (!run) {
+		return null;
+	}
+	if (run.activeCompositionJobId) {
+		const selected = await ctx.db.get(run.activeCompositionJobId);
+		if (selected && selected.runId === runId) {
+			return selected;
+		}
+	}
+	const jobs = await listCompositionJobsForRunCtx(ctx, runId);
+	return jobs[0] ?? null;
+}
 
 export const getRunDoc = internalQuery({
 	args: {
@@ -17,10 +54,7 @@ export const getCompositionJobByRun = internalQuery({
 	},
 	returns: v.union(v.null(), v.any()),
 	handler: async (ctx, args) => {
-		return await ctx.db
-			.query("compositionJobs")
-			.withIndex("by_runId", (q) => q.eq("runId", args.runId))
-			.unique();
+		return await resolveActiveCompositionJob(ctx, args.runId);
 	},
 });
 
@@ -53,21 +87,22 @@ export const objectKeyBelongsToRun = internalQuery({
 		if (inRun) {
 			return true;
 		}
-		const job = await ctx.db
-			.query("compositionJobs")
-			.withIndex("by_runId", (q) => q.eq("runId", args.runId))
-			.unique();
-		if (!job) {
-			return false;
+		const jobs = await listCompositionJobsForRunCtx(ctx, args.runId);
+		for (const job of jobs) {
+			const compositionClips = await ctx.db
+				.query("compositionClips")
+				.withIndex("by_jobId_and_clipIndex", (q) => q.eq("jobId", job._id))
+				.take(6);
+			if (
+				compositionClips.some(
+					(clip) =>
+						clip.video?.objectKey === args.objectKey ||
+						clip.terminalFrameObjectKey === args.objectKey,
+				)
+			) {
+				return true;
+			}
 		}
-		const compositionClips = await ctx.db
-			.query("compositionClips")
-			.withIndex("by_jobId_and_clipIndex", (q) => q.eq("jobId", job._id))
-			.take(6);
-		return compositionClips.some(
-			(clip) =>
-				clip.video?.objectKey === args.objectKey ||
-				clip.terminalFrameObjectKey === args.objectKey,
-		);
+		return false;
 	},
 });

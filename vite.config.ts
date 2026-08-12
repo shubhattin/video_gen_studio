@@ -25,7 +25,7 @@ const config = defineConfig({
 		devtools(),
 		nitro({
 			rollupConfig: {
-				external: [/^@sentry\//, "ffmpeg-static"],
+				external: [/^@sentry\//],
 			},
 		}),
 		tailwindcss(),

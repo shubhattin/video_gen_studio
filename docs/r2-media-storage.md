@@ -30,6 +30,6 @@ studio/runs/<runId>/frames/<id>.<ext>
 
 AWS SDK v3 defaults can add `x-amz-checksum-mode=ENABLED` to signed GETs, which breaks browser `fetch`. The R2 client in `convex/lib/r2.ts` uses `requestChecksumCalculation` / `responseChecksumValidation`: `WHEN_REQUIRED`.
 
-## Optional video processor
+## Continuity frames (browser only)
 
-Continuation mode can extract terminal frames in the browser. Optionally set `VIDEO_PROCESSOR_*` so Convex calls `/api/extract-terminal-frame` on the deployed app instead. See `.env.example`.
+Continuation compositions pause after each mid-clip so the **browser** extracts the terminal frame with WASM FFmpeg and uploads it to R2. The next clip starts only after that handoff. If the client goes offline (or the tab closes), generation stays paused until the studio page is open again.

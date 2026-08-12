@@ -97,33 +97,22 @@ export const commitCompositionPlan = internalMutation({
 				"The composition plan does not match the requested clip count.",
 			);
 		}
-		const existing = await ctx.db
+
+		const existingJobs = await ctx.db
 			.query("compositionJobs")
 			.withIndex("by_runId", (q) => q.eq("runId", args.runId))
-			.unique();
-		if (existing) {
-			const existingClips = await ctx.db
-				.query("compositionClips")
-				.withIndex("by_jobId_and_clipIndex", (q) => q.eq("jobId", existing._id))
-				.take(6);
-			const keysToDelete: string[] = [];
-			for (const clip of existingClips) {
-				if (clip.video) {
-					keysToDelete.push(clip.video.objectKey);
-				}
-				if (clip.terminalFrameObjectKey) {
-					keysToDelete.push(clip.terminalFrameObjectKey);
-				}
-				await ctx.db.delete(clip._id);
-			}
-			await scheduleObjectDeletes(ctx, keysToDelete);
-			await ctx.db.delete(existing._id);
-		}
+			.take(50);
+		const maxAttempt = existingJobs.reduce(
+			(acc, job) => Math.max(acc, job.attemptNumber ?? 1),
+			0,
+		);
 
 		const now = Date.now();
+		const attemptNumber = maxAttempt + 1;
 		const perClipEstimate = estimateVideoCostUsd(run.videoParams);
 		const jobId = await ctx.db.insert("compositionJobs", {
 			runId: args.runId,
+			attemptNumber,
 			mode: run.compositionMode,
 			status: "planned",
 			videoParams: run.videoParams,
@@ -135,6 +124,8 @@ export const commitCompositionPlan = internalMutation({
 					? perClipEstimate * run.compositionClipCount
 					: undefined,
 			overallDescription: args.overallDescription,
+			plannerModel: args.plannerModel,
+			plannerReasoning: args.plannerReasoning,
 			createdAt: now,
 			updatedAt: now,
 		});
@@ -161,6 +152,7 @@ export const commitCompositionPlan = internalMutation({
 			warnings: args.warnings,
 			planningKey: args.planningKey,
 			planningCompletedAt: now,
+			activeCompositionJobId: jobId,
 			lastError: undefined,
 			updatedAt: now,
 		});
@@ -321,7 +313,7 @@ export const completeCompositionClip = internalMutation({
 		video: generatedVideoValidator,
 		terminalFrameObjectKey: v.optional(v.string()),
 		warnings: v.optional(v.array(v.string())),
-		/** When false, pause for browser terminal-frame extraction. */
+		/** When true, pause for browser terminal-frame extraction. */
 		scheduleNext: v.optional(v.boolean()),
 		awaitTerminalFrame: v.optional(v.boolean()),
 	},
