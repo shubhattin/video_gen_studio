@@ -1,5 +1,5 @@
 import { convexTest } from "convex-test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { api, internal } from "./_generated/api";
 import schema from "./schema";
 import { modules } from "./test.setup";
@@ -7,6 +7,41 @@ import {
 	compositionPlannerOutputSchema,
 	validateVideoParams,
 } from "./lib/schemas";
+
+vi.mock("./lib/r2", () => ({
+	buildStudioObjectKey: ({
+		runId,
+		kind,
+		mimeType,
+	}: {
+		runId: string;
+		kind: string;
+		mimeType: string;
+	}) => {
+		const ext = mimeType.includes("png")
+			? "png"
+			: mimeType.includes("jpeg")
+				? "jpg"
+				: "bin";
+		return `studio/runs/${runId}/${kind}/test.${ext}`;
+	},
+	createPresignedPutUrl: async ({ objectKey }: { objectKey: string }) =>
+		`https://r2.example/put/${objectKey}`,
+	createPresignedGetUrl: async ({ objectKey }: { objectKey: string }) =>
+		`https://r2.example/get/${objectKey}`,
+	headObject: async () => ({
+		contentType: "image/png",
+		contentLength: 4,
+		etag: '"abc"',
+	}),
+	putObjectBytes: async ({ objectKey }: { objectKey: string }) => objectKey,
+	deleteObjects: async () => undefined,
+	deleteObject: async () => undefined,
+	getR2Client: () => {
+		throw new Error("getR2Client should not be called in unit tests");
+	},
+	getR2ApiOrigin: () => "https://account.r2.cloudflarestorage.com",
+}));
 
 describe("studio mutations", () => {
 	it("creates a shloka draft with portrait defaults", async () => {
@@ -70,30 +105,28 @@ describe("studio mutations", () => {
 		expect(run).toBeNull();
 	});
 
-	it("attaches an uploaded reference image", async () => {
+	it("attaches an uploaded reference image via object key", async () => {
 		const t = convexTest(schema, modules);
 		const runId = await t.mutation(api.studio.createModelStudioDraft, {
 			modelId: "google/veo-3.1-lite",
 			prompt: "Temple courtyard at dusk",
 		});
 
-		const uploadUrl = await t.mutation(api.studio.generateUploadUrl, {});
-		expect(typeof uploadUrl).toBe("string");
-
-		const storageId = await t.run(async (ctx) => {
-			const blob = new Blob([new Uint8Array([137, 80, 78, 71])], {
-				type: "image/png",
-			});
-			return await ctx.storage.store(blob);
-		});
-
-		const attached = await t.mutation(api.studio.attachUploadedReferenceImage, {
+		const objectKey = `studio/runs/${runId}/refs/test.png`;
+		await t.mutation(internal.studioInternal.appendReferenceImage, {
 			runId,
-			storageId,
-			mimeType: "image/png",
-			width: 1024,
-			height: 1536,
-			bytes: 4,
+			image: {
+				id: "img_test",
+				objectKey,
+				meta: {
+					mimeType: "image/png",
+					width: 1024,
+					height: 1536,
+					bytes: 4,
+				},
+				source: "uploaded",
+				createdAt: Date.now(),
+			},
 		});
 
 		const run = await t.query(api.studio.getRun, { runId });
@@ -102,7 +135,22 @@ describe("studio mutations", () => {
 		expect(run?.referenceImages).toHaveLength(1);
 		expect(run?.referenceImages?.[0]?.source).toBe("uploaded");
 		expect(run?.referenceImages?.[0]?.meta.mimeType).toBe("image/png");
-		expect(run?.referenceImages?.[0]?.id).toBe(attached.imageId);
+		expect(run?.referenceImages?.[0]?.objectKey).toBe(objectKey);
+		expect(run?.referenceImages?.[0]?.id).toBe("img_test");
+
+		const belongs = await t.query(
+			internal.studioQueries.objectKeyBelongsToRun,
+			{ runId, objectKey },
+		);
+		expect(belongs).toBe(true);
+		const foreign = await t.query(
+			internal.studioQueries.objectKeyBelongsToRun,
+			{
+				runId,
+				objectKey: "studio/runs/other/refs/x.png",
+			},
+		);
+		expect(foreign).toBe(false);
 	});
 
 	it("persists a bounded composition plan as ordered clip rows", async () => {

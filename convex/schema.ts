@@ -58,7 +58,7 @@ export const referenceImageSourceValidator = v.union(
 
 export const referenceImageValidator = v.object({
 	id: v.string(),
-	storageId: v.id("_storage"),
+	objectKey: v.string(),
 	meta: mediaMetaValidator,
 	source: v.optional(referenceImageSourceValidator),
 	revisedImagePrompt: v.optional(v.string()),
@@ -67,7 +67,7 @@ export const referenceImageValidator = v.object({
 
 export const generatedVideoValidator = v.object({
 	id: v.string(),
-	storageId: v.id("_storage"),
+	objectKey: v.string(),
 	meta: mediaMetaValidator,
 	openRouterJobId: v.string(),
 	openRouterGenerationId: v.optional(v.string()),
@@ -182,8 +182,7 @@ export default defineSchema({
 		continuityInstructions: v.string(),
 		transition: v.string(),
 		referenceImageId: v.optional(v.string()),
-		referenceStorageId: v.optional(v.id("_storage")),
-		terminalFrameStorageId: v.optional(v.id("_storage")),
+		terminalFrameObjectKey: v.optional(v.string()),
 		video: v.optional(generatedVideoValidator),
 		attempts: v.number(),
 		lastError: v.optional(v.string()),

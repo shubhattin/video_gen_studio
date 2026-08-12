@@ -39,6 +39,12 @@ import {
 	multiClipPlannerInstructions,
 } from "./lib/plannerPrompt";
 import { adaptOpenRouterVideoRequest } from "./lib/videoAdapters";
+import {
+	buildStudioObjectKey,
+	createPresignedGetUrl,
+	deleteObjects as deleteR2Objects,
+	putObjectBytes,
+} from "./lib/r2";
 
 function buildPlannerPrompt(
 	shlokaText: string,
@@ -122,33 +128,40 @@ function warningMessages(
 		.filter((value): value is string => Boolean(value));
 }
 
-async function storeBytes(
-	ctx: { storage: { store: (blob: Blob) => Promise<Id<"_storage">> } },
-	bytes: Uint8Array,
-	mimeType: string,
-) {
-	const normalized = Uint8Array.from(bytes);
-	const blob = new Blob([normalized], { type: mimeType });
-	return await ctx.storage.store(blob);
+async function storeBytes(args: {
+	runId: string;
+	kind: "refs" | "videos" | "frames";
+	bytes: Uint8Array;
+	mimeType: string;
+	mediaId?: string;
+}) {
+	const objectKey = buildStudioObjectKey({
+		runId: args.runId,
+		kind: args.kind,
+		mimeType: args.mimeType,
+		mediaId: args.mediaId,
+	});
+	await putObjectBytes({
+		objectKey,
+		bytes: args.bytes,
+		mimeType: args.mimeType,
+	});
+	return objectKey;
 }
 
 function newMediaId(prefix: string) {
 	return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-async function extractTerminalFrame(
-	ctx: {
-		storage: {
-			getUrl: (storageId: Id<"_storage">) => Promise<string | null>;
-			store: (blob: Blob) => Promise<Id<"_storage">>;
-		};
-	},
-	videoStorageId: Id<"_storage">,
-) {
-	const sourceUrl = await ctx.storage.getUrl(videoStorageId);
-	if (!sourceUrl) {
-		throw new Error("Generated video storage URL is unavailable.");
-	}
+async function signedReadUrl(objectKey: string) {
+	return await createPresignedGetUrl({ objectKey });
+}
+
+async function extractTerminalFrame(args: {
+	runId: string;
+	videoObjectKey: string;
+}) {
+	const sourceUrl = await signedReadUrl(args.videoObjectKey);
 	const response = await fetch(
 		`${getVideoProcessorUrl()}/api/extract-terminal-frame`,
 		{
@@ -165,9 +178,12 @@ async function extractTerminalFrame(
 		throw new Error(`Terminal-frame extraction failed (${response.status}).`);
 	}
 	const mimeType = response.headers.get("content-type") ?? "image/jpeg";
-	return await ctx.storage.store(
-		new Blob([new Uint8Array(await response.arrayBuffer())], { type: mimeType }),
-	);
+	return await storeBytes({
+		runId: args.runId,
+		kind: "frames",
+		bytes: new Uint8Array(await response.arrayBuffer()),
+		mimeType,
+	});
 }
 
 export const planShlokaRun = action({
@@ -386,11 +402,12 @@ export const generateReferenceImage = action({
 			});
 
 			const image = result.image;
-			const storageId = await storeBytes(
-				ctx,
-				image.uint8Array,
-				image.mediaType,
-			);
+			const objectKey = await storeBytes({
+				runId: args.runId,
+				kind: "refs",
+				bytes: image.uint8Array,
+				mimeType: image.mediaType,
+			});
 			const [width, height] = imageConfig.size.split("x").map(Number);
 			const warnings = warningMessages(result.warnings ?? []);
 			const openaiMeta = result.providerMetadata?.openai as
@@ -401,7 +418,7 @@ export const generateReferenceImage = action({
 				runId: args.runId,
 				image: {
 					id: newMediaId("img"),
-					storageId,
+					objectKey,
 					meta: {
 						mimeType: image.mediaType,
 						width,
@@ -451,7 +468,7 @@ export const generateVideoForRun = action({
 		const profile = MODEL_CAPABILITY_PROFILES[modelId];
 		type RefImage = {
 			id: string;
-			storageId: Id<"_storage">;
+			objectKey: string;
 		};
 		const images = (run.referenceImages ?? []) as RefImage[];
 		const first = images.find(
@@ -484,17 +501,11 @@ export const generateVideoForRun = action({
 				: run.imagePrompt) ||
 			"Warm Indian cinematic motion portrait.";
 
-		const firstUrl = first
-			? await ctx.storage.getUrl(first.storageId)
-			: null;
-		const lastUrl = last ? await ctx.storage.getUrl(last.storageId) : null;
-		const referenceUrls = (
-			await Promise.all(
-				extras.map(async (image: RefImage) =>
-					ctx.storage.getUrl(image.storageId),
-				),
-			)
-		).filter((url: string | null): url is string => Boolean(url));
+		const firstUrl = first ? await signedReadUrl(first.objectKey) : null;
+		const lastUrl = last ? await signedReadUrl(last.objectKey) : null;
+		const referenceUrls = await Promise.all(
+			extras.map(async (image: RefImage) => signedReadUrl(image.objectKey)),
+		);
 
 		const adapted = adaptOpenRouterVideoRequest({
 			params: parsedParams,
@@ -524,17 +535,18 @@ export const generateVideoForRun = action({
 				timeoutMs: 540_000,
 			});
 			const downloaded = await downloadOpenRouterVideo(apiKey, completed);
-			const storageId = await storeBytes(
-				ctx,
-				downloaded.bytes,
-				downloaded.mimeType,
-			);
+			const objectKey = await storeBytes({
+				runId: args.runId,
+				kind: "videos",
+				bytes: downloaded.bytes,
+				mimeType: downloaded.mimeType,
+			});
 
 			await ctx.runMutation(internal.studioInternal.appendVideo, {
 				runId: args.runId,
 				video: {
 					id: newMediaId("vid"),
-					storageId,
+					objectKey,
 					meta: {
 						mimeType: downloaded.mimeType,
 						durationSeconds: adapted.body.duration,
@@ -583,7 +595,7 @@ export const generateNextCompositionClip = internalAction({
 			return null;
 		}
 
-		const { job, clip, previousTerminalFrameStorageId } = claimed as {
+		const { job, clip, previousTerminalFrameObjectKey } = claimed as {
 			job: {
 				runId: Id<"generationRuns">;
 				mode: "continuation" | "cut-scenes";
@@ -602,12 +614,11 @@ export const generateNextCompositionClip = internalAction({
 				_id: Id<"compositionClips">;
 				clipIndex: number;
 				scenePrompt: string;
-				referenceStorageId?: Id<"_storage">;
 			};
-			previousTerminalFrameStorageId?: Id<"_storage">;
+			previousTerminalFrameObjectKey?: string;
 		};
-		let generatedStorageId: Id<"_storage"> | undefined;
-		let extractedTerminalFrameStorageId: Id<"_storage"> | undefined;
+		let generatedObjectKey: string | undefined;
+		let extractedTerminalFrameObjectKey: string | undefined;
 		try {
 			if (!isVideoModelId(job.videoParams.modelId)) {
 				throw new Error("Composition uses an unsupported video model.");
@@ -623,20 +634,20 @@ export const generateNextCompositionClip = internalAction({
 			let firstFrameUrl: string | null = null;
 			const referenceUrls: string[] = [];
 
-			const explicitReferenceStorageId =
-				clip.referenceStorageId ??
-				(clip.clipIndex === 0
+			const explicitReferenceObjectKey =
+				clip.clipIndex === 0
 					? run.referenceImages?.find(
-							(image) => image.id === run.firstFrameImageId,
-						)?.storageId
-					: undefined);
-			if (explicitReferenceStorageId) {
-				firstFrameUrl = await ctx.storage.getUrl(explicitReferenceStorageId);
+							(image: { id: string; objectKey: string }) =>
+								image.id === run.firstFrameImageId,
+						)?.objectKey
+					: undefined;
+			if (explicitReferenceObjectKey) {
+				firstFrameUrl = await signedReadUrl(explicitReferenceObjectKey);
 			}
 
-			if (previousTerminalFrameStorageId) {
-				const terminalFrameUrl = await ctx.storage.getUrl(
-					previousTerminalFrameStorageId,
+			if (previousTerminalFrameObjectKey) {
+				const terminalFrameUrl = await signedReadUrl(
+					previousTerminalFrameObjectKey,
 				);
 				if (terminalFrameUrl) {
 					if (profile.supportsFirstFrame) {
@@ -675,19 +686,23 @@ export const generateNextCompositionClip = internalAction({
 				timeoutMs: 540_000,
 			});
 			const downloaded = await downloadOpenRouterVideo(apiKey, completed);
-			const storageId = await storeBytes(
-				ctx,
-				downloaded.bytes,
-				downloaded.mimeType,
-			);
-			generatedStorageId = storageId;
-			let terminalFrameStorageId: Id<"_storage"> | undefined;
+			const objectKey = await storeBytes({
+				runId: job.runId,
+				kind: "videos",
+				bytes: downloaded.bytes,
+				mimeType: downloaded.mimeType,
+			});
+			generatedObjectKey = objectKey;
+			let terminalFrameObjectKey: string | undefined;
 			let awaitTerminalFrame = false;
 			if (clip.clipIndex < job.clipCount - 1 && job.mode === "continuation") {
 				if (isVideoProcessorConfigured()) {
 					try {
-						terminalFrameStorageId = await extractTerminalFrame(ctx, storageId);
-						extractedTerminalFrameStorageId = terminalFrameStorageId;
+						terminalFrameObjectKey = await extractTerminalFrame({
+							runId: job.runId,
+							videoObjectKey: objectKey,
+						});
+						extractedTerminalFrameObjectKey = terminalFrameObjectKey;
 					} catch (error) {
 						referenceWarnings.push(
 							error instanceof Error
@@ -709,7 +724,7 @@ export const generateNextCompositionClip = internalAction({
 				clipId: clip._id,
 				video: {
 					id: newMediaId("composition_vid"),
-					storageId,
+					objectKey,
 					meta: {
 						mimeType: downloaded.mimeType,
 						durationSeconds: adapted.body.duration,
@@ -729,18 +744,19 @@ export const generateNextCompositionClip = internalAction({
 					warnings: warnings.length > 0 ? warnings : undefined,
 					createdAt: Date.now(),
 				},
-				terminalFrameStorageId,
+				terminalFrameObjectKey,
 				warnings: warnings.length > 0 ? warnings : undefined,
 				awaitTerminalFrame,
 			});
-			generatedStorageId = undefined;
-			extractedTerminalFrameStorageId = undefined;
+			generatedObjectKey = undefined;
+			extractedTerminalFrameObjectKey = undefined;
 		} catch (error) {
-			if (generatedStorageId) {
-				await ctx.storage.delete(generatedStorageId);
-			}
-			if (extractedTerminalFrameStorageId) {
-				await ctx.storage.delete(extractedTerminalFrameStorageId);
+			const keys = [
+				generatedObjectKey,
+				extractedTerminalFrameObjectKey,
+			].filter((key): key is string => Boolean(key));
+			if (keys.length > 0) {
+				await deleteR2Objects(keys);
 			}
 			await ctx.runMutation(internal.studioInternal.failCompositionClip, {
 				jobId: args.jobId,

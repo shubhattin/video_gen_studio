@@ -7,6 +7,10 @@ const app = defineApp({
 		OPENAI_API_KEY: v.optional(v.string()),
 		VIDEO_PROCESSOR_URL: v.optional(v.string()),
 		VIDEO_PROCESSOR_SHARED_SECRET: v.optional(v.string()),
+		CLOUDFLARE_ACCOUNT_ID: v.optional(v.string()),
+		R2_ACCESS_KEY_ID: v.optional(v.string()),
+		R2_SECRET_ACCESS_KEY: v.optional(v.string()),
+		R2_BUCKET_NAME: v.optional(v.string()),
 	},
 });
 

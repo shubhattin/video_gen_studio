@@ -22,6 +22,10 @@ import { Button } from "#/components/ui/button";
 import { downloadMergedComposition } from "#/lib/merge-composition-videos";
 import { useCompositionTerminalFrameHandoff } from "#/hooks/use-composition-terminal-frame-handoff";
 import {
+	useSignedMediaUrls,
+	withSignedUrl,
+} from "#/hooks/use-signed-media-urls";
+import {
 	defaultVideoParams,
 	isVideoModelId,
 	MODEL_CAPABILITY_PROFILES,
@@ -45,9 +49,11 @@ export function ModelStudio({
 	const createDraft = useMutation(api.studio.createModelStudioDraft);
 	const updateDraft = useMutation(api.studio.updateDraft);
 	const removeReferenceImage = useMutation(api.studio.removeReferenceImage);
-	const generateUploadUrl = useMutation(api.studio.generateUploadUrl);
-	const attachUploadedReferenceImage = useMutation(
-		api.studio.attachUploadedReferenceImage,
+	const prepareReferenceImageUpload = useAction(
+		api.studioR2.prepareReferenceImageUpload,
+	);
+	const finalizeReferenceImageUpload = useAction(
+		api.studioR2.finalizeReferenceImageUpload,
 	);
 	const generateImage = useAction(api.studioActions.generateReferenceImage);
 	const generateVideo = useAction(api.studioActions.generateVideoForRun);
@@ -86,9 +92,32 @@ export function ModelStudio({
 	);
 	const profile = MODEL_CAPABILITY_PROFILES[selectedModel];
 
+	const rawImages = run?.referenceImages ?? [];
+	const rawVideos = run?.videos ?? [];
+	const mediaObjectKeys = [
+		...rawImages.map((image) => image.objectKey),
+		...rawVideos.map((video) => video.objectKey),
+		...(compositionJob?.clips ?? []).flatMap((clip) => [
+			clip.video?.objectKey,
+			clip.terminalFrameObjectKey,
+		]),
+	];
+	const urlsByKey = useSignedMediaUrls(activeRunId, mediaObjectKeys);
+	const images = rawImages.map((image) => withSignedUrl(image, urlsByKey));
+	const videos = rawVideos.map((video) => withSignedUrl(video, urlsByKey));
+	const compositionJobWithUrls = compositionJob
+		? {
+				...compositionJob,
+				clips: (compositionJob.clips ?? []).map((clip) => ({
+					...clip,
+					video: clip.video ? withSignedUrl(clip.video, urlsByKey) : undefined,
+				})),
+			}
+		: compositionJob;
+
 	useCompositionTerminalFrameHandoff({
 		runId: activeRunId,
-		compositionJob,
+		compositionJob: compositionJobWithUrls,
 		onError: (error) =>
 			notifyStudioError("Continuity frame capture failed", error),
 	});
@@ -239,11 +268,11 @@ export function ModelStudio({
 	};
 
 	const onDownloadComposition = async () => {
-		if (!compositionJob) return;
+		if (!compositionJobWithUrls) return;
 		setMergingComposition(true);
 		try {
 			await downloadMergedComposition(
-				compositionJob.clips.map(
+				compositionJobWithUrls.clips.map(
 					(clip: { video?: { url?: string | null } }) => ({
 						url: clip.video?.url,
 					}),
@@ -276,8 +305,8 @@ export function ModelStudio({
 			await uploadReferenceImage({
 				runId,
 				file,
-				generateUploadUrl,
-				attachUploadedReferenceImage,
+				prepareUpload: prepareReferenceImageUpload,
+				finalizeUpload: finalizeReferenceImageUpload,
 			});
 			notifyStudioSuccess("Reference image uploaded");
 		} catch (error) {
@@ -287,8 +316,6 @@ export function ModelStudio({
 		}
 	};
 
-	const images = run?.referenceImages ?? [];
-	const videos = run?.videos ?? [];
 	const extraIds = run?.extraReferenceImageIds ?? [];
 	const isBusy = busyStage !== null;
 	const isModelLocked =
@@ -469,17 +496,17 @@ export function ModelStudio({
 				)}
 			</div>
 
-			{compositionJob ? (
+			{compositionJobWithUrls ? (
 				<CompositionResult
-					status={compositionJob.status}
-					clips={compositionJob.clips as CompositionClipResult[]}
-					totalDurationSeconds={compositionJob.totalDurationSeconds}
+					status={compositionJobWithUrls.status}
+					clips={compositionJobWithUrls.clips as CompositionClipResult[]}
+					totalDurationSeconds={compositionJobWithUrls.totalDurationSeconds}
 					onDownloadMerged={onDownloadComposition}
 					merging={mergingComposition}
 				/>
 			) : null}
 
-			{run ? <VideoResult videos={videos} /> : null}
+			{run ? <VideoResult runId={activeRunId} videos={videos} /> : null}
 
 			<GenerationProgressDock
 				status={run?.status}

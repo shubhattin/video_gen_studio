@@ -1,7 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
-import type { Id } from "./_generated/dataModel";
 import {
 	MODEL_CAPABILITY_PROFILES,
 	VIDEO_MODEL_IDS,
@@ -11,79 +10,13 @@ import { normalizePlannerSystemPromptForStorage } from "./lib/plannerPrompt";
 import { defaultImageConfig, defaultVideoParams } from "./lib/schemas";
 import { compositionModeValidator, videoParamsValidator } from "./schema";
 
-async function resolveRunUrls(
-	ctx: { storage: { getUrl: (id: Id<"_storage">) => Promise<string | null> } },
-	run: {
-		referenceImages?: Array<{
-			id: string;
-			storageId: Id<"_storage">;
-			meta: {
-				mimeType: string;
-				width?: number;
-				height?: number;
-				durationSeconds?: number;
-				bytes?: number;
-			};
-			source?: "generated" | "uploaded";
-			revisedImagePrompt?: string;
-			createdAt: number;
-		}>;
-		videos?: Array<{
-			id: string;
-			storageId: Id<"_storage">;
-			meta: {
-				mimeType: string;
-				width?: number;
-				height?: number;
-				durationSeconds?: number;
-				bytes?: number;
-			};
-			openRouterJobId: string;
-			openRouterGenerationId?: string;
-			actualCostUsd?: number;
-			videoParams: {
-				modelId: string;
-				aspectRatio: string;
-				resolution: string;
-				durationSeconds: number;
-				generateAudio?: boolean;
-				negativePrompt?: string;
-				cfgScale?: number;
-				prompt?: string;
-			};
-			videoPrompt?: string;
-			warnings?: string[];
-			createdAt: number;
-		}>;
-	},
-) {
-	const referenceImages = await Promise.all(
-		(run.referenceImages ?? []).map(async (image) => ({
-			...image,
-			url: await ctx.storage.getUrl(image.storageId),
-		})),
-	);
-	const videos = await Promise.all(
-		(run.videos ?? []).map(async (video) => ({
-			...video,
-			url: await ctx.storage.getUrl(video.storageId),
-		})),
-	);
-	return { referenceImages, videos };
-}
-
 export const getRun = query({
 	args: {
 		runId: v.id("generationRuns"),
 	},
 	returns: v.union(v.null(), v.any()),
 	handler: async (ctx, args) => {
-		const run = await ctx.db.get(args.runId);
-		if (!run) {
-			return null;
-		}
-		const media = await resolveRunUrls(ctx, run);
-		return { ...run, ...media };
+		return await ctx.db.get(args.runId);
 	},
 });
 
@@ -107,17 +40,7 @@ export const getCompositionForRun = query({
 			.take(6);
 		return {
 			...job,
-			clips: await Promise.all(
-				clips.map(async (clip) => ({
-					...clip,
-					video: clip.video
-						? {
-								...clip.video,
-								url: await ctx.storage.getUrl(clip.video.storageId),
-							}
-						: undefined,
-				})),
-			),
+			clips,
 		};
 	},
 });
@@ -129,17 +52,11 @@ export const listRecentRuns = query({
 	returns: v.array(v.any()),
 	handler: async (ctx, args) => {
 		const limit = Math.min(args.limit ?? 20, 50);
-		const runs = await ctx.db
+		return await ctx.db
 			.query("generationRuns")
 			.withIndex("by_createdAt")
 			.order("desc")
 			.take(limit);
-		return await Promise.all(
-			runs.map(async (run) => {
-				const media = await resolveRunUrls(ctx, run);
-				return { ...run, ...media };
-			}),
-		);
 	},
 });
 
@@ -371,7 +288,9 @@ export const startComposition = mutation({
 			.withIndex("by_runId", (q) => q.eq("runId", args.runId))
 			.unique();
 		if (!job) {
-			throw new Error("Generate a multi-clip plan before starting the composition.");
+			throw new Error(
+				"Generate a multi-clip plan before starting the composition.",
+			);
 		}
 		if (job.status === "completed" || job.status === "cancelled") {
 			throw new Error("This composition cannot be started.");
@@ -417,40 +336,6 @@ export const cancelComposition = mutation({
 	},
 });
 
-export const submitCompositionTerminalFrame = mutation({
-	args: {
-		runId: v.id("generationRuns"),
-		clipId: v.id("compositionClips"),
-		storageId: v.id("_storage"),
-	},
-	returns: v.null(),
-	handler: async (ctx, args) => {
-		const job = await ctx.db
-			.query("compositionJobs")
-			.withIndex("by_runId", (q) => q.eq("runId", args.runId))
-			.unique();
-		if (!job) {
-			await ctx.storage.delete(args.storageId);
-			throw new Error("Composition job was not found.");
-		}
-		if (job.status !== "awaiting_terminal_frame") {
-			await ctx.storage.delete(args.storageId);
-			throw new Error("Composition is not waiting for a continuity frame.");
-		}
-		const clip = await ctx.db.get(args.clipId);
-		if (!clip || clip.jobId !== job._id) {
-			await ctx.storage.delete(args.storageId);
-			throw new Error("Composition clip was not found.");
-		}
-		await ctx.runMutation(internal.studioInternal.attachCompositionTerminalFrame, {
-			jobId: job._id,
-			clipId: args.clipId,
-			terminalFrameStorageId: args.storageId,
-		});
-		return null;
-	},
-});
-
 export const deleteRun = mutation({
 	args: {
 		runId: v.id("generationRuns"),
@@ -461,6 +346,7 @@ export const deleteRun = mutation({
 		if (!run) {
 			return null;
 		}
+		const keysToDelete: string[] = [];
 		const compositionJob = await ctx.db
 			.query("compositionJobs")
 			.withIndex("by_runId", (q) => q.eq("runId", args.runId))
@@ -474,22 +360,27 @@ export const deleteRun = mutation({
 				.take(6);
 			for (const clip of compositionClips) {
 				if (clip.video) {
-					await ctx.storage.delete(clip.video.storageId);
+					keysToDelete.push(clip.video.objectKey);
 				}
-				if (clip.terminalFrameStorageId) {
-					await ctx.storage.delete(clip.terminalFrameStorageId);
+				if (clip.terminalFrameObjectKey) {
+					keysToDelete.push(clip.terminalFrameObjectKey);
 				}
 				await ctx.db.delete(clip._id);
 			}
 			await ctx.db.delete(compositionJob._id);
 		}
 		for (const image of run.referenceImages ?? []) {
-			await ctx.storage.delete(image.storageId);
+			keysToDelete.push(image.objectKey);
 		}
 		for (const video of run.videos ?? []) {
-			await ctx.storage.delete(video.storageId);
+			keysToDelete.push(video.objectKey);
 		}
 		await ctx.db.delete(args.runId);
+		if (keysToDelete.length > 0) {
+			await ctx.scheduler.runAfter(0, internal.studioR2.deleteObjects, {
+				objectKeys: keysToDelete,
+			});
+		}
 		return null;
 	},
 });
@@ -511,7 +402,6 @@ export const removeReferenceImage = mutation({
 		if (!target) {
 			return null;
 		}
-		await ctx.storage.delete(target.storageId);
 		const referenceImages = (run.referenceImages ?? []).filter(
 			(image) => image.id !== args.imageId,
 		);
@@ -531,94 +421,10 @@ export const removeReferenceImage = mutation({
 			status: referenceImages.length > 0 ? run.status : "plan_ready",
 			updatedAt: Date.now(),
 		});
-		return null;
-	},
-});
-
-const ALLOWED_REFERENCE_UPLOAD_MIME_TYPES = new Set([
-	"image/png",
-	"image/jpeg",
-	"image/jpg",
-	"image/webp",
-	"image/gif",
-]);
-
-const MAX_REFERENCE_UPLOAD_BYTES = 20 * 1024 * 1024;
-
-function newReferenceImageId() {
-	return `img_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-export const generateUploadUrl = mutation({
-	args: {},
-	returns: v.string(),
-	handler: async (ctx) => {
-		return await ctx.storage.generateUploadUrl();
-	},
-});
-
-export const attachUploadedReferenceImage = mutation({
-	args: {
-		runId: v.id("generationRuns"),
-		storageId: v.id("_storage"),
-		mimeType: v.string(),
-		width: v.optional(v.number()),
-		height: v.optional(v.number()),
-		bytes: v.optional(v.number()),
-		setAsFirstFrame: v.optional(v.boolean()),
-	},
-	returns: v.object({
-		imageId: v.string(),
-	}),
-	handler: async (ctx, args) => {
-		const run = await ctx.db.get(args.runId);
-		if (!run) {
-			throw new Error("Run not found.");
-		}
-
-		const mimeType = args.mimeType.toLowerCase();
-		if (!ALLOWED_REFERENCE_UPLOAD_MIME_TYPES.has(mimeType)) {
-			await ctx.storage.delete(args.storageId);
-			throw new Error(
-				"Unsupported image type. Use PNG, JPEG, WebP, or GIF.",
-			);
-		}
-
-		const url = await ctx.storage.getUrl(args.storageId);
-		if (!url) {
-			throw new Error("Uploaded file not found in storage.");
-		}
-		const bytes = args.bytes;
-		if (bytes !== undefined && bytes > MAX_REFERENCE_UPLOAD_BYTES) {
-			await ctx.storage.delete(args.storageId);
-			throw new Error("Image is too large. Max size is 20MB.");
-		}
-
-		const imageId = newReferenceImageId();
-		const setAsFirstFrame = args.setAsFirstFrame === true;
-		const image = {
-			id: imageId,
-			storageId: args.storageId,
-			meta: {
-				mimeType,
-				width: args.width,
-				height: args.height,
-				bytes,
-			},
-			source: "uploaded" as const,
-			createdAt: Date.now(),
-		};
-		const referenceImages = [...(run.referenceImages ?? []), image];
-		await ctx.db.patch(args.runId, {
-			status: "image_ready",
-			referenceImages,
-			firstFrameImageId: setAsFirstFrame ? imageId : run.firstFrameImageId,
-			imageCompletedAt: Date.now(),
-			lastError: undefined,
-			updatedAt: Date.now(),
+		await ctx.scheduler.runAfter(0, internal.studioR2.deleteObjects, {
+			objectKeys: [target.objectKey],
 		});
-
-		return { imageId };
+		return null;
 	},
 });
 

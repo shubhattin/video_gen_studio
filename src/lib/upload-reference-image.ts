@@ -52,42 +52,52 @@ export function assertReferenceImageFile(file: File) {
 type UploadReferenceImageArgs = {
 	runId: Id<"generationRuns">;
 	file: File;
-	generateUploadUrl: () => Promise<string>;
-	attachUploadedReferenceImage: (args: {
+	prepareUpload: (args: {
 		runId: Id<"generationRuns">;
-		storageId: Id<"_storage">;
+		mimeType: string;
+		bytes?: number;
+	}) => Promise<{
+		uploadUrl: string;
+		objectKey: string;
+		contentType: string;
+	}>;
+	finalizeUpload: (args: {
+		runId: Id<"generationRuns">;
+		objectKey: string;
 		mimeType: string;
 		width?: number;
 		height?: number;
 		bytes?: number;
+		setAsFirstFrame?: boolean;
 	}) => Promise<{ imageId: string }>;
 };
 
 export async function uploadReferenceImage({
 	runId,
 	file,
-	generateUploadUrl,
-	attachUploadedReferenceImage,
+	prepareUpload,
+	finalizeUpload,
 }: UploadReferenceImageArgs) {
 	assertReferenceImageFile(file);
 	const dimensions = await readImageDimensions(file);
-	const postUrl = await generateUploadUrl();
-	const result = await fetch(postUrl, {
-		method: "POST",
-		headers: { "Content-Type": file.type || "application/octet-stream" },
+	const mimeType = file.type || "image/png";
+	const prepared = await prepareUpload({
+		runId,
+		mimeType,
+		bytes: file.size,
+	});
+	const result = await fetch(prepared.uploadUrl, {
+		method: "PUT",
+		headers: { "Content-Type": prepared.contentType },
 		body: file,
 	});
 	if (!result.ok) {
 		throw new Error("Failed to upload image to storage.");
 	}
-	const json = (await result.json()) as { storageId?: string };
-	if (!json.storageId) {
-		throw new Error("Upload succeeded but no storage id was returned.");
-	}
-	return await attachUploadedReferenceImage({
+	return await finalizeUpload({
 		runId,
-		storageId: json.storageId as Id<"_storage">,
-		mimeType: file.type || "image/png",
+		objectKey: prepared.objectKey,
+		mimeType,
 		width: dimensions?.width,
 		height: dimensions?.height,
 		bytes: file.size,
