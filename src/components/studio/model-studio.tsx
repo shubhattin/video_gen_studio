@@ -19,7 +19,6 @@ import {
 import { VideoModelSelector } from "#/components/studio/video-model-selector";
 import { VideoResult } from "#/components/studio/video-result";
 import { Button } from "#/components/ui/button";
-import { downloadMergedComposition } from "#/lib/merge-composition-videos";
 import { useCompositionTerminalFrameHandoff } from "#/hooks/use-composition-terminal-frame-handoff";
 import {
 	useSignedMediaUrls,
@@ -74,7 +73,6 @@ export function ModelStudio({
 	const [imageQuality, setImageQuality] = useState("medium");
 	const [busyStage, setBusyStage] = useState<StudioBusyStage>(null);
 	const [refreshingCatalog, setRefreshingCatalog] = useState(false);
-	const [mergingComposition, setMergingComposition] = useState(false);
 	const [composition, setComposition] = useState<CompositionSettings>({
 		enabled: false,
 		mode: "continuation",
@@ -264,28 +262,6 @@ export function ModelStudio({
 			notifyStudioError("Composition could not start", error);
 		} finally {
 			setBusyStage(null);
-		}
-	};
-
-	const onDownloadComposition = async () => {
-		if (!compositionJobWithUrls || !activeRunId) return;
-		setMergingComposition(true);
-		try {
-			await downloadMergedComposition(
-				compositionJobWithUrls.clips.map(
-					(clip: {
-						video?: { url?: string | null; objectKey?: string | null };
-					}) => ({
-						url: clip.video?.url,
-						objectKey: clip.video?.objectKey,
-						runId: activeRunId,
-					}),
-				),
-			);
-		} catch (error) {
-			notifyStudioError("Merged download failed", error);
-		} finally {
-			setMergingComposition(false);
 		}
 	};
 
@@ -505,8 +481,16 @@ export function ModelStudio({
 					status={compositionJobWithUrls.status}
 					clips={compositionJobWithUrls.clips as CompositionClipResult[]}
 					totalDurationSeconds={compositionJobWithUrls.totalDurationSeconds}
-					onDownloadMerged={onDownloadComposition}
-					merging={mergingComposition}
+					aspectRatio={compositionJobWithUrls.videoParams?.aspectRatio}
+					mergeSources={(compositionJobWithUrls.clips ?? []).map(
+						(clip: {
+							video?: { url?: string | null; objectKey?: string | null };
+						}) => ({
+							url: clip.video?.url,
+							objectKey: clip.video?.objectKey,
+							runId: activeRunId,
+						}),
+					)}
 				/>
 			) : null}
 

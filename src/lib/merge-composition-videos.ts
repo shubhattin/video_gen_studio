@@ -2,7 +2,7 @@ import wasmUrl from "@ffmpeg/core/wasm?url";
 import coreUrl from "@ffmpeg/core?url";
 import { studioMediaProxyUrl } from "#/lib/studio-media-proxy";
 
-type MergeVideoSource = {
+export type MergeVideoSource = {
 	url?: string | null;
 	objectKey?: string | null;
 	runId?: string | null;
@@ -10,23 +10,101 @@ type MergeVideoSource = {
 
 type MergeOptions = {
 	onProgress?: (progress: number) => void;
+	/** When set, reuse a previously merged blob for the same clip set. */
+	cacheKey?: string;
 };
 
-function resolveFetchUrl(source: MergeVideoSource): string | null {
-	if (source.runId && source.objectKey) {
-		return studioMediaProxyUrl({
-			runId: source.runId,
-			objectKey: source.objectKey,
-		});
-	}
-	return source.url ?? null;
+type CachedMerge = {
+	blob: Blob;
+	objectUrl: string;
+};
+
+const mergeCache = new Map<string, CachedMerge>();
+
+export function compositionMergeCacheKey(sources: MergeVideoSource[]) {
+	const parts = sources
+		.map((source) => source.objectKey ?? source.url ?? "")
+		.filter(Boolean);
+	return parts.join("|");
 }
 
-function triggerDownload(blob: Blob) {
+export function getCachedMergedComposition(
+	cacheKey: string,
+): CachedMerge | null {
+	return mergeCache.get(cacheKey) ?? null;
+}
+
+export function clearMergedCompositionCache(cacheKey?: string) {
+	if (cacheKey) {
+		const cached = mergeCache.get(cacheKey);
+		if (cached) {
+			URL.revokeObjectURL(cached.objectUrl);
+			mergeCache.delete(cacheKey);
+		}
+		return;
+	}
+	for (const cached of mergeCache.values()) {
+		URL.revokeObjectURL(cached.objectUrl);
+	}
+	mergeCache.clear();
+}
+
+function rememberMerge(cacheKey: string | undefined, blob: Blob): CachedMerge {
+	if (!cacheKey) {
+		return { blob, objectUrl: URL.createObjectURL(blob) };
+	}
+	const existing = mergeCache.get(cacheKey);
+	if (existing) {
+		URL.revokeObjectURL(existing.objectUrl);
+	}
+	const entry = { blob, objectUrl: URL.createObjectURL(blob) };
+	mergeCache.set(cacheKey, entry);
+	return entry;
+}
+
+async function fetchMediaBytes(source: MergeVideoSource): Promise<ArrayBuffer> {
+	const directUrl = source.url ?? null;
+	const proxyUrl =
+		source.runId && source.objectKey
+			? studioMediaProxyUrl({
+					runId: source.runId,
+					objectKey: source.objectKey,
+				})
+			: null;
+
+	const tryFetch = async (url: string) => {
+		const response = await fetch(url, { cache: "no-store" });
+		if (!response.ok) {
+			throw new Error(`HTTP ${response.status}`);
+		}
+		return await response.arrayBuffer();
+	};
+
+	if (directUrl) {
+		try {
+			return await tryFetch(directUrl);
+		} catch (error) {
+			if (!proxyUrl) {
+				throw error instanceof Error
+					? error
+					: new Error("Could not download clip from storage.");
+			}
+			return await tryFetch(proxyUrl);
+		}
+	}
+
+	if (proxyUrl) {
+		return await tryFetch(proxyUrl);
+	}
+
+	throw new Error("No clip URL available.");
+}
+
+export function triggerMergedDownload(blob: Blob, filename?: string) {
 	const objectUrl = URL.createObjectURL(blob);
 	const link = document.createElement("a");
 	link.href = objectUrl;
-	link.download = `composed-video-${Date.now()}.mp4`;
+	link.download = filename ?? `composed-video-${Date.now()}.mp4`;
 	link.style.display = "none";
 	document.body.append(link);
 	link.click();
@@ -34,23 +112,31 @@ function triggerDownload(blob: Blob) {
 	window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
 }
 
-export async function downloadMergedComposition(
+/** Merge clips into a single MP4 blob. Reuses cache when `cacheKey` matches. */
+export async function mergeCompositionVideos(
 	videos: MergeVideoSource[],
 	options: MergeOptions = {},
-) {
-	const sources = videos
-		.map((video) => resolveFetchUrl(video))
-		.filter((url): url is string => Boolean(url));
+): Promise<CachedMerge> {
+	const sources = videos.filter(
+		(video) => Boolean(video.url) || (video.runId && video.objectKey),
+	);
 	if (sources.length === 0) {
 		throw new Error("No completed clips are available to merge.");
 	}
+
+	const cacheKey = options.cacheKey ?? compositionMergeCacheKey(sources);
+	const cached = mergeCache.get(cacheKey);
+	if (cached) {
+		options.onProgress?.(100);
+		return cached;
+	}
+
 	if (sources.length === 1) {
-		const response = await fetch(sources[0]);
-		if (!response.ok) {
-			throw new Error(`Could not download the clip (${response.status}).`);
-		}
-		triggerDownload(await response.blob());
-		return;
+		const blob = new Blob([await fetchMediaBytes(sources[0])], {
+			type: "video/mp4",
+		});
+		options.onProgress?.(100);
+		return rememberMerge(cacheKey, blob);
 	}
 
 	const [{ FFmpeg }, { toBlobURL }] = await Promise.all([
@@ -70,16 +156,18 @@ export async function downloadMergedComposition(
 		});
 		await Promise.all(
 			sources.map(async (source, index) => {
-				const response = await fetch(source);
-				if (!response.ok) {
+				try {
+					await ffmpeg.writeFile(
+						inputNames[index],
+						new Uint8Array(await fetchMediaBytes(source)),
+					);
+				} catch (error) {
 					throw new Error(
-						`Could not download clip ${index + 1} (${response.status}).`,
+						`Could not download clip ${index + 1}${
+							error instanceof Error ? ` (${error.message})` : ""
+						}.`,
 					);
 				}
-				await ffmpeg.writeFile(
-					inputNames[index],
-					new Uint8Array(await response.arrayBuffer()),
-				);
 			}),
 		);
 		await ffmpeg.writeFile(
@@ -133,11 +221,18 @@ export async function downloadMergedComposition(
 		const output = await ffmpeg.readFile("merged.mp4");
 		const bytes =
 			output instanceof Uint8Array ? output : new TextEncoder().encode(output);
-		triggerDownload(
-			new Blob([bytes.buffer as ArrayBuffer], { type: "video/mp4" }),
-		);
+		const blob = new Blob([bytes.buffer as ArrayBuffer], { type: "video/mp4" });
 		options.onProgress?.(100);
+		return rememberMerge(cacheKey, blob);
 	} finally {
 		ffmpeg.terminate();
 	}
+}
+
+export async function downloadMergedComposition(
+	videos: MergeVideoSource[],
+	options: MergeOptions = {},
+) {
+	const merged = await mergeCompositionVideos(videos, options);
+	triggerMergedDownload(merged.blob);
 }

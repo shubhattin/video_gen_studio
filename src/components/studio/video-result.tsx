@@ -63,7 +63,7 @@ async function downloadVideoFile(
 	sourceUrl: string,
 	filename: string,
 ): Promise<void> {
-	const response = await fetch(sourceUrl);
+	const response = await fetch(sourceUrl, { cache: "no-store" });
 	if (!response.ok) {
 		throw new Error(`Download failed (${response.status})`);
 	}
@@ -263,8 +263,7 @@ function VideoClipCard({
 							const filename = `studio-video-${video.id}.${extensionForMime(video.meta?.mimeType)}`;
 							try {
 								let sourceUrl = video.url;
-								if (runId && video.objectKey) {
-									// Prefer Convex proxy so browser fetch does not depend on R2 CORS.
+								if (!sourceUrl && runId && video.objectKey) {
 									sourceUrl = studioMediaProxyUrl({
 										runId,
 										objectKey: video.objectKey,
@@ -273,7 +272,24 @@ function VideoClipCard({
 								if (!sourceUrl) {
 									throw new Error("No download URL available");
 								}
-								await downloadVideoFile(sourceUrl, filename);
+								try {
+									await downloadVideoFile(sourceUrl, filename);
+								} catch (error) {
+									if (
+										!(runId && video.objectKey) ||
+										sourceUrl.includes("/studio/media")
+									) {
+										throw error;
+									}
+									// Direct R2 failed (usually CORS) — fall back once via Convex proxy.
+									await downloadVideoFile(
+										studioMediaProxyUrl({
+											runId,
+											objectKey: video.objectKey,
+										}),
+										filename,
+									);
+								}
 							} catch (error) {
 								console.error(error);
 								window.alert(

@@ -24,7 +24,6 @@ import {
 import { VideoModelSelector } from "#/components/studio/video-model-selector";
 import { VideoResult } from "#/components/studio/video-result";
 import { Button } from "#/components/ui/button";
-import { downloadMergedComposition } from "#/lib/merge-composition-videos";
 import { useCompositionTerminalFrameHandoff } from "#/hooks/use-composition-terminal-frame-handoff";
 import {
 	useSignedMediaUrls,
@@ -87,7 +86,6 @@ function ShlokaStudioPage() {
 		mode: "continuation",
 		multiplier: 2,
 	});
-	const [mergingComposition, setMergingComposition] = useState(false);
 
 	const run = useQuery(api.studio.getRun, runId ? { runId } : "skip");
 	const compositionJob = useQuery(
@@ -342,28 +340,6 @@ function ShlokaStudioPage() {
 		}
 	};
 
-	const onDownloadComposition = async () => {
-		if (!compositionJobWithUrls || !runId) return;
-		setMergingComposition(true);
-		try {
-			await downloadMergedComposition(
-				compositionJobWithUrls.clips.map(
-					(clip: {
-						video?: { url?: string | null; objectKey?: string | null };
-					}) => ({
-						url: clip.video?.url,
-						objectKey: clip.video?.objectKey,
-						runId,
-					}),
-				),
-			);
-		} catch (error) {
-			notifyStudioError("Merged download failed", error);
-		} finally {
-			setMergingComposition(false);
-		}
-	};
-
 	const profile =
 		MODEL_CAPABILITY_PROFILES[videoConfig.modelId as VideoModelId];
 
@@ -615,8 +591,16 @@ function ShlokaStudioPage() {
 								totalDurationSeconds={
 									compositionJobWithUrls.totalDurationSeconds
 								}
-								onDownloadMerged={onDownloadComposition}
-								merging={mergingComposition}
+								aspectRatio={compositionJobWithUrls.videoParams?.aspectRatio}
+								mergeSources={(compositionJobWithUrls.clips ?? []).map(
+									(clip: {
+										video?: { url?: string | null; objectKey?: string | null };
+									}) => ({
+										url: clip.video?.url,
+										objectKey: clip.video?.objectKey,
+										runId,
+									}),
+								)}
 							/>
 						) : null}
 
