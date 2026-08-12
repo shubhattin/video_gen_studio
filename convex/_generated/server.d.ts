@@ -25,8 +25,12 @@ import type { DataModel } from "./dataModel.js";
  * Typesafe environment variables declared in `convex.config.ts`.
  */
 type Env = {
+  readonly CLOUDFLARE_ACCOUNT_ID: string | undefined;
   readonly OPENAI_API_KEY: string | undefined;
   readonly OPENROUTER_API_KEY: string | undefined;
+  readonly R2_ACCESS_KEY_ID: string | undefined;
+  readonly R2_BUCKET_NAME: string | undefined;
+  readonly R2_SECRET_ACCESS_KEY: string | undefined;
   readonly VIDEO_PROCESSOR_SHARED_SECRET: string | undefined;
   readonly VIDEO_PROCESSOR_URL: string | undefined;
 };

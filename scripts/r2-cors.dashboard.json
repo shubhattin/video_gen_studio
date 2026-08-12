@@ -1,0 +1,18 @@
+[
+	{
+		"AllowedOrigins": [
+			"http://localhost:3000",
+			"http://127.0.0.1:3000"
+		],
+		"AllowedMethods": ["GET", "HEAD", "PUT"],
+		"AllowedHeaders": ["*"],
+		"ExposeHeaders": [
+			"ETag",
+			"Content-Length",
+			"Content-Type",
+			"Content-Range",
+			"Accept-Ranges"
+		],
+		"MaxAgeSeconds": 3600
+	}
+]

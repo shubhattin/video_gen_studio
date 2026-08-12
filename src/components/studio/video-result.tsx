@@ -1,5 +1,6 @@
 import { Download, Info, Loader2 } from "lucide-react";
 import { useState } from "react";
+import type { Id } from "@convex/_generated/dataModel";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
 import {
@@ -10,11 +11,12 @@ import {
 	PopoverTitle,
 	PopoverTrigger,
 } from "#/components/ui/popover";
+import { studioMediaProxyUrl } from "#/lib/studio-media-proxy";
 import { cn } from "#/lib/utils";
 
 export type VideoResultItem = {
 	id: string;
-	storageId?: string;
+	objectKey?: string;
 	url?: string | null;
 	meta?: {
 		mimeType?: string;
@@ -40,6 +42,7 @@ export type VideoResultItem = {
 };
 
 type VideoResultProps = {
+	runId?: Id<"generationRuns"> | null;
 	videos: VideoResultItem[];
 };
 
@@ -56,24 +59,11 @@ function formatBytes(bytes?: number) {
 	return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-function getDownloadEndpoint(storageId: string, filename: string): string {
-	const siteUrl = import.meta.env.VITE_CONVEX_SITE_URL as string | undefined;
-	if (!siteUrl) {
-		throw new Error(
-			"VITE_CONVEX_SITE_URL is not set. Add it to .env.local (https://….convex.site).",
-		);
-	}
-	const endpoint = new URL("/downloadVideo", siteUrl);
-	endpoint.searchParams.set("storageId", storageId);
-	endpoint.searchParams.set("filename", filename);
-	return endpoint.toString();
-}
-
 async function downloadVideoFile(
 	sourceUrl: string,
 	filename: string,
 ): Promise<void> {
-	const response = await fetch(sourceUrl);
+	const response = await fetch(sourceUrl, { cache: "no-store" });
 	if (!response.ok) {
 		throw new Error(`Download failed (${response.status})`);
 	}
@@ -116,16 +106,18 @@ function InfoRow({
 }
 
 function VideoClipCard({
+	runId,
 	video,
 	versionLabel,
 	isLatest,
 }: {
+	runId?: Id<"generationRuns"> | null;
 	video: VideoResultItem;
 	versionLabel: string;
 	isLatest: boolean;
 }) {
 	const [downloading, setDownloading] = useState(false);
-	const canDownload = Boolean(video.storageId || video.url);
+	const canDownload = Boolean(video.objectKey || video.url);
 	const duration =
 		video.meta?.durationSeconds ?? video.videoParams?.durationSeconds;
 	const modelId = video.videoParams?.modelId;
@@ -270,13 +262,34 @@ function VideoClipCard({
 							setDownloading(true);
 							const filename = `studio-video-${video.id}.${extensionForMime(video.meta?.mimeType)}`;
 							try {
-								const sourceUrl = video.storageId
-									? getDownloadEndpoint(video.storageId, filename)
-									: video.url;
+								let sourceUrl = video.url;
+								if (!sourceUrl && runId && video.objectKey) {
+									sourceUrl = studioMediaProxyUrl({
+										runId,
+										objectKey: video.objectKey,
+									});
+								}
 								if (!sourceUrl) {
 									throw new Error("No download URL available");
 								}
-								await downloadVideoFile(sourceUrl, filename);
+								try {
+									await downloadVideoFile(sourceUrl, filename);
+								} catch (error) {
+									if (
+										!(runId && video.objectKey) ||
+										sourceUrl.includes("/studio/media")
+									) {
+										throw error;
+									}
+									// Direct R2 failed (usually CORS) — fall back once via Convex proxy.
+									await downloadVideoFile(
+										studioMediaProxyUrl({
+											runId,
+											objectKey: video.objectKey,
+										}),
+										filename,
+									);
+								}
 							} catch (error) {
 								console.error(error);
 								window.alert(
@@ -302,7 +315,7 @@ function VideoClipCard({
 	);
 }
 
-export function VideoResult({ videos }: VideoResultProps) {
+export function VideoResult({ runId, videos }: VideoResultProps) {
 	if (!videos.length) {
 		return null;
 	}
@@ -324,6 +337,7 @@ export function VideoResult({ videos }: VideoResultProps) {
 				{ordered.map((video, index) => (
 					<VideoClipCard
 						key={video.id}
+						runId={runId}
 						video={video}
 						versionLabel={`Take ${videos.length - index}`}
 						isLatest={index === 0}

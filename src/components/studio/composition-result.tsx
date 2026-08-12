@@ -1,8 +1,20 @@
-import { Download, Loader2, Play } from "lucide-react";
+import { Download, Film, Loader2, Play } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
+import {
+	compositionMergeCacheKey,
+	getCachedMergedComposition,
+	type MergeVideoSource,
+	mergeCompositionVideos,
+	triggerMergedDownload,
+} from "#/lib/merge-composition-videos";
+import { notifyStudioError, notifyStudioSuccess } from "#/lib/studio-toast";
 import { cn } from "#/lib/utils";
+import {
+	CompositionClipPlayer,
+	type CompositionPlayerClip,
+} from "./composition-clip-player";
 import type { VideoResultItem } from "./video-result";
 
 export type CompositionClipResult = {
@@ -26,20 +38,33 @@ type CompositionResultProps = {
 		| "cancelled";
 	clips: CompositionClipResult[];
 	totalDurationSeconds: number;
-	onDownloadMerged?: () => void;
-	merging?: boolean;
+	aspectRatio?: string | null;
+	mergeSources: MergeVideoSource[];
 };
 
 function statusLabel(status: CompositionClipResult["status"]) {
 	return status.replace("-", " ");
 }
 
+function resolveAspectRatio(
+	aspectRatio: string | null | undefined,
+	firstCompleted?: CompositionClipResult,
+) {
+	if (aspectRatio?.trim()) return aspectRatio;
+	const fromParams = firstCompleted?.video?.videoParams?.aspectRatio;
+	if (fromParams?.trim()) return fromParams;
+	const width = firstCompleted?.video?.meta?.width;
+	const height = firstCompleted?.video?.meta?.height;
+	if (width && height) return `${width}:${height}`;
+	return "9:16";
+}
+
 export function CompositionResult({
 	status,
 	clips,
 	totalDurationSeconds,
-	onDownloadMerged,
-	merging,
+	aspectRatio,
+	mergeSources,
 }: CompositionResultProps) {
 	const completed = useMemo(
 		() =>
@@ -48,8 +73,37 @@ export function CompositionResult({
 				.sort((a, b) => a.clipIndex - b.clipIndex),
 		[clips],
 	);
+	const playerClips: CompositionPlayerClip[] = useMemo(
+		() =>
+			completed.map((clip) => ({
+				id: clip._id,
+				label: clip.clipIndex + 1,
+				url: clip.video!.url!,
+			})),
+		[completed],
+	);
+	const usableMergeSources = useMemo(
+		() =>
+			mergeSources.filter(
+				(source) => Boolean(source.url) || Boolean(source.objectKey),
+			),
+		[mergeSources],
+	);
+	const cacheKey = useMemo(
+		() => compositionMergeCacheKey(usableMergeSources),
+		[usableMergeSources],
+	);
 	const [activeIndex, setActiveIndex] = useState(0);
-	const active = completed[activeIndex];
+	const [merging, setMerging] = useState(false);
+	const [mergeProgress, setMergeProgress] = useState<number | null>(null);
+	const [viewingMerged, setViewingMerged] = useState(false);
+	const [mergedUrl, setMergedUrl] = useState<string | null>(null);
+
+	const allClipsReady =
+		status === "completed" &&
+		completed.length === clips.length &&
+		completed.length > 0 &&
+		usableMergeSources.length > 0;
 
 	useEffect(() => {
 		setActiveIndex((current) =>
@@ -57,9 +111,70 @@ export function CompositionResult({
 		);
 	}, [completed.length]);
 
+	useEffect(() => {
+		const cached = cacheKey ? getCachedMergedComposition(cacheKey) : null;
+		if (cached) {
+			setMergedUrl(cached.objectUrl);
+			return;
+		}
+		setMergedUrl(null);
+		setViewingMerged(false);
+	}, [cacheKey]);
+
+	const ensureMerged = async () => {
+		const cached = getCachedMergedComposition(cacheKey);
+		if (cached) {
+			setMergedUrl(cached.objectUrl);
+			return cached;
+		}
+		setMerging(true);
+		setMergeProgress(0);
+		try {
+			const merged = await mergeCompositionVideos(usableMergeSources, {
+				cacheKey,
+				onProgress: setMergeProgress,
+			});
+			setMergedUrl(merged.objectUrl);
+			return merged;
+		} finally {
+			setMerging(false);
+			setMergeProgress(null);
+		}
+	};
+
+	const onViewFullVideo = async () => {
+		try {
+			const hadCache = Boolean(getCachedMergedComposition(cacheKey));
+			await ensureMerged();
+			setViewingMerged(true);
+			if (!hadCache) {
+				notifyStudioSuccess("Full video ready");
+			}
+		} catch (error) {
+			notifyStudioError("Could not build full video", error);
+		}
+	};
+
+	const onDownloadMerged = async () => {
+		try {
+			const hadCache = Boolean(getCachedMergedComposition(cacheKey));
+			const merged = await ensureMerged();
+			triggerMergedDownload(merged.blob);
+			notifyStudioSuccess(
+				hadCache ? "Download started" : "Merged download ready",
+			);
+		} catch (error) {
+			notifyStudioError("Merged download failed", error);
+		}
+	};
+
 	if (!clips.length) {
 		return null;
 	}
+
+	const hasCachedMerge = Boolean(mergedUrl);
+	const mergeLabel =
+		mergeProgress != null ? `Merging… ${mergeProgress}%` : "Merging…";
 
 	return (
 		<section className="flex flex-col gap-4 border-t border-border/80 pt-6">
@@ -79,47 +194,59 @@ export function CompositionResult({
 							: `${completed.length}/${clips.length} clips ready · ${totalDurationSeconds}s planned`}
 					</p>
 				</div>
-				{onDownloadMerged &&
-				status === "completed" &&
-				completed.length === clips.length ? (
-					<Button
-						type="button"
-						variant="outline"
-						disabled={merging}
-						onClick={onDownloadMerged}
-					>
-						{merging ? (
-							<Loader2 className="animate-spin" data-icon="inline-start" />
-						) : (
-							<Download data-icon="inline-start" />
-						)}
-						{merging ? "Merging…" : "Download merged MP4"}
-					</Button>
+				{allClipsReady ? (
+					<div className="flex flex-wrap gap-2">
+						<Button
+							type="button"
+							variant={viewingMerged ? "secondary" : "outline"}
+							disabled={merging}
+							onClick={() => void onViewFullVideo()}
+						>
+							{merging && !hasCachedMerge ? (
+								<Loader2 className="animate-spin" data-icon="inline-start" />
+							) : (
+								<Film data-icon="inline-start" />
+							)}
+							{merging && !hasCachedMerge
+								? mergeLabel
+								: viewingMerged
+									? "Playing full video"
+									: "View full video"}
+						</Button>
+						<Button
+							type="button"
+							variant="outline"
+							disabled={merging}
+							onClick={() => void onDownloadMerged()}
+						>
+							{merging ? (
+								<Loader2 className="animate-spin" data-icon="inline-start" />
+							) : (
+								<Download data-icon="inline-start" />
+							)}
+							{merging
+								? mergeLabel
+								: hasCachedMerge
+									? "Download MP4"
+									: "Download merged MP4"}
+						</Button>
+					</div>
 				) : null}
 			</div>
 
-			{active?.video?.url ? (
-				<div className="overflow-hidden rounded-xl border border-border bg-black">
-					<video
-						key={active.video.id}
-						src={active.video.url}
-						controls
-						autoPlay
-						playsInline
-						preload="auto"
-						onEnded={() => {
-							if (activeIndex < completed.length - 1) {
-								setActiveIndex(activeIndex + 1);
-							}
-						}}
-						className="mx-auto max-h-[min(70vh,560px)] w-full object-contain"
-					>
-						<track kind="captions" srcLang="en" label="Captions unavailable" />
-					</video>
-					<p className="border-t border-white/15 px-3 py-2 text-sm text-white/75">
-						Playing clip {active.clipIndex + 1} of {clips.length}
-					</p>
-				</div>
+			{playerClips.length > 0 ? (
+				<CompositionClipPlayer
+					clips={playerClips}
+					totalClipCount={clips.length}
+					aspectRatio={resolveAspectRatio(aspectRatio, completed[0])}
+					activeIndex={activeIndex}
+					onActiveIndexChange={(index) => {
+						setViewingMerged(false);
+						setActiveIndex(index);
+					}}
+					mergedUrl={viewingMerged ? mergedUrl : null}
+					onExitMerged={() => setViewingMerged(false)}
+				/>
 			) : (
 				<div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
 					The composed player will be ready when the first clip completes.
@@ -138,7 +265,8 @@ export function CompositionResult({
 								key={clip._id}
 								className={cn(
 									"rounded-lg border border-border/80 p-3",
-									playableIndex === activeIndex &&
+									!viewingMerged &&
+										playableIndex === activeIndex &&
 										"border-primary bg-primary/5",
 								)}
 							>
@@ -149,7 +277,10 @@ export function CompositionResult({
 											size="icon-sm"
 											variant="ghost"
 											aria-label={`Play clip ${clip.clipIndex + 1}`}
-											onClick={() => setActiveIndex(playableIndex)}
+											onClick={() => {
+												setViewingMerged(false);
+												setActiveIndex(playableIndex);
+											}}
 										>
 											<Play />
 										</Button>

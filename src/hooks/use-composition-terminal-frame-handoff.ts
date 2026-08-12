@@ -1,15 +1,15 @@
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { extractCompositionTerminalFrame } from "#/lib/extract-composition-terminal-frame";
-import { useMutation } from "convex/react";
+import { useAction } from "convex/react";
 import { useEffect, useEffectEvent, useRef } from "react";
 
 type CompositionHandoffClip = {
 	_id: Id<"compositionClips">;
 	clipIndex: number;
 	status: string;
-	terminalFrameStorageId?: Id<"_storage">;
-	video?: { url?: string | null };
+	terminalFrameObjectKey?: string;
+	video?: { url?: string | null; objectKey?: string };
 };
 
 type CompositionHandoffJob = {
@@ -29,8 +29,8 @@ export function useCompositionTerminalFrameHandoff(args: {
 	compositionJob: CompositionHandoffJob;
 	onError?: (error: unknown) => void;
 }) {
-	const generateUploadUrl = useMutation(api.studio.generateUploadUrl);
-	const submitFrame = useMutation(api.studio.submitCompositionTerminalFrame);
+	const prepareUpload = useAction(api.studioR2.prepareTerminalFrameUpload);
+	const finalizeUpload = useAction(api.studioR2.finalizeTerminalFrameUpload);
 	const inFlightRef = useRef<string | null>(null);
 	const onError = useEffectEvent((error: unknown) => {
 		args.onError?.(error);
@@ -52,14 +52,14 @@ export function useCompositionTerminalFrameHandoff(args: {
 						.filter(
 							(item) =>
 								item.status === "completed" &&
-								!item.terminalFrameStorageId &&
+								!item.terminalFrameObjectKey &&
 								item.video?.url,
 						)
 						.sort((a, b) => b.clipIndex - a.clipIndex)[0]
 			: undefined;
 	const clipId = handoffClip?._id;
 	const videoUrl = handoffClip?.video?.url ?? null;
-	const hasTerminalFrame = Boolean(handoffClip?.terminalFrameStorageId);
+	const hasTerminalFrame = Boolean(handoffClip?.terminalFrameObjectKey);
 
 	useEffect(() => {
 		if (
@@ -84,10 +84,14 @@ export function useCompositionTerminalFrameHandoff(args: {
 			try {
 				const frame = await extractCompositionTerminalFrame(videoUrl);
 				if (cancelled) return;
-				const uploadUrl = await generateUploadUrl({});
-				const uploaded = await fetch(uploadUrl, {
-					method: "POST",
-					headers: { "Content-Type": frame.type || "image/jpeg" },
+				const prepared = await prepareUpload({
+					runId,
+					clipId,
+					mimeType: frame.type || "image/jpeg",
+				});
+				const uploaded = await fetch(prepared.uploadUrl, {
+					method: "PUT",
+					headers: { "Content-Type": prepared.contentType },
 					body: frame,
 				});
 				if (!uploaded.ok) {
@@ -95,14 +99,11 @@ export function useCompositionTerminalFrameHandoff(args: {
 						`Continuity-frame upload failed (${uploaded.status}).`,
 					);
 				}
-				const { storageId } = (await uploaded.json()) as {
-					storageId: Id<"_storage">;
-				};
 				if (cancelled) return;
-				await submitFrame({
+				await finalizeUpload({
 					runId,
 					clipId,
-					storageId,
+					objectKey: prepared.objectKey,
 				});
 			} catch (error) {
 				if (!cancelled) {
@@ -120,14 +121,14 @@ export function useCompositionTerminalFrameHandoff(args: {
 		};
 	}, [
 		clipId,
-		generateUploadUrl,
+		finalizeUpload,
 		hasTerminalFrame,
 		jobId,
 		jobMode,
 		jobStatus,
 		onError,
+		prepareUpload,
 		runId,
-		submitFrame,
 		videoUrl,
 	]);
 }

@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import { internalMutation } from "./_generated/server";
+import { internalMutation, type MutationCtx } from "./_generated/server";
 import {
 	compositionClipPlanValidator,
 	generatedVideoValidator,
@@ -10,6 +10,21 @@ import {
 	videoSceneValidator,
 } from "./schema";
 import { estimateVideoCostUsd } from "./lib/videoAdapters";
+
+async function scheduleObjectDeletes(
+	ctx: MutationCtx,
+	objectKeys: Array<string | undefined | null>,
+) {
+	const keys = [
+		...new Set(objectKeys.filter((key): key is string => Boolean(key))),
+	];
+	if (keys.length === 0) {
+		return;
+	}
+	await ctx.scheduler.runAfter(0, internal.studioR2.deleteObjects, {
+		objectKeys: keys,
+	});
+}
 
 export const setRunStatus = internalMutation({
 	args: {
@@ -78,7 +93,9 @@ export const commitCompositionPlan = internalMutation({
 			throw new Error("Composition settings are missing from this run.");
 		}
 		if (args.clips.length !== run.compositionClipCount) {
-			throw new Error("The composition plan does not match the requested clip count.");
+			throw new Error(
+				"The composition plan does not match the requested clip count.",
+			);
 		}
 		const existing = await ctx.db
 			.query("compositionJobs")
@@ -89,15 +106,17 @@ export const commitCompositionPlan = internalMutation({
 				.query("compositionClips")
 				.withIndex("by_jobId_and_clipIndex", (q) => q.eq("jobId", existing._id))
 				.take(6);
+			const keysToDelete: string[] = [];
 			for (const clip of existingClips) {
 				if (clip.video) {
-					await ctx.storage.delete(clip.video.storageId);
+					keysToDelete.push(clip.video.objectKey);
 				}
-				if (clip.terminalFrameStorageId) {
-					await ctx.storage.delete(clip.terminalFrameStorageId);
+				if (clip.terminalFrameObjectKey) {
+					keysToDelete.push(clip.terminalFrameObjectKey);
 				}
 				await ctx.db.delete(clip._id);
 			}
+			await scheduleObjectDeletes(ctx, keysToDelete);
 			await ctx.db.delete(existing._id);
 		}
 
@@ -290,7 +309,7 @@ export const claimNextCompositionClip = internalMutation({
 		return {
 			job: { ...job, status: "generating", currentClipIndex: next.clipIndex },
 			clip: { ...next, status: "generating", attempts: next.attempts + 1 },
-			previousTerminalFrameStorageId: previous?.terminalFrameStorageId,
+			previousTerminalFrameObjectKey: previous?.terminalFrameObjectKey,
 		};
 	},
 });
@@ -300,7 +319,7 @@ export const completeCompositionClip = internalMutation({
 		jobId: v.id("compositionJobs"),
 		clipId: v.id("compositionClips"),
 		video: generatedVideoValidator,
-		terminalFrameStorageId: v.optional(v.id("_storage")),
+		terminalFrameObjectKey: v.optional(v.string()),
 		warnings: v.optional(v.array(v.string())),
 		/** When false, pause for browser terminal-frame extraction. */
 		scheduleNext: v.optional(v.boolean()),
@@ -316,10 +335,10 @@ export const completeCompositionClip = internalMutation({
 			throw new Error("Composition clip was not found.");
 		}
 		if (job.status === "cancelled") {
-			await ctx.storage.delete(args.video.storageId);
-			if (args.terminalFrameStorageId) {
-				await ctx.storage.delete(args.terminalFrameStorageId);
-			}
+			await scheduleObjectDeletes(ctx, [
+				args.video.objectKey,
+				args.terminalFrameObjectKey,
+			]);
 			return null;
 		}
 		if (clip.status !== "generating") {
@@ -329,16 +348,18 @@ export const completeCompositionClip = internalMutation({
 		await ctx.db.patch(clip._id, {
 			status: "completed",
 			video: args.video,
-			terminalFrameStorageId: args.terminalFrameStorageId,
+			terminalFrameObjectKey: args.terminalFrameObjectKey,
 			warnings: args.warnings,
 			updatedAt: now,
 		});
 		const awaitTerminalFrame =
-			args.awaitTerminalFrame === true && !args.terminalFrameStorageId;
+			args.awaitTerminalFrame === true && !args.terminalFrameObjectKey;
 		await ctx.db.patch(job._id, {
 			status: awaitTerminalFrame ? "awaiting_terminal_frame" : job.status,
 			actualCostUsd: (job.actualCostUsd ?? 0) + (args.video.actualCostUsd ?? 0),
-			currentClipIndex: awaitTerminalFrame ? clip.clipIndex : job.currentClipIndex,
+			currentClipIndex: awaitTerminalFrame
+				? clip.clipIndex
+				: job.currentClipIndex,
 			updatedAt: now,
 		});
 		if (awaitTerminalFrame) {
@@ -364,7 +385,7 @@ export const attachCompositionTerminalFrame = internalMutation({
 	args: {
 		jobId: v.id("compositionJobs"),
 		clipId: v.id("compositionClips"),
-		terminalFrameStorageId: v.id("_storage"),
+		terminalFrameObjectKey: v.string(),
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
@@ -376,22 +397,24 @@ export const attachCompositionTerminalFrame = internalMutation({
 			throw new Error("Composition clip was not found.");
 		}
 		if (job.status === "cancelled") {
-			await ctx.storage.delete(args.terminalFrameStorageId);
+			await scheduleObjectDeletes(ctx, [args.terminalFrameObjectKey]);
 			return null;
 		}
 		if (job.status !== "awaiting_terminal_frame") {
 			throw new Error("Composition is not waiting for a terminal frame.");
 		}
 		if (clip.status !== "completed") {
-			throw new Error("Clip must be completed before attaching a terminal frame.");
+			throw new Error(
+				"Clip must be completed before attaching a terminal frame.",
+			);
 		}
-		if (clip.terminalFrameStorageId) {
-			await ctx.storage.delete(args.terminalFrameStorageId);
+		if (clip.terminalFrameObjectKey) {
+			await scheduleObjectDeletes(ctx, [args.terminalFrameObjectKey]);
 			return null;
 		}
 		const now = Date.now();
 		await ctx.db.patch(clip._id, {
-			terminalFrameStorageId: args.terminalFrameStorageId,
+			terminalFrameObjectKey: args.terminalFrameObjectKey,
 			updatedAt: now,
 		});
 		await ctx.db.patch(job._id, {
@@ -520,30 +543,13 @@ export const wipeAllStudioData = internalMutation({
 	}),
 	handler: async (ctx) => {
 		const runs = await ctx.db.query("generationRuns").collect();
-		let filesDeleted = 0;
+		const keysToDelete: string[] = [];
 		for (const run of runs) {
-			const doc = run as Record<string, unknown>;
 			for (const image of run.referenceImages ?? []) {
-				await ctx.storage.delete(image.storageId);
-				filesDeleted += 1;
+				keysToDelete.push(image.objectKey);
 			}
 			for (const video of run.videos ?? []) {
-				await ctx.storage.delete(video.storageId);
-				filesDeleted += 1;
-			}
-			const legacyImage = doc.referenceImageStorageId as
-				| import("./_generated/dataModel").Id<"_storage">
-				| undefined;
-			const legacyVideo = doc.videoStorageId as
-				| import("./_generated/dataModel").Id<"_storage">
-				| undefined;
-			if (legacyImage) {
-				await ctx.storage.delete(legacyImage);
-				filesDeleted += 1;
-			}
-			if (legacyVideo) {
-				await ctx.storage.delete(legacyVideo);
-				filesDeleted += 1;
+				keysToDelete.push(video.objectKey);
 			}
 			await ctx.db.delete(run._id);
 		}
@@ -551,12 +557,10 @@ export const wipeAllStudioData = internalMutation({
 		const compositionClips = await ctx.db.query("compositionClips").collect();
 		for (const clip of compositionClips) {
 			if (clip.video) {
-				await ctx.storage.delete(clip.video.storageId);
-				filesDeleted += 1;
+				keysToDelete.push(clip.video.objectKey);
 			}
-			if (clip.terminalFrameStorageId) {
-				await ctx.storage.delete(clip.terminalFrameStorageId);
-				filesDeleted += 1;
+			if (clip.terminalFrameObjectKey) {
+				keysToDelete.push(clip.terminalFrameObjectKey);
 			}
 			await ctx.db.delete(clip._id);
 		}
@@ -565,6 +569,8 @@ export const wipeAllStudioData = internalMutation({
 			await ctx.db.delete(job._id);
 		}
 
+		await scheduleObjectDeletes(ctx, keysToDelete);
+
 		const caches = await ctx.db.query("catalogCache").collect();
 		for (const cache of caches) {
 			await ctx.db.delete(cache._id);
@@ -572,7 +578,7 @@ export const wipeAllStudioData = internalMutation({
 
 		return {
 			runsDeleted: runs.length,
-			filesDeleted,
+			filesDeleted: keysToDelete.length,
 			cachesDeleted: caches.length,
 		};
 	},

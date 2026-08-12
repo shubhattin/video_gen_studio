@@ -16,6 +16,8 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.34",
+    "@aws-sdk/client-s3": "^3.1108.0",
+    "@aws-sdk/s3-request-presigner": "^3.1108.0",
     "@base-ui/react": "^1.7.0",
     "@ffmpeg/core": "^0.12.10",
     "@ffmpeg/ffmpeg": "^0.12.15",

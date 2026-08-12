@@ -34,6 +34,7 @@ import {
 	runStatusPillLabel,
 } from "#/lib/studio-run-status";
 import { cn } from "#/lib/utils";
+import { HistoryPanelSkeleton } from "#/components/studio/studio-run-skeleton";
 
 type HistoryRun = {
 	_id: Id<"generationRuns">;
@@ -84,7 +85,7 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 	return (
 		<div className="flex min-h-0 flex-col gap-2">
 			{historyRuns === undefined ? (
-				<p className="px-2 text-sm text-muted-foreground">Loading history…</p>
+				<HistoryPanelSkeleton />
 			) : historyRuns.length === 0 ? (
 				<p className="px-2 text-sm text-muted-foreground">No runs yet.</p>
 			) : (
@@ -196,7 +197,7 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 						<AlertDialogTitle>Delete this run?</AlertDialogTitle>
 						<AlertDialogDescription>
 							This permanently deletes the run and all associated reference
-							images and videos from Convex storage. This cannot be undone.
+							images and videos from storage. This cannot be undone.
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					<AlertDialogFooter>

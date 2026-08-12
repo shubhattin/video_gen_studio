@@ -117,7 +117,7 @@ export const imageConfigSchema = z.object({
 export type ImageConfig = z.infer<typeof imageConfigSchema>;
 
 export function defaultImageConfig(): ImageConfig {
-	return { size: "1024x1536", quality: "low" };
+	return { size: "1024x1536", quality: "medium" };
 }
 
 export function defaultVideoParams(modelId: VideoModelId): VideoParams {
