@@ -1,8 +1,4 @@
-import {
-	Authenticated,
-	AuthLoading,
-	Unauthenticated,
-} from "convex/react";
+import { Authenticated, AuthLoading, Unauthenticated } from "convex/react";
 import { LogOut } from "lucide-react";
 import {
 	type ComponentProps,
