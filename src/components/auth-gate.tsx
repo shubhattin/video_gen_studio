@@ -1,4 +1,4 @@
-import { Authenticated, AuthLoading, Unauthenticated } from "convex/react";
+import { Authenticated, Unauthenticated, useConvexAuth } from "convex/react";
 import { LogOut } from "lucide-react";
 import {
 	type ComponentProps,
@@ -173,13 +173,20 @@ function AccessDenied() {
 
 export function AuthGate({ children }: { children: ReactNode }) {
 	const jwt = useJwtSession();
+	const { isLoading: convexAuthLoading } = useConvexAuth();
 	const [mounted, setMounted] = useState(false);
 
 	useEffect(() => {
 		setMounted(true);
 	}, []);
 
-	if (!mounted || jwt.isPending) {
+	const isAdmin = jwt.data?.user.role === "admin";
+	// One spinner through hydrate → JWT → Convex confirm. Switching
+	// AuthSessionPending → AuthLoading remounted the spinner and looked like a stall.
+	const showSpinner =
+		!mounted || jwt.isPending || (isAdmin && convexAuthLoading);
+
+	if (showSpinner) {
 		return <AuthSessionPending />;
 	}
 
@@ -187,15 +194,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
 		return <GoogleSignIn />;
 	}
 
-	if (jwt.data.user.role !== "admin") {
+	if (!isAdmin) {
 		return <AccessDenied />;
 	}
 
 	return (
 		<>
-			<AuthLoading>
-				<AuthSessionPending />
-			</AuthLoading>
 			<Unauthenticated>
 				<ConvexTokenError />
 			</Unauthenticated>

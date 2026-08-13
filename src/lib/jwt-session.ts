@@ -135,10 +135,17 @@ export async function getJwtSession(options?: {
 	}
 
 	const forceRefresh = options?.forceRefresh === true;
-	if (!forceRefresh && snapshot.data && cachedSessionStillValid(snapshot.data)) {
+	if (
+		!forceRefresh &&
+		snapshot.data &&
+		cachedSessionStillValid(snapshot.data)
+	) {
 		return snapshot.data;
 	}
-	if (!forceRefresh && inFlight) {
+	// Join an in-flight request even on forceRefresh. Convex (and React
+	// Strict Mode) can ask for a "fresh" token while the first GET is still
+	// running; Better Auth does not require two round trips.
+	if (inFlight) {
 		return await inFlight;
 	}
 
@@ -186,4 +193,10 @@ export function getJwtSessionSnapshot(): JwtSessionState {
 
 export function getJwtSessionServerSnapshot(): JwtSessionState {
 	return SERVER_SNAPSHOT;
+}
+
+// Start the cookie→JWT fetch as soon as this module loads in the browser,
+// not after React hydrates and useSyncExternalStore subscribes.
+if (typeof window !== "undefined") {
+	void getJwtSession();
 }
