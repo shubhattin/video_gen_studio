@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { Clapperboard, Sparkles } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
+import { AccountPopover } from "#/components/studio/account-popover";
 import { ThemeToggle } from "#/components/studio/theme-toggle";
 import {
 	Sidebar,
@@ -98,8 +99,15 @@ export function StudioShell({
 						</SidebarGroup>
 					</SidebarContent>
 
-					<SidebarFooter className="flex flex-row items-center justify-end gap-1 px-2 py-2 group-data-[collapsible=icon]:justify-center">
-						<ThemeToggle compact />
+					<SidebarFooter>
+						<div className="flex items-center justify-end group-data-[collapsible=icon]:justify-center">
+							<ThemeToggle compact />
+						</div>
+						<SidebarMenu>
+							<SidebarMenuItem>
+								<AccountPopover />
+							</SidebarMenuItem>
+						</SidebarMenu>
 					</SidebarFooter>
 					<SidebarRail />
 				</Sidebar>
