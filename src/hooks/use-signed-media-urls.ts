@@ -22,9 +22,7 @@ export function useSignedMediaUrls(
 	objectKeys: Array<string | undefined | null>,
 ) {
 	const getReadUrls = useAction(api.studioR2.getReadUrls);
-	const [urlsByKey, setUrlsByKey] = useState<Record<string, string | null>>(
-		{},
-	);
+	const [urlsByKey, setUrlsByKey] = useState<Record<string, string | null>>({});
 	const keysSignature = uniqueObjectKeys(objectKeys).join("\0");
 	const keys = useMemo(
 		() => (keysSignature ? keysSignature.split("\0") : []),

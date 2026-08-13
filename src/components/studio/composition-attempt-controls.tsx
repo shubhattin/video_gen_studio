@@ -121,7 +121,10 @@ function AttemptDetailsPopover({
 			>
 				<Info />
 			</PopoverTrigger>
-			<PopoverContent align="end" className="w-96 max-w-[min(24rem,92vw)] gap-3 p-4">
+			<PopoverContent
+				align="end"
+				className="w-96 max-w-[min(24rem,92vw)] gap-3 p-4"
+			>
 				<PopoverHeader>
 					<PopoverTitle>
 						{active?.attemptNumber

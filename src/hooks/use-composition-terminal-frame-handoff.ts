@@ -12,13 +12,16 @@ type CompositionHandoffClip = {
 	video?: { url?: string | null; objectKey?: string };
 };
 
-type CompositionHandoffJob = {
-	_id: Id<"compositionJobs">;
-	status: string;
-	mode: "continuation" | "cut-scenes";
-	currentClipIndex?: number;
-	clips: CompositionHandoffClip[];
-} | null | undefined;
+type CompositionHandoffJob =
+	| {
+			_id: Id<"compositionJobs">;
+			status: string;
+			mode: "continuation" | "cut-scenes";
+			currentClipIndex?: number;
+			clips: CompositionHandoffClip[];
+	  }
+	| null
+	| undefined;
 
 /**
  * When continuation mode pauses for a terminal frame, extract it in the browser
@@ -44,9 +47,7 @@ export function useCompositionTerminalFrameHandoff(args: {
 	const jobMode = job?.mode;
 	const currentClipIndex = job?.currentClipIndex;
 	const handoffClip =
-		job &&
-		jobStatus === "awaiting_terminal_frame" &&
-		jobMode === "continuation"
+		job && jobStatus === "awaiting_terminal_frame" && jobMode === "continuation"
 			? typeof currentClipIndex === "number"
 				? job.clips.find((item) => item.clipIndex === currentClipIndex)
 				: job.clips

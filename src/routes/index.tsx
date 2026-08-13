@@ -224,7 +224,9 @@ function ShlokaStudioPage() {
 		setImageQuality(run.imageQuality ?? "medium");
 		if (run.videoParams) {
 			setVideoConfig({
-				modelId: (run.selectedModelId as VideoModelId) ?? "bytedance/seedance-2.0-fast",
+				modelId:
+					(run.selectedModelId as VideoModelId) ??
+					"bytedance/seedance-2.0-fast",
 				aspectRatio: run.videoParams.aspectRatio,
 				resolution: run.videoParams.resolution,
 				durationSeconds: run.videoParams.durationSeconds,

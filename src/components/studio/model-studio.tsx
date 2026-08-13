@@ -503,8 +503,7 @@ export function ModelStudio({
 				)}
 			</div>
 
-			{composition.enabled &&
-			(compositionJob || isPlanningNextComposition) ? (
+			{composition.enabled && (compositionJob || isPlanningNextComposition) ? (
 				<CompositionAttemptControls
 					attempts={compositionAttempts ?? []}
 					activeJobId={compositionJob?._id}
