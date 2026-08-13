@@ -1,3 +1,8 @@
+import {
+	Authenticated,
+	AuthLoading,
+	Unauthenticated,
+} from "convex/react";
 import { LogOut } from "lucide-react";
 import {
 	type ComponentProps,
@@ -51,6 +56,7 @@ function AuthSessionPending() {
 			aria-busy="true"
 			aria-live="polite"
 			className="flex min-h-svh flex-col items-center justify-center gap-6 p-6"
+			role="status"
 		>
 			<Spinner className="size-6" />
 			<div className="flex w-full max-w-sm flex-col gap-3">
@@ -59,6 +65,7 @@ function AuthSessionPending() {
 				<Skeleton className="h-4 w-3/4" />
 				<Skeleton className="mt-2 h-10 w-full rounded-md" />
 			</div>
+			<p className="sr-only">Checking your session</p>
 		</div>
 	);
 }
@@ -185,5 +192,36 @@ export function AuthGate({ children }: { children: ReactNode }) {
 		return <AccessDenied />;
 	}
 
-	return children;
+	return (
+		<>
+			<AuthLoading>
+				<AuthSessionPending />
+			</AuthLoading>
+			<Unauthenticated>
+				<ConvexTokenError />
+			</Unauthenticated>
+			<Authenticated>{children}</Authenticated>
+		</>
+	);
+}
+
+function ConvexTokenError() {
+	return (
+		<div className="flex min-h-svh items-center justify-center p-6">
+			<Empty className="max-w-sm border-none">
+				<EmptyHeader>
+					<EmptyTitle>Could not connect</EmptyTitle>
+					<EmptyDescription>
+						The studio signed you in, but Convex rejected the access token.
+						Refresh to try again.
+					</EmptyDescription>
+				</EmptyHeader>
+				<EmptyContent>
+					<Button onClick={() => window.location.reload()} size="lg">
+						Refresh
+					</Button>
+				</EmptyContent>
+			</Empty>
+		</div>
+	);
 }

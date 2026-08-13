@@ -43,9 +43,25 @@ vi.mock("./lib/r2", () => ({
 	getR2ApiOrigin: () => "https://account.r2.cloudflarestorage.com",
 }));
 
+const ADMIN_IDENTITY = {
+	subject: "admin-user",
+	issuer: "https://auth.test",
+	role: "admin",
+} as const;
+
+const MEMBER_IDENTITY = {
+	subject: "member-user",
+	issuer: "https://auth.test",
+	role: "user",
+} as const;
+
+function adminConvex() {
+	return convexTest(schema, modules).withIdentity(ADMIN_IDENTITY);
+}
+
 describe("studio mutations", () => {
 	it("creates a shloka draft with portrait defaults", async () => {
-		const t = convexTest(schema, modules);
+		const t = adminConvex();
 		const runId = await t.mutation(api.studio.createShlokaDraft, {
 			shlokaText: "धर्मक्षेत्रे कुरुक्षेत्रे",
 			customInstructions: "Twilight forest mood",
@@ -61,7 +77,7 @@ describe("studio mutations", () => {
 	});
 
 	it("transitions plan commit to plan_ready", async () => {
-		const t = convexTest(schema, modules);
+		const t = adminConvex();
 		const runId = await t.mutation(api.studio.createShlokaDraft, {
 			shlokaText: "Test shloka",
 		});
@@ -96,7 +112,7 @@ describe("studio mutations", () => {
 	});
 
 	it("deletes a run", async () => {
-		const t = convexTest(schema, modules);
+		const t = adminConvex();
 		const runId = await t.mutation(api.studio.createShlokaDraft, {
 			shlokaText: "Delete me",
 		});
@@ -106,7 +122,7 @@ describe("studio mutations", () => {
 	});
 
 	it("attaches an uploaded reference image via object key", async () => {
-		const t = convexTest(schema, modules);
+		const t = adminConvex();
 		const runId = await t.mutation(api.studio.createModelStudioDraft, {
 			modelId: "google/veo-3.1-lite",
 			prompt: "Temple courtyard at dusk",
@@ -154,7 +170,7 @@ describe("studio mutations", () => {
 	});
 
 	it("persists a bounded composition plan as ordered clip rows", async () => {
-		const t = convexTest(schema, modules);
+		const t = adminConvex();
 		const runId = await t.mutation(api.studio.createShlokaDraft, {
 			shlokaText: "वसुदेवसुतं देवं",
 		});
@@ -351,5 +367,171 @@ describe("prompt limits", () => {
 				],
 			}),
 		).toThrow();
+	});
+});
+
+describe("studio authorization", () => {
+	it("rejects missing and non-admin identities on public queries and mutations", async () => {
+		const backend = convexTest(schema, modules);
+		const admin = backend.withIdentity(ADMIN_IDENTITY);
+		const member = backend.withIdentity(MEMBER_IDENTITY);
+		const runId = await admin.mutation(api.studio.createShlokaDraft, {
+			shlokaText: "Auth gate shloka",
+		});
+
+		await expect(backend.query(api.studio.getRun, { runId })).rejects.toThrow(
+			"Not authenticated.",
+		);
+		await expect(member.query(api.studio.getRun, { runId })).rejects.toThrow(
+			"Admin access required.",
+		);
+		const run = await admin.query(api.studio.getRun, { runId });
+		expect(run?._id).toBe(runId);
+
+		await expect(
+			backend.mutation(api.studio.wipeAllStudioData, {}),
+		).rejects.toThrow("Not authenticated.");
+		await expect(
+			member.mutation(api.studio.wipeAllStudioData, {}),
+		).rejects.toThrow("Admin access required.");
+		const wiped = await admin.mutation(api.studio.wipeAllStudioData, {});
+		expect(wiped.runsDeleted).toBe(1);
+	});
+
+	it("rejects missing and non-admin identities on cost-bearing and R2 actions", async () => {
+		const backend = convexTest(schema, modules);
+		const admin = backend.withIdentity(ADMIN_IDENTITY);
+		const member = backend.withIdentity(MEMBER_IDENTITY);
+		const runId = await admin.mutation(api.studio.createShlokaDraft, {
+			shlokaText: "Action auth shloka",
+		});
+		const objectKey = `studio/runs/${runId}/refs/test.png`;
+		await admin.mutation(internal.studioInternal.appendReferenceImage, {
+			runId,
+			image: {
+				id: "img_auth",
+				objectKey,
+				meta: {
+					mimeType: "image/png",
+					width: 1024,
+					height: 1536,
+					bytes: 4,
+				},
+				source: "uploaded",
+				createdAt: Date.now(),
+			},
+		});
+
+		await expect(
+			backend.action(api.studioActions.planShlokaRun, { runId }),
+		).rejects.toThrow("Not authenticated.");
+		await expect(
+			member.action(api.studioActions.planShlokaRun, { runId }),
+		).rejects.toThrow("Admin access required.");
+
+		await expect(
+			backend.action(api.studioR2.getReadUrls, {
+				runId,
+				objectKeys: [objectKey],
+			}),
+		).rejects.toThrow("Not authenticated.");
+		await expect(
+			member.action(api.studioR2.getReadUrls, {
+				runId,
+				objectKeys: [objectKey],
+			}),
+		).rejects.toThrow("Admin access required.");
+
+		const urls = await admin.action(api.studioR2.getReadUrls, {
+			runId,
+			objectKeys: [objectKey],
+		});
+		expect(urls[objectKey]).toBe(`https://r2.example/get/${objectKey}`);
+	});
+
+	it("keeps internal functions callable without a user identity", async () => {
+		const backend = convexTest(schema, modules);
+		const admin = backend.withIdentity(ADMIN_IDENTITY);
+		const runId = await admin.mutation(api.studio.createShlokaDraft, {
+			shlokaText: "Internal still works",
+		});
+		const objectKey = `studio/runs/${runId}/refs/test.png`;
+		await backend.mutation(internal.studioInternal.appendReferenceImage, {
+			runId,
+			image: {
+				id: "img_internal",
+				objectKey,
+				meta: {
+					mimeType: "image/png",
+					width: 64,
+					height: 64,
+					bytes: 4,
+				},
+				source: "uploaded",
+				createdAt: Date.now(),
+			},
+		});
+		const belongs = await backend.query(
+			internal.studioQueries.objectKeyBelongsToRun,
+			{ runId, objectKey },
+		);
+		expect(belongs).toBe(true);
+	});
+
+	it("requires an admin bearer for the media HTTP fallback", async () => {
+		const backend = convexTest(schema, modules);
+		const admin = backend.withIdentity(ADMIN_IDENTITY);
+		const member = backend.withIdentity(MEMBER_IDENTITY);
+		const runId = await admin.mutation(api.studio.createShlokaDraft, {
+			shlokaText: "Media proxy auth",
+		});
+		const objectKey = `studio/runs/${runId}/refs/test.png`;
+		await admin.mutation(internal.studioInternal.appendReferenceImage, {
+			runId,
+			image: {
+				id: "img_media",
+				objectKey,
+				meta: {
+					mimeType: "image/png",
+					width: 64,
+					height: 64,
+					bytes: 4,
+				},
+				source: "uploaded",
+				createdAt: Date.now(),
+			},
+		});
+
+		const mediaPath = `/studio/media?runId=${runId}&objectKey=${encodeURIComponent(objectKey)}`;
+		const missing = await backend.fetch(mediaPath);
+		expect(missing.status).toBe(401);
+		expect(await missing.text()).toBe("Not authenticated.");
+
+		const forbidden = await member.fetch(mediaPath);
+		expect(forbidden.status).toBe(403);
+		expect(await forbidden.text()).toBe("Admin access required.");
+
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = String(input);
+			if (url.startsWith("https://r2.example/")) {
+				return new Response("fake-bytes", {
+					status: 200,
+					headers: {
+						"Content-Type": "image/png",
+						"Content-Length": "10",
+					},
+				});
+			}
+			return originalFetch(input, init);
+		}) as typeof fetch;
+		try {
+			const allowed = await admin.fetch(mediaPath);
+			expect(allowed.status).toBe(200);
+			expect(await allowed.text()).toBe("fake-bytes");
+			expect(allowed.headers.get("Content-Type")).toBe("image/png");
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
 	});
 });

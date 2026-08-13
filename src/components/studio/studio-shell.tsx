@@ -1,7 +1,13 @@
 import { Link } from "@tanstack/react-router";
+import { api } from "@convex/_generated/api";
+import { useConvexAuth, useQuery } from "convex/react";
 import { Clapperboard, Sparkles } from "lucide-react";
-import type { CSSProperties, ReactNode } from "react";
+import { Activity, type CSSProperties, type ReactNode } from "react";
 import { AccountPopover } from "#/components/studio/account-popover";
+import {
+	HistoryPanelSkeleton,
+	StudioRunSkeleton,
+} from "#/components/studio/studio-run-skeleton";
 import { ThemeToggle } from "#/components/studio/theme-toggle";
 import {
 	Sidebar,
@@ -35,6 +41,14 @@ export function StudioShell({
 	history,
 	activePath = "/",
 }: StudioShellProps) {
+	const { isAuthenticated } = useConvexAuth();
+	const historyRuns = useQuery(
+		api.studio.listRecentRuns,
+		isAuthenticated ? { limit: 24 } : "skip",
+	);
+	const waitingForStudioData = historyRuns === undefined;
+	const mainLabel = "Loading your runs";
+
 	return (
 		<TooltipProvider>
 			<SidebarProvider
@@ -95,7 +109,9 @@ export function StudioShell({
 					<SidebarContent>
 						<SidebarGroup className="group-data-[collapsible=icon]:hidden">
 							<SidebarGroupLabel>History</SidebarGroupLabel>
-							<SidebarGroupContent>{history}</SidebarGroupContent>
+							<SidebarGroupContent>
+								{waitingForStudioData ? <HistoryPanelSkeleton /> : history}
+							</SidebarGroupContent>
 						</SidebarGroup>
 					</SidebarContent>
 
@@ -120,14 +136,21 @@ export function StudioShell({
 								{activePath === "/studio" ? "Model Studio" : "Shloka Studio"}
 							</p>
 							<p className="truncate text-xs text-muted-foreground sm:text-sm">
-								{activePath === "/studio"
-									? "OpenRouter video models and reference stills"
-									: "Plan → reference stills → OpenRouter video"}
+								{waitingForStudioData
+									? mainLabel
+									: activePath === "/studio"
+										? "OpenRouter video models and reference stills"
+										: "Plan → reference stills → OpenRouter video"}
 							</p>
 						</div>
 					</header>
 					<div className="flex flex-1 flex-col gap-6 p-4 sm:p-6">
-						{children}
+						<Activity mode={waitingForStudioData ? "hidden" : "visible"}>
+							{children}
+						</Activity>
+						{waitingForStudioData ? (
+							<StudioRunSkeleton label={mainLabel} />
+						) : null}
 					</div>
 				</SidebarInset>
 			</SidebarProvider>
