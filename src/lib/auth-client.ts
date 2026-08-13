@@ -1,3 +1,4 @@
+import { adminClient } from "better-auth/client/plugins";
 import { createAuthClient } from "better-auth/react";
 
 const betterAuthUrl = import.meta.env.VITE_BETTER_AUTH_URL;
@@ -11,6 +12,7 @@ export const authClient = createAuthClient({
 	fetchOptions: {
 		credentials: "include",
 	},
+	plugins: [adminClient()],
 });
 
 export const { useSession, signIn, signOut } = authClient;

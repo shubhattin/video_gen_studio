@@ -1,3 +1,4 @@
+import { LogOut } from "lucide-react";
 import {
 	type ComponentProps,
 	type ReactNode,
@@ -8,12 +9,13 @@ import { Button } from "#/components/ui/button";
 import {
 	Empty,
 	EmptyContent,
+	EmptyDescription,
 	EmptyHeader,
 	EmptyTitle,
 } from "#/components/ui/empty";
 import { Skeleton } from "#/components/ui/skeleton";
 import { Spinner } from "#/components/ui/spinner";
-import { signIn, useSession } from "#/lib/auth-client";
+import { signIn, signOut, useSession } from "#/lib/auth-client";
 import { notifyStudioError } from "#/lib/studio-toast";
 
 function googleCallbackUrl() {
@@ -113,6 +115,56 @@ function GoogleSignIn() {
 	);
 }
 
+function AccessDenied() {
+	const [pending, setPending] = useState(false);
+
+	const onLogout = async () => {
+		setPending(true);
+		try {
+			const { error } = await signOut();
+			if (error) {
+				setPending(false);
+				notifyStudioError(
+					"Could not log out",
+					error.message ?? error.statusText ?? "Sign-out failed.",
+				);
+			}
+		} catch (error) {
+			setPending(false);
+			notifyStudioError("Could not log out", error);
+		}
+	};
+
+	return (
+		<div className="flex min-h-svh items-center justify-center p-6">
+			<Empty className="max-w-sm border-none">
+				<EmptyHeader>
+					<EmptyTitle>Access denied</EmptyTitle>
+					<EmptyDescription>
+						This studio is limited to admin accounts.
+					</EmptyDescription>
+				</EmptyHeader>
+				<EmptyContent>
+					<Button
+						className="min-h-11 w-full"
+						disabled={pending}
+						onClick={onLogout}
+						size="lg"
+						variant="outline"
+					>
+						{pending ? (
+							<Spinner data-icon="inline-start" />
+						) : (
+							<LogOut data-icon="inline-start" />
+						)}
+						Log out
+					</Button>
+				</EmptyContent>
+			</Empty>
+		</div>
+	);
+}
+
 export function AuthGate({ children }: { children: ReactNode }) {
 	const { data: session, isPending } = useSession();
 	const [mounted, setMounted] = useState(false);
@@ -127,6 +179,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
 	if (!session) {
 		return <GoogleSignIn />;
+	}
+
+	if (session.user.role !== "admin") {
+		return <AccessDenied />;
 	}
 
 	return children;
