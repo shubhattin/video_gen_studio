@@ -1,4 +1,4 @@
-import { fetchBetterAuthJwt } from "#/lib/auth-client";
+import { getJwtSession } from "#/lib/jwt-session";
 
 function getConvexSiteUrl() {
 	const cloudUrl = import.meta.env.VITE_CONVEX_URL as string | undefined;
@@ -24,10 +24,11 @@ export async function fetchStudioMedia(
 	args: { runId: string; objectKey: string },
 	init: RequestInit = {},
 ): Promise<Response> {
-	const token = await fetchBetterAuthJwt();
-	if (!token) {
+	const session = await getJwtSession();
+	if (!session?.token) {
 		throw new Error("Not authenticated.");
 	}
+	const token = session.token;
 	const headers = new Headers(init.headers);
 	headers.set("Authorization", `Bearer ${token}`);
 	return await fetch(studioMediaProxyUrl(args), {

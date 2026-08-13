@@ -9,7 +9,7 @@ Browser cookie → GET {VITE_BETTER_AUTH_URL}/api/auth/token → JWT
      → requireAdmin()  (role === "admin")
 ```
 
-UI gate: Google session + `role === "admin"`, then wait until Convex accepts the token (`Authenticated` / `AuthLoading`). Implementation: `src/components/auth-gate.tsx`, `src/hooks/use-convex-auth.ts`, `convex/auth.config.ts`, `convex/lib/auth.ts`.
+UI gate: `useJwtSession` / `getJwtSession`. A valid token proves login; `role` in the payload is the admin check. No `useSession`. Convex still confirms the JWT on the websocket. Implementation: `src/lib/jwt-session.ts`, `src/hooks/use-jwt-session.ts`, `src/components/auth-gate.tsx`.
 
 ## Env split
 

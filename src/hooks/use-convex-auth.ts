@@ -1,25 +1,15 @@
-import { useCallback, useMemo } from "react";
-import { fetchBetterAuthJwt, useSession } from "#/lib/auth-client";
+import { useMemo } from "react";
+import { useJwtSession } from "#/hooks/use-jwt-session";
 
 export function useConvexBetterAuth() {
-	const { data: session, isPending } = useSession();
-
-	const fetchAccessToken = useCallback(
-		async (_args: { forceRefreshToken: boolean }) => {
-			if (!session) {
-				return null;
-			}
-			return await fetchBetterAuthJwt();
-		},
-		[session],
-	);
+	const { data, isPending, fetchAccessToken } = useJwtSession();
 
 	return useMemo(
 		() => ({
 			isLoading: isPending,
-			isAuthenticated: Boolean(session),
+			isAuthenticated: Boolean(data?.token),
 			fetchAccessToken,
 		}),
-		[isPending, session, fetchAccessToken],
+		[data?.token, fetchAccessToken, isPending],
 	);
 }

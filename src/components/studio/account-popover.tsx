@@ -12,7 +12,9 @@ import {
 } from "#/components/ui/popover";
 import { SidebarMenuButton } from "#/components/ui/sidebar";
 import { Spinner } from "#/components/ui/spinner";
-import { signOut, useSession } from "#/lib/auth-client";
+import { useJwtSession } from "#/hooks/use-jwt-session";
+import { signOut } from "#/lib/auth-client";
+import { clearJwtSession } from "#/lib/jwt-session";
 import { notifyStudioError } from "#/lib/studio-toast";
 
 function initials(name: string | undefined) {
@@ -23,7 +25,7 @@ function initials(name: string | undefined) {
 }
 
 export function AccountPopover() {
-	const { data } = useSession();
+	const { data } = useJwtSession();
 	const user = data?.user;
 	const [pending, setPending] = useState(false);
 
@@ -37,6 +39,7 @@ export function AccountPopover() {
 	const onLogout = async () => {
 		setPending(true);
 		try {
+			clearJwtSession();
 			const { error } = await signOut();
 			if (error) {
 				setPending(false);

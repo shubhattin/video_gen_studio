@@ -6,6 +6,7 @@ import {
 	useEffect,
 	useState,
 } from "react";
+import { useJwtSession } from "#/hooks/use-jwt-session";
 import { Button } from "#/components/ui/button";
 import {
 	Empty,
@@ -16,7 +17,8 @@ import {
 } from "#/components/ui/empty";
 import { Skeleton } from "#/components/ui/skeleton";
 import { Spinner } from "#/components/ui/spinner";
-import { signIn, signOut, useSession } from "#/lib/auth-client";
+import { signIn, signOut } from "#/lib/auth-client";
+import { clearJwtSession } from "#/lib/jwt-session";
 import { notifyStudioError } from "#/lib/studio-toast";
 
 function googleCallbackUrl() {
@@ -124,6 +126,7 @@ function AccessDenied() {
 	const onLogout = async () => {
 		setPending(true);
 		try {
+			clearJwtSession();
 			const { error } = await signOut();
 			if (error) {
 				setPending(false);
@@ -169,22 +172,22 @@ function AccessDenied() {
 }
 
 export function AuthGate({ children }: { children: ReactNode }) {
-	const { data: session, isPending } = useSession();
+	const jwt = useJwtSession();
 	const [mounted, setMounted] = useState(false);
 
 	useEffect(() => {
 		setMounted(true);
 	}, []);
 
-	if (!mounted || isPending) {
+	if (!mounted || jwt.isPending) {
 		return <AuthSessionPending />;
 	}
 
-	if (!session) {
+	if (!jwt.data) {
 		return <GoogleSignIn />;
 	}
 
-	if (session.user.role !== "admin") {
+	if (jwt.data.user.role !== "admin") {
 		return <AccessDenied />;
 	}
 
