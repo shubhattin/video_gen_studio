@@ -5,6 +5,7 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { action, internalAction } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
+import { requireAdmin } from "./lib/auth";
 import {
 	MODEL_CAPABILITY_PROFILES,
 	PLANNER_MODEL_ID,
@@ -161,6 +162,7 @@ export const planShlokaRun = action({
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
 		const run = await ctx.runQuery(internal.studioQueries.getRunDoc, {
 			runId: args.runId,
 		});
@@ -266,6 +268,7 @@ export const planModelStudioComposition = action({
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
 		const run = await ctx.runQuery(internal.studioQueries.getRunDoc, {
 			runId: args.runId,
 		});
@@ -331,6 +334,7 @@ export const generateReferenceImage = action({
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
 		const run = await ctx.runQuery(internal.studioQueries.getRunDoc, {
 			runId: args.runId,
 		});
@@ -421,6 +425,7 @@ export const generateVideoForRun = action({
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
 		const run = await ctx.runQuery(internal.studioQueries.getRunDoc, {
 			runId: args.runId,
 		});
@@ -718,6 +723,7 @@ export const refreshModelCatalog = action({
 	args: {},
 	returns: v.any(),
 	handler: async (ctx) => {
+		await requireAdmin(ctx);
 		const apiKey = getOpenRouterApiKey();
 		const models = await fetchOpenRouterVideoModels(apiKey);
 		const allowed = new Set(VIDEO_MODEL_IDS);

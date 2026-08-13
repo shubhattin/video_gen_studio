@@ -1,13 +1,20 @@
 import { Skeleton } from "#/components/ui/skeleton";
 
-/** Placeholder for the main studio card while a `?run=` document loads. */
-export function StudioRunSkeleton() {
+/** Placeholder for the main studio card while auth or a `?run=` document loads. */
+export function StudioRunSkeleton({
+	label = "Loading studio",
+}: {
+	label?: string;
+}) {
 	return (
 		<div
 			className="space-y-8 rounded-2xl border border-border/80 bg-card p-5 sm:p-8"
 			aria-busy="true"
+			aria-label={label}
 			aria-live="polite"
+			role="status"
 		>
+			<p className="sr-only">{label}</p>
 			<section className="space-y-3">
 				<Skeleton className="h-8 w-56 max-w-full" />
 				<Skeleton className="h-4 w-full max-w-md" />
@@ -52,7 +59,9 @@ export function HistoryPanelSkeleton({ rows = 5 }: { rows?: number }) {
 		<div
 			className="flex flex-col gap-2 px-1"
 			aria-busy="true"
+			aria-label="Loading run history"
 			aria-live="polite"
+			role="status"
 		>
 			{Array.from({ length: rows }, (_, index) => (
 				<div key={index} className="flex flex-col gap-2 rounded-md px-2 py-2">

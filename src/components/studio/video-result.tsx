@@ -11,7 +11,7 @@ import {
 	PopoverTitle,
 	PopoverTrigger,
 } from "#/components/ui/popover";
-import { studioMediaProxyUrl } from "#/lib/studio-media-proxy";
+import { fetchStudioMedia } from "#/lib/studio-media-proxy";
 import { cn } from "#/lib/utils";
 
 export type VideoResultItem = {
@@ -59,11 +59,10 @@ function formatBytes(bytes?: number) {
 	return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-async function downloadVideoFile(
-	sourceUrl: string,
+async function saveDownloadResponse(
+	response: Response,
 	filename: string,
 ): Promise<void> {
-	const response = await fetch(sourceUrl, { cache: "no-store" });
 	if (!response.ok) {
 		throw new Error(`Download failed (${response.status})`);
 	}
@@ -81,6 +80,14 @@ async function downloadVideoFile(
 	} finally {
 		window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
 	}
+}
+
+async function downloadVideoFile(
+	sourceUrl: string,
+	filename: string,
+): Promise<void> {
+	const response = await fetch(sourceUrl, { cache: "no-store" });
+	await saveDownloadResponse(response, filename);
 }
 
 function InfoRow({
@@ -262,33 +269,25 @@ function VideoClipCard({
 							setDownloading(true);
 							const filename = `studio-video-${video.id}.${extensionForMime(video.meta?.mimeType)}`;
 							try {
-								let sourceUrl = video.url;
-								if (!sourceUrl && runId && video.objectKey) {
-									sourceUrl = studioMediaProxyUrl({
-										runId,
-										objectKey: video.objectKey,
-									});
-								}
-								if (!sourceUrl) {
-									throw new Error("No download URL available");
-								}
-								try {
-									await downloadVideoFile(sourceUrl, filename);
-								} catch (error) {
-									if (
-										!(runId && video.objectKey) ||
-										sourceUrl.includes("/studio/media")
-									) {
-										throw error;
+								const fallbackProxy =
+									runId && video.objectKey
+										? { runId: String(runId), objectKey: video.objectKey }
+										: null;
+								if (video.url) {
+									try {
+										await downloadVideoFile(video.url, filename);
+									} catch (error) {
+										if (!fallbackProxy) {
+											throw error;
+										}
+										const response = await fetchStudioMedia(fallbackProxy);
+										await saveDownloadResponse(response, filename);
 									}
-									// Direct R2 failed (usually CORS) — fall back once via Convex proxy.
-									await downloadVideoFile(
-										studioMediaProxyUrl({
-											runId,
-											objectKey: video.objectKey,
-										}),
-										filename,
-									);
+								} else if (fallbackProxy) {
+									const response = await fetchStudioMedia(fallbackProxy);
+									await saveDownloadResponse(response, filename);
+								} else {
+									throw new Error("No download URL available");
 								}
 							} catch (error) {
 								console.error(error);

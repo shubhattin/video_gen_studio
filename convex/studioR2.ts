@@ -3,6 +3,7 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { action, internalAction } from "./_generated/server";
+import { requireAdmin } from "./lib/auth";
 import {
 	buildStudioObjectKey,
 	createPresignedGetUrl,
@@ -53,6 +54,7 @@ export const prepareReferenceImageUpload = action({
 		contentType: v.string(),
 	}),
 	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
 		const run = await ctx.runQuery(internal.studioQueries.getRunDoc, {
 			runId: args.runId,
 		});
@@ -96,6 +98,7 @@ export const finalizeReferenceImageUpload = action({
 		imageId: v.string(),
 	}),
 	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
 		const run = await ctx.runQuery(internal.studioQueries.getRunDoc, {
 			runId: args.runId,
 		});
@@ -169,6 +172,7 @@ export const prepareTerminalFrameUpload = action({
 		contentType: v.string(),
 	}),
 	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
 		const job = await ctx.runQuery(
 			internal.studioQueries.getCompositionJobByRun,
 			{ runId: args.runId },
@@ -210,6 +214,7 @@ export const finalizeTerminalFrameUpload = action({
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
 		const job = await ctx.runQuery(
 			internal.studioQueries.getCompositionJobByRun,
 			{ runId: args.runId },
@@ -265,6 +270,7 @@ export const getReadUrls = action({
 	},
 	returns: v.record(v.string(), v.union(v.string(), v.null())),
 	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
 		const uniqueKeys = [...new Set(args.objectKeys.filter(Boolean))];
 		const result: Record<string, string | null> = {};
 		await Promise.all(
@@ -297,6 +303,7 @@ export const getDownloadUrl = action({
 	},
 	returns: v.string(),
 	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
 		const allowed = await ctx.runQuery(
 			internal.studioQueries.objectKeyBelongsToRun,
 			{

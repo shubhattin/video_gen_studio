@@ -9,6 +9,9 @@ const app = defineApp({
 		R2_ACCESS_KEY_ID: v.optional(v.string()),
 		R2_SECRET_ACCESS_KEY: v.optional(v.string()),
 		R2_BUCKET_NAME: v.optional(v.string()),
+		BETTER_AUTH_ISSUER: v.optional(v.string()),
+		JWKS_ENDPOINT: v.optional(v.string()),
+		VIDEO_APP_ORIGIN: v.optional(v.string()),
 	},
 });
 

@@ -1,6 +1,6 @@
 import wasmUrl from "@ffmpeg/core/wasm?url";
 import coreUrl from "@ffmpeg/core?url";
-import { studioMediaProxyUrl } from "#/lib/studio-media-proxy";
+import { fetchStudioMedia } from "#/lib/studio-media-proxy";
 
 export type MergeVideoSource = {
 	url?: string | null;
@@ -64,37 +64,47 @@ function rememberMerge(cacheKey: string | undefined, blob: Blob): CachedMerge {
 
 async function fetchMediaBytes(source: MergeVideoSource): Promise<ArrayBuffer> {
 	const directUrl = source.url ?? null;
-	const proxyUrl =
-		source.runId && source.objectKey
-			? studioMediaProxyUrl({
-					runId: source.runId,
-					objectKey: source.objectKey,
-				})
-			: null;
+	const canProxy = Boolean(source.runId && source.objectKey);
 
-	const tryFetch = async (url: string) => {
-		const response = await fetch(url, { cache: "no-store" });
+	const readOk = async (response: Response) => {
 		if (!response.ok) {
 			throw new Error(`HTTP ${response.status}`);
 		}
 		return await response.arrayBuffer();
 	};
 
+	const tryDirect = async (url: string) => {
+		const response = await fetch(url, { cache: "no-store" });
+		return await readOk(response);
+	};
+
+	const tryProxy = async () => {
+		if (!source.runId || !source.objectKey) {
+			throw new Error("No clip URL available.");
+		}
+		return await readOk(
+			await fetchStudioMedia({
+				runId: source.runId,
+				objectKey: source.objectKey,
+			}),
+		);
+	};
+
 	if (directUrl) {
 		try {
-			return await tryFetch(directUrl);
+			return await tryDirect(directUrl);
 		} catch (error) {
-			if (!proxyUrl) {
+			if (!canProxy) {
 				throw error instanceof Error
 					? error
 					: new Error("Could not download clip from storage.");
 			}
-			return await tryFetch(proxyUrl);
+			return await tryProxy();
 		}
 	}
 
-	if (proxyUrl) {
-		return await tryFetch(proxyUrl);
+	if (canProxy) {
+		return await tryProxy();
 	}
 
 	throw new Error("No clip URL available.");

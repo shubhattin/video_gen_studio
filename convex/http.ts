@@ -1,24 +1,39 @@
 import { httpRouter } from "convex/server";
 import type { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
-import { httpAction } from "./_generated/server";
+import { env, httpAction } from "./_generated/server";
+import { requireAdmin } from "./lib/auth";
 
 const http = httpRouter();
 
-const MEDIA_CORS_HEADERS = {
-	"Access-Control-Allow-Origin": "*",
-	"Access-Control-Allow-Methods": "GET, OPTIONS",
-	"Access-Control-Allow-Headers": "Content-Type, Range",
-	"Access-Control-Expose-Headers": "Content-Length, Content-Type, Content-Range",
-	"Access-Control-Max-Age": "86400",
-};
+function mediaCorsHeaders() {
+	const origin = env.VIDEO_APP_ORIGIN?.trim();
+	const headers: Record<string, string> = {
+		"Access-Control-Allow-Methods": "GET, OPTIONS",
+		"Access-Control-Allow-Headers": "Authorization, Content-Type, Range",
+		"Access-Control-Expose-Headers":
+			"Content-Length, Content-Type, Content-Range",
+		"Access-Control-Max-Age": "86400",
+		Vary: "Origin",
+	};
+	if (origin) {
+		headers["Access-Control-Allow-Origin"] = origin;
+	}
+	return headers;
+}
 
 function corsResponse(body: BodyInit | null, init: ResponseInit = {}) {
 	const headers = new Headers(init.headers);
-	for (const [key, value] of Object.entries(MEDIA_CORS_HEADERS)) {
+	for (const [key, value] of Object.entries(mediaCorsHeaders())) {
 		headers.set(key, value);
 	}
 	return new Response(body, { ...init, headers });
+}
+
+function authorizationFailureResponse(error: unknown) {
+	const message = error instanceof Error ? error.message : "Unauthorized";
+	const status = message === "Not authenticated." ? 401 : 403;
+	return corsResponse(message, { status });
 }
 
 http.route({
@@ -33,6 +48,12 @@ http.route({
 	path: "/studio/media",
 	method: "GET",
 	handler: httpAction(async (ctx, request) => {
+		try {
+			await requireAdmin(ctx);
+		} catch (error) {
+			return authorizationFailureResponse(error);
+		}
+
 		const url = new URL(request.url);
 		const runId = url.searchParams.get("runId");
 		const objectKey = url.searchParams.get("objectKey");
@@ -65,7 +86,7 @@ http.route({
 			});
 		}
 
-		const headers = new Headers(MEDIA_CORS_HEADERS);
+		const headers = new Headers(mediaCorsHeaders());
 		headers.set(
 			"Content-Type",
 			upstream.headers.get("Content-Type") ?? "application/octet-stream",
@@ -73,6 +94,10 @@ http.route({
 		const contentLength = upstream.headers.get("Content-Length");
 		if (contentLength) {
 			headers.set("Content-Length", contentLength);
+		}
+		const contentRange = upstream.headers.get("Content-Range");
+		if (contentRange) {
+			headers.set("Content-Range", contentRange);
 		}
 		headers.set("Cache-Control", "private, max-age=300");
 

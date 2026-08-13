@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { mutation, query, type QueryCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
+import { requireAdmin } from "./lib/auth";
 import {
 	MODEL_CAPABILITY_PROFILES,
 	VIDEO_MODEL_IDS,
@@ -36,6 +37,7 @@ export const getRun = query({
 	},
 	returns: v.union(v.null(), v.any()),
 	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
 		return await ctx.db.get(args.runId);
 	},
 });
@@ -47,6 +49,7 @@ export const getCompositionForRun = query({
 	},
 	returns: v.union(v.null(), v.any()),
 	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
 		let job = null;
 		if (args.jobId) {
 			const selected = await ctx.db.get(args.jobId);
@@ -70,6 +73,7 @@ export const listCompositionJobsForRun = query({
 	},
 	returns: v.array(v.any()),
 	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
 		const jobs = await listCompositionJobsForRunCtx(ctx, args.runId);
 		return jobs.map((job) => ({
 			_id: job._id,
@@ -97,6 +101,7 @@ export const selectCompositionJob = mutation({
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
 		const run = await ctx.db.get(args.runId);
 		if (!run) {
 			throw new Error("Run not found.");
@@ -119,6 +124,7 @@ export const listRecentRuns = query({
 	},
 	returns: v.array(v.any()),
 	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
 		const limit = Math.min(args.limit ?? 20, 50);
 		return await ctx.db
 			.query("generationRuns")
@@ -131,7 +137,8 @@ export const listRecentRuns = query({
 export const getStaticModelCatalog = query({
 	args: {},
 	returns: v.any(),
-	handler: async () => {
+	handler: async (ctx) => {
+		await requireAdmin(ctx);
 		return {
 			modelIds: VIDEO_MODEL_IDS,
 			profiles: MODEL_CAPABILITY_PROFILES,
@@ -143,6 +150,7 @@ export const getCachedOpenRouterCatalog = query({
 	args: {},
 	returns: v.union(v.null(), v.any()),
 	handler: async (ctx) => {
+		await requireAdmin(ctx);
 		const cached = await ctx.db.query("catalogCache").first();
 		if (!cached) {
 			return null;
@@ -166,6 +174,7 @@ export const createShlokaDraft = mutation({
 	},
 	returns: v.id("generationRuns"),
 	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
 		const shlokaText = args.shlokaText.trim();
 		if (!shlokaText) {
 			throw new Error("Shloka text is required.");
@@ -203,6 +212,7 @@ export const createModelStudioDraft = mutation({
 	},
 	returns: v.id("generationRuns"),
 	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
 		if (!(VIDEO_MODEL_IDS as readonly string[]).includes(args.modelId)) {
 			throw new Error("Unsupported model.");
 		}
@@ -246,6 +256,7 @@ export const updateDraft = mutation({
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
 		const run = await ctx.db.get(args.runId);
 		if (!run) {
 			throw new Error("Run not found.");
@@ -337,6 +348,7 @@ export const startComposition = mutation({
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
 		let job = null;
 		if (args.jobId) {
 			const selected = await ctx.db.get(args.jobId);
@@ -380,6 +392,7 @@ export const cancelComposition = mutation({
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
 		let job = null;
 		if (args.jobId) {
 			const selected = await ctx.db.get(args.jobId);
@@ -413,6 +426,7 @@ export const deleteRun = mutation({
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
 		const run = await ctx.db.get(args.runId);
 		if (!run) {
 			return null;
@@ -460,6 +474,7 @@ export const removeReferenceImage = mutation({
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
 		const run = await ctx.db.get(args.runId);
 		if (!run) {
 			throw new Error("Run not found.");
@@ -509,6 +524,7 @@ export const wipeAllStudioData = mutation({
 		filesDeleted: number;
 		cachesDeleted: number;
 	}> => {
+		await requireAdmin(ctx);
 		return await ctx.runMutation(internal.studioInternal.wipeAllStudioData, {});
 	},
 });
