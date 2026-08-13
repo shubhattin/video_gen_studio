@@ -17,7 +17,7 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { Streamdown } from "streamdown";
+import { Streamdown, type PluginConfig } from "streamdown";
 import {
 	Collapsible,
 	CollapsibleContent,
@@ -204,7 +204,7 @@ export type ReasoningContentProps = ComponentProps<
 	children: string;
 };
 
-const streamdownPlugins = { cjk, code, math, mermaid };
+const streamdownPlugins = { cjk, code, math, mermaid } as PluginConfig;
 
 export const ReasoningContent = memo(
 	({ className, children, ...props }: ReasoningContentProps) => (
