@@ -3,13 +3,15 @@ import { cn } from "@/lib/utils";
 
 function Spinner({ className, ...props }: React.ComponentProps<"svg">) {
 	return (
-		<SpinnerIcon
-			data-slot="spinner"
-			role="status"
-			aria-label="Loading"
-			className={cn("size-4 animate-spin", className)}
-			{...props}
-		/>
+		<span className={cn("inline-flex size-4 animate-spin", className)}>
+			<SpinnerIcon
+				aria-label="Loading"
+				className="size-full"
+				data-slot="spinner"
+				role="status"
+				{...props}
+			/>
+		</span>
 	);
 }
 
