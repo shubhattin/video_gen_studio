@@ -186,7 +186,7 @@ export const createShlokaDraft = mutation({
 		}
 		const now = Date.now();
 		const imageConfig = defaultImageConfig();
-		const defaultModel: VideoModelId = "bytedance/seedance-2.0-fast";
+		const defaultModel: VideoModelId = "bytedance/seedance-2.5";
 		const plannerSystemPrompt = normalizePlannerSystemPromptForStorage(
 			args.plannerSystemPrompt,
 		);
