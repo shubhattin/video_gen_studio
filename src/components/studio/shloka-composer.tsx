@@ -31,6 +31,8 @@ type ShlokaComposerProps = {
 	onShlokaChange: (value: string) => void;
 	onInstructionsChange: (value: string) => void;
 	onPlannerSystemPromptChange: (value: string) => void;
+	/** Persist shloka / instructions / system prompt (typically on blur). */
+	onPersist?: () => void;
 	disabled?: boolean;
 };
 
@@ -41,6 +43,7 @@ export function ShlokaComposer({
 	onShlokaChange,
 	onInstructionsChange,
 	onPlannerSystemPromptChange,
+	onPersist,
 	disabled,
 }: ShlokaComposerProps) {
 	const [lipiEnabled, setLipiEnabled] = useState(true);
@@ -131,6 +134,7 @@ export function ShlokaComposer({
 										onChange={(event) =>
 											onPlannerSystemPromptChange(event.target.value)
 										}
+										onBlur={() => onPersist?.()}
 										className="min-h-64 max-h-[50vh] resize-y font-mono text-xs leading-relaxed"
 										disabled={disabled}
 										aria-label="Planner system prompt"
@@ -194,7 +198,10 @@ export function ShlokaComposer({
 							onShlokaChange,
 						);
 					}}
-					onBlur={() => typingContextRef.current.clearContext()}
+					onBlur={() => {
+						typingContextRef.current.clearContext();
+						onPersist?.();
+					}}
 					onKeyDown={(event) =>
 						clearTypingContextOnKeyDown(
 							event.nativeEvent,
@@ -216,6 +223,7 @@ export function ShlokaComposer({
 				<Textarea
 					value={customInstructions}
 					onChange={(event) => onInstructionsChange(event.target.value)}
+					onBlur={() => onPersist?.()}
 					placeholder="Example: twilight temple courtyard, soft diya glow, marigold petals, gentle camera drift, no text overlays…"
 					className="min-h-40 max-h-72 overflow-y-auto resize-y"
 					disabled={disabled}

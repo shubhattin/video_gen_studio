@@ -36,6 +36,7 @@ import {
 	buildShlokaPlannerSystemPrompt,
 	multiClipPlannerInstructions,
 } from "./lib/plannerPrompt";
+import { buildVideoPromptFromScenes } from "./lib/videoPlanMarkdown";
 import { adaptOpenRouterVideoRequest } from "./lib/videoAdapters";
 import {
 	buildStudioObjectKey,
@@ -102,20 +103,6 @@ function withImageStyleSafety(prompt: string) {
 		return trimmed;
 	}
 	return `${IMAGE_STYLE_SAFETY_PREFIX} ${trimmed}`;
-}
-
-function buildVideoPromptFromScenes(
-	scenes: Array<{ intent: string; actionMotion: string; composition: string }>,
-) {
-	// Keep compact — Kling and similar providers reject very long prompts.
-	const compact = scenes
-		.slice(0, 6)
-		.map(
-			(scene, index) =>
-				`${index + 1}. ${scene.intent}: ${scene.actionMotion}`,
-		)
-		.join(" | ");
-	return `${compact} | stylized illustrated characters, not photoreal people`;
 }
 
 function warningMessages(

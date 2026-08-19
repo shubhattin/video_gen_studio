@@ -249,6 +249,7 @@ function ShlokaStudioPage() {
 		if (runId) {
 			await updateDraft({
 				runId,
+				shlokaText,
 				customInstructions,
 				plannerSystemPrompt: storedPlannerSystemPrompt,
 				imageSize,
@@ -275,6 +276,7 @@ function ShlokaStudioPage() {
 		setRunId(id);
 		await updateDraft({
 			runId: id,
+			shlokaText,
 			plannerSystemPrompt: storedPlannerSystemPrompt,
 			imageSize,
 			imageQuality,
@@ -287,6 +289,36 @@ function ShlokaStudioPage() {
 			compositionClipCount: composition.enabled ? composition.multiplier : null,
 		});
 		return id;
+	};
+
+	const persistComposerFields = async () => {
+		if (busyStage !== null) return;
+		const trimmedShloka = shlokaText.trim();
+		if (!trimmedShloka) return;
+		try {
+			if (!runId) {
+				const storedPlannerSystemPrompt =
+					normalizePlannerSystemPromptForStorage(plannerSystemPrompt) ?? null;
+				const id = await createDraft({
+					shlokaText: trimmedShloka,
+					customInstructions,
+					...(storedPlannerSystemPrompt
+						? { plannerSystemPrompt: storedPlannerSystemPrompt }
+						: {}),
+				});
+				setRunId(id);
+				return;
+			}
+			await updateDraft({
+				runId,
+				shlokaText: trimmedShloka,
+				customInstructions,
+				plannerSystemPrompt:
+					normalizePlannerSystemPromptForStorage(plannerSystemPrompt) ?? null,
+			});
+		} catch (error) {
+			notifyStudioError("Could not save draft", error);
+		}
 	};
 
 	const onPlan = async () => {
@@ -419,6 +451,7 @@ function ShlokaStudioPage() {
 							onShlokaChange={setShlokaText}
 							onInstructionsChange={setCustomInstructions}
 							onPlannerSystemPromptChange={setPlannerSystemPrompt}
+							onPersist={persistComposerFields}
 							disabled={busyStage !== null}
 						/>
 
@@ -545,6 +578,29 @@ function ShlokaStudioPage() {
 									}
 									plannerReasoning={
 										compositionJob?.plannerReasoning ?? run?.plannerReasoning
+									}
+									disabled={busyStage !== null || !runId}
+									onSaveImagePrompt={
+										runId
+											? async (imagePrompt) => {
+													await updateDraft({ runId, imagePrompt });
+													notifyStudioSuccess(
+														"Image prompt saved",
+														"Reference image generation will use the updated prompt.",
+													);
+												}
+											: undefined
+									}
+									onSaveVideoScenes={
+										runId
+											? async (videoScenes) => {
+													await updateDraft({ runId, videoScenes });
+													notifyStudioSuccess(
+														"Video plan saved",
+														"Video generation will use the updated scenes.",
+													);
+												}
+											: undefined
 									}
 									onRegenerate={
 										runId

@@ -10,7 +10,12 @@ import {
 } from "./lib/modelCatalog";
 import { normalizePlannerSystemPromptForStorage } from "./lib/plannerPrompt";
 import { defaultImageConfig, defaultVideoParams } from "./lib/schemas";
-import { compositionModeValidator, videoParamsValidator } from "./schema";
+import { buildVideoPromptFromScenes } from "./lib/videoPlanMarkdown";
+import {
+	compositionModeValidator,
+	videoParamsValidator,
+	videoSceneValidator,
+} from "./schema";
 import {
 	listCompositionJobsForRunCtx,
 	resolveActiveCompositionJob,
@@ -240,8 +245,11 @@ export const createModelStudioDraft = mutation({
 export const updateDraft = mutation({
 	args: {
 		runId: v.id("generationRuns"),
+		shlokaText: v.optional(v.string()),
 		customInstructions: v.optional(v.string()),
 		plannerSystemPrompt: v.optional(v.union(v.string(), v.null())),
+		imagePrompt: v.optional(v.string()),
+		videoScenes: v.optional(v.array(videoSceneValidator)),
 		imageSize: v.optional(v.string()),
 		imageQuality: v.optional(v.string()),
 		selectedModelId: v.optional(v.string()),
@@ -305,20 +313,56 @@ export const updateDraft = mutation({
 		) {
 			throw new Error("Composition clip count must be between 2 and 6.");
 		}
+
+		let shlokaText = run.shlokaText;
+		if (args.shlokaText !== undefined) {
+			const trimmed = args.shlokaText.trim();
+			if (!trimmed) {
+				throw new Error("Shloka text is required.");
+			}
+			shlokaText = trimmed;
+		}
+
+		let imagePrompt = run.imagePrompt;
+		if (args.imagePrompt !== undefined) {
+			const trimmed = args.imagePrompt.trim();
+			if (trimmed.length < 20) {
+				throw new Error("Image prompt must be at least 20 characters.");
+			}
+			imagePrompt = trimmed;
+		}
+
+		let videoScenes = run.videoScenes;
+		let videoPrompt =
+			args.videoPrompt !== undefined
+				? args.videoPrompt.trim() || undefined
+				: run.videoPrompt;
+		if (args.videoScenes !== undefined) {
+			if (args.videoScenes.length < 1 || args.videoScenes.length > 12) {
+				throw new Error("Video plan must include between 1 and 12 scenes.");
+			}
+			videoScenes = args.videoScenes;
+			// Prefer the derived provider prompt when scenes are edited unless an
+			// explicit videoPrompt was also supplied in this same update.
+			if (args.videoPrompt === undefined) {
+				videoPrompt = buildVideoPromptFromScenes(args.videoScenes);
+			}
+		}
+
 		await ctx.db.patch(args.runId, {
+			shlokaText,
 			customInstructions:
 				args.customInstructions !== undefined
 					? args.customInstructions.trim() || undefined
 					: run.customInstructions,
 			plannerSystemPrompt,
+			imagePrompt,
+			videoScenes,
 			imageSize: args.imageSize ?? run.imageSize,
 			imageQuality: args.imageQuality ?? run.imageQuality,
 			selectedModelId: args.selectedModelId ?? run.selectedModelId,
 			videoParams: args.videoParams ?? run.videoParams,
-			videoPrompt:
-				args.videoPrompt !== undefined
-					? args.videoPrompt.trim() || undefined
-					: run.videoPrompt,
+			videoPrompt,
 			compositionMode:
 				args.compositionMode === null
 					? undefined

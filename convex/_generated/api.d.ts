@@ -17,6 +17,7 @@ import type * as lib_providers from "../lib/providers.js";
 import type * as lib_r2 from "../lib/r2.js";
 import type * as lib_schemas from "../lib/schemas.js";
 import type * as lib_videoAdapters from "../lib/videoAdapters.js";
+import type * as lib_videoPlanMarkdown from "../lib/videoPlanMarkdown.js";
 import type * as studio from "../studio.js";
 import type * as studioActions from "../studioActions.js";
 import type * as studioInternal from "../studioInternal.js";
@@ -39,6 +40,7 @@ declare const fullApi: ApiFromModules<{
   "lib/r2": typeof lib_r2;
   "lib/schemas": typeof lib_schemas;
   "lib/videoAdapters": typeof lib_videoAdapters;
+  "lib/videoPlanMarkdown": typeof lib_videoPlanMarkdown;
   studio: typeof studio;
   studioActions: typeof studioActions;
   studioInternal: typeof studioInternal;
