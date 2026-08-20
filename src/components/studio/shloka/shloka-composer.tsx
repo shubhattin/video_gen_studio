@@ -187,6 +187,7 @@ export function ShlokaComposer({
 				</div>
 				<Textarea
 					value={shlokaText}
+					spellCheck={false}
 					onChange={(event) => onShlokaChange(event.target.value)}
 					onBeforeInput={(event) => {
 						if (!lipiEnabled) {

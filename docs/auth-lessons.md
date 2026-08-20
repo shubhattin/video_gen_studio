@@ -12,11 +12,13 @@ JWKS is one public key set. Scope is the JWT `aud` claim, not a per-app JWKS.
 
 ## Convex Cloud is not your laptop
 
-Hosted Convex cannot fetch `http://localhost:5188`. JWKS must be a public HTTPS URL **or** a data URI.
+Hosted Convex cannot fetch `http://localhost:5188`. `JWKS_ENDPOINT` must be a **public HTTPS** URL that Convex can reach (usually `{issuer}/api/auth/jwks`).
 
-Issuer and JWKS URL can differ. Local JWT `iss` is `http://localhost:5188`; Convex fetches JWKS from a tunnel. Do **not** derive `jwks` as `` `${issuer}/api/auth/jwks` `` — that points Convex at localhost.
+If local JWT `iss` is `http://localhost:5188` but JWKS is served from a tunnel or staging host, set `JWKS_ENDPOINT` to that public URL explicitly. Do **not** derive `jwks` as `` `${issuer}/api/auth/jwks` `` when issuer is localhost — that points Convex at an unreachable address.
 
 `BETTER_AUTH_ISSUER` / `JWKS_ENDPOINT` live on the **Convex dashboard**, not in Vite. Unset issuer → “no providers configured”. Empty `?? ""` can deploy a blank provider and look the same.
+
+Do not hardcode JWKS JSON or a `data:` URI in env. Point at the live Better Auth JWKS URL so key rotation works without re-pasting keys.
 
 ## Typecheck can deploy a broken auth config
 
@@ -34,7 +36,7 @@ Error: `Could not fetch JWKS … error sending request for url`.
 
 Convex uses rustls. Curl/OpenSSL accept `_` under `*.domain`. rustls does not (`better_auth_local_dev…` vs `*.shubhattin.in`). Python `ssl` reproduces the hostname mismatch.
 
-Fix: hyphenated tunnel hostname, or JWKS as `data:text/plain;charset=utf-8;base64,…` (refresh with curl + `bunx convex env set` — see [auth-convex.md](./auth-convex.md)). Better Auth must issue **RS256** (not default EdDSA). Changing `alg` requires a new key in the `jwks` table, not only a config edit. Prod Vercel custom domains do not need the data URI.
+Fix: use a hyphenated tunnel hostname or a real custom domain for `JWKS_ENDPOINT`. Better Auth must issue **RS256** (not default EdDSA). Changing `alg` requires a new key in the `jwks` table, not only a config edit.
 
 ## Queries race the JWT
 

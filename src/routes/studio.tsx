@@ -3,10 +3,10 @@ import { useQuery } from "convex/react";
 import { useEffect } from "react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
-import { ModelStudio } from "#/components/studio/model-studio";
-import { HistoryPanel } from "#/components/studio/history-panel";
-import { StudioShell } from "#/components/studio/studio-shell";
-import { StudioRunSkeleton } from "#/components/studio/studio-run-skeleton";
+import { ModelStudio } from "#/components/studio/model/model-studio";
+import { HistoryPanel } from "#/components/studio/shell/history-panel";
+import { StudioShell } from "#/components/studio/shell/studio-shell";
+import { StudioRunSkeleton } from "#/components/studio/shell/studio-run-skeleton";
 import {
 	studioRunSearchSchema,
 	type StudioRunSearch,

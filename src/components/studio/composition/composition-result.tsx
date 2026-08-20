@@ -15,7 +15,7 @@ import {
 	CompositionClipPlayer,
 	type CompositionPlayerClip,
 } from "./composition-clip-player";
-import type { VideoResultItem } from "./video-result";
+import type { VideoResultItem } from "../video/video-result";
 
 export type CompositionClipResult = {
 	_id: string;

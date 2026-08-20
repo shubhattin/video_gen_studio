@@ -34,7 +34,7 @@ import {
 	runStatusPillLabel,
 } from "#/lib/studio-run-status";
 import { cn } from "#/lib/utils";
-import { HistoryPanelSkeleton } from "#/components/studio/studio-run-skeleton";
+import { HistoryPanelSkeleton } from "#/components/studio/shell/studio-run-skeleton";
 
 type HistoryRun = {
 	_id: Id<"generationRuns">;

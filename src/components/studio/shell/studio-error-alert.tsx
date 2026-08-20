@@ -15,10 +15,10 @@ export function StudioErrorAlert({
 	}
 
 	return (
-		<Alert variant="destructive" className="border-destructive/40">
+		<Alert variant="destructive" className="border-Wdestructive/40">
 			<WarningCircleIcon />
 			<AlertTitle>{title}</AlertTitle>
-			<AlertDescription className="break-words whitespace-pre-wrap">
+			<AlertDescription className="wrap-break-word whitespace-pre-wrap">
 				{error}
 			</AlertDescription>
 		</Alert>

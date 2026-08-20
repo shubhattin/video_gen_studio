@@ -6,24 +6,24 @@ import { useEffect, useMemo, useState } from "react";
 import {
 	type CompositionClipResult,
 	CompositionResult,
-} from "#/components/studio/composition-result";
-import { CompositionAttemptControls } from "#/components/studio/composition-attempt-controls";
-import { GenerationProgressDock } from "#/components/studio/generation-progress-dock";
-import { HistoryPanel } from "#/components/studio/history-panel";
+} from "#/components/studio/composition/composition-result";
+import { CompositionAttemptControls } from "#/components/studio/composition/composition-attempt-controls";
+import { GenerationProgressDock } from "#/components/studio/video/generation-progress-dock";
+import { HistoryPanel } from "#/components/studio/shell/history-panel";
 import {
 	type CompositionSettings,
 	MultiClipCompositionControls,
-} from "#/components/studio/multi-clip-composition-controls";
-import { ReferenceImagePanel } from "#/components/studio/reference-image-panel";
-import { ShlokaComposer } from "#/components/studio/shloka-composer";
-import { ShlokaPlanPreview } from "#/components/studio/shloka-plan-preview";
-import { StudioShell } from "#/components/studio/studio-shell";
+} from "#/components/studio/composition/multi-clip-composition-controls";
+import { ReferenceImagePanel } from "#/components/studio/video/reference-image-panel";
+import { ShlokaComposer } from "#/components/studio/shloka/shloka-composer";
+import { ShlokaPlanPreview } from "#/components/studio/shloka/shloka-plan-preview";
+import { StudioShell } from "#/components/studio/shell/studio-shell";
 import {
 	type VideoConfigState,
 	VideoConfiguration,
-} from "#/components/studio/video-configuration";
-import { VideoModelSelector } from "#/components/studio/video-model-selector";
-import { VideoResult } from "#/components/studio/video-result";
+} from "#/components/studio/video/video-configuration";
+import { VideoModelSelector } from "#/components/studio/video/video-model-selector";
+import { VideoResult } from "#/components/studio/video/video-result";
 import { Button } from "#/components/ui/button";
 import { useCompositionTerminalFrameHandoff } from "#/hooks/use-composition-terminal-frame-handoff";
 import {
@@ -47,7 +47,7 @@ import {
 import type { StudioBusyStage } from "#/lib/studio-run-status";
 import { notifyStudioError, notifyStudioSuccess } from "#/lib/studio-toast";
 import { uploadReferenceImage } from "#/lib/upload-reference-image";
-import { StudioRunSkeleton } from "#/components/studio/studio-run-skeleton";
+import { StudioRunSkeleton } from "#/components/studio/shell/studio-run-skeleton";
 
 export const Route = createFileRoute("/")({
 	validateSearch: studioRunSearchSchema,

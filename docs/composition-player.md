@@ -9,4 +9,4 @@ Simple per-clip preview for composed runs.
 - **Download merged MP4** — same merge path; reuses the cached blob if View/Download already ran
 - Cache key is the set of clip `objectKey`s / URLs; changes when clips change
 
-Implementation: `src/components/studio/composition-clip-player.tsx`, `composition-result.tsx`, `src/lib/merge-composition-videos.ts`
+Implementation: `src/components/studio/composition/composition-clip-player.tsx`, `composition-result.tsx`, `src/lib/merge-composition-videos.ts`

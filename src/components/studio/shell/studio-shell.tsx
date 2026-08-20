@@ -3,12 +3,12 @@ import { api } from "@convex/_generated/api";
 import { useConvexAuth, useQuery } from "convex/react";
 import { Clapperboard, Sparkles } from "lucide-react";
 import { Activity, type CSSProperties, type ReactNode } from "react";
-import { AccountPopover } from "#/components/studio/account-popover";
+import { AccountPopover } from "#/components/studio/shell/account-popover";
 import {
 	HistoryPanelSkeleton,
 	StudioRunSkeleton,
-} from "#/components/studio/studio-run-skeleton";
-import { ThemeToggle } from "#/components/studio/theme-toggle";
+} from "#/components/studio/shell/studio-run-skeleton";
+import { ThemeToggle } from "#/components/studio/shell/theme-toggle";
 import {
 	Sidebar,
 	SidebarContent,
