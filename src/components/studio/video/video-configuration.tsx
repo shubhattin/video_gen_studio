@@ -2,7 +2,16 @@ import {
 	MODEL_CAPABILITY_PROFILES,
 	type VideoModelId,
 } from "#/lib/model-catalog";
+import { Info } from "lucide-react";
 import { Label } from "#/components/ui/label";
+import {
+	Popover,
+	PopoverContent,
+	PopoverDescription,
+	PopoverHeader,
+	PopoverTitle,
+	PopoverTrigger,
+} from "#/components/ui/popover";
 import {
 	Select,
 	SelectContent,
@@ -43,12 +52,38 @@ export function VideoConfiguration({
 	}
 
 	return (
-		<section className="space-y-4 border-t border-border/80 pt-6">
-			<div>
-				<h2 className="font-heading text-xl font-semibold">
-					Video configuration
-				</h2>
-				<p className="text-sm text-muted-foreground">{profile.pricingNotes}</p>
+		<section className="space-y-3 border-t border-border/80 pt-5">
+			<div className="flex flex-wrap items-baseline justify-between gap-2">
+				<div>
+					<h2 className="font-heading text-lg font-semibold">
+						Video configuration
+					</h2>
+					<p className="text-sm text-muted-foreground">
+						Adjust the clip’s shape, resolution, and length for the selected
+						model.
+					</p>
+				</div>
+				{profile.pricingNotes ? (
+					<Popover>
+						<PopoverTrigger
+							render={
+								<button
+									type="button"
+									className="inline-flex h-6 items-center gap-1 rounded px-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+								>
+									<Info data-icon="inline-start" className="size-3.5" />
+									Pricing
+								</button>
+							}
+						/>
+						<PopoverContent align="end" className="w-80 gap-3 p-4">
+							<PopoverHeader>
+								<PopoverTitle>Pricing notes</PopoverTitle>
+								<PopoverDescription>{profile.pricingNotes}</PopoverDescription>
+							</PopoverHeader>
+						</PopoverContent>
+					</Popover>
+				) : null}
 			</div>
 
 			<div className="grid gap-4 sm:grid-cols-2">

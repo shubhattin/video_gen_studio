@@ -54,7 +54,7 @@ export function ModelCard({
 			</div>
 			<p className="mt-3 text-xs text-muted-foreground">
 				{gatewayPricing?.output
-					? `OpenRouter SKU sample: ${gatewayPricing.output}`
+					? `Pricing ref: ${gatewayPricing.output}`
 					: profile.pricingNotes}
 			</p>
 			{onSelect ? (

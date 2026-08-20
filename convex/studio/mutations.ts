@@ -1,6 +1,6 @@
 import { v } from "convex/values";
-import { mutation } from "../_generated/server";
 import { internal } from "../_generated/api";
+import { mutation } from "../_generated/server";
 import { requireAdmin } from "../lib/auth";
 import { VIDEO_MODEL_IDS, type VideoModelId } from "../lib/modelCatalog";
 import { normalizePlannerSystemPromptForStorage } from "../lib/plannerPrompt";
@@ -8,6 +8,7 @@ import { defaultImageConfig, defaultVideoParams } from "../lib/schemas";
 import { buildVideoPromptFromScenes } from "../lib/videoPlanMarkdown";
 import {
 	compositionModeValidator,
+	provenanceValidator,
 	videoParamsValidator,
 	videoSceneValidator,
 } from "../schema";
@@ -250,6 +251,15 @@ export const updateDraft = mutation({
 				args.extraReferenceImageIds ?? run.extraReferenceImageIds,
 			updatedAt: Date.now(),
 		});
+
+		// Generate a title once real content (shloka / prompt) first arrives and
+		// the run still has none. The action no-ops when a title already exists.
+		const hasContent = Boolean(shlokaText?.trim() || videoPrompt?.trim());
+		if (!run.title && hasContent) {
+			await ctx.scheduler.runAfter(1500, internal.studio.actions.generateRunTitleScheduled, {
+				runId: args.runId,
+			});
+		}
 		return null;
 	},
 });
@@ -330,6 +340,82 @@ export const cancelComposition = mutation({
 			updatedAt: Date.now(),
 		});
 		return null;
+	},
+});
+
+export const renameRun = mutation({
+	args: {
+		runId: v.id("generationRuns"),
+		title: v.string(),
+	},
+	returns: v.null(),
+	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
+		const run = await ctx.db.get(args.runId);
+		if (!run) {
+			throw new Error("Run not found.");
+		}
+		const title = args.title.trim();
+		if (!title) {
+			throw new Error("Title cannot be empty.");
+		}
+		await ctx.db.patch(args.runId, {
+			title: title.slice(0, 90),
+			updatedAt: Date.now(),
+		});
+		return null;
+	},
+});
+
+/** Create a run from the new-run setup screen (no text content yet). */
+export const createStudioRun = mutation({
+	args: {
+		provenance: provenanceValidator,
+		selectedModelId: v.string(),
+		videoParams: v.optional(videoParamsValidator),
+		compositionMode: v.optional(compositionModeValidator),
+		compositionMultiplier: v.optional(v.number()),
+		compositionClipCount: v.optional(v.number()),
+		prompt: v.optional(v.string()),
+	},
+	returns: v.id("generationRuns"),
+	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
+		if (!(VIDEO_MODEL_IDS as readonly string[]).includes(args.selectedModelId)) {
+			throw new Error("Unsupported model.");
+		}
+		const modelId = args.selectedModelId as VideoModelId;
+		const now = Date.now();
+		const imageConfig = defaultImageConfig();
+		const videoParams = args.videoParams
+			? { ...defaultVideoParams(modelId), ...args.videoParams, modelId }
+			: defaultVideoParams(modelId);
+		const prompt = args.prompt?.trim();
+
+		const runId = await ctx.db.insert("generationRuns", {
+			provenance: args.provenance,
+			status: "draft",
+			revisionNumber: 1,
+			selectedModelId: modelId,
+			videoParams: prompt ? { ...videoParams, prompt } : videoParams,
+			...(prompt ? { videoPrompt: prompt } : {}),
+			imageSize: imageConfig.size,
+			imageQuality: imageConfig.quality,
+			referenceImages: [],
+			extraReferenceImageIds: [],
+			videos: [],
+			compositionMode: args.compositionMode,
+			compositionMultiplier: args.compositionMultiplier,
+			compositionClipCount: args.compositionClipCount,
+			createdAt: now,
+			updatedAt: now,
+		});
+
+		// Generate a title for the new run shortly after creation.
+		await ctx.scheduler.runAfter(1500, internal.studio.actions.generateRunTitleScheduled, {
+			runId,
+		});
+		return runId;
 	},
 });
 

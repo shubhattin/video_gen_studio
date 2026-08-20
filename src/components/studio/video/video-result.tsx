@@ -12,6 +12,10 @@ import {
 	PopoverTrigger,
 } from "#/components/ui/popover";
 import { fetchStudioMedia } from "#/lib/studio-media-proxy";
+import {
+	MODEL_CAPABILITY_PROFILES,
+	type VideoModelId,
+} from "#/lib/model-catalog";
 import { cn } from "#/lib/utils";
 
 export type VideoResultItem = {
@@ -128,6 +132,10 @@ function VideoClipCard({
 	const duration =
 		video.meta?.durationSeconds ?? video.videoParams?.durationSeconds;
 	const modelId = video.videoParams?.modelId;
+	const modelLabel = modelId
+		? (MODEL_CAPABILITY_PROFILES[modelId as VideoModelId]?.displayName ??
+			modelId)
+		: null;
 	const prompt = video.videoPrompt ?? video.videoParams?.prompt;
 
 	return (
@@ -159,14 +167,9 @@ function VideoClipCard({
 					{duration != null ? (
 						<span className="text-xs text-muted-foreground">{duration}s</span>
 					) : null}
-					{video.actualCostUsd != null ? (
-						<span className="text-xs text-muted-foreground">
-							${video.actualCostUsd.toFixed(4)}
-						</span>
-					) : null}
-					{modelId ? (
+					{modelLabel ? (
 						<span className="truncate text-xs text-muted-foreground">
-							{modelId}
+							{modelLabel}
 						</span>
 					) : null}
 				</div>
@@ -188,7 +191,7 @@ function VideoClipCard({
 						<PopoverHeader>
 							<PopoverTitle>Clip details</PopoverTitle>
 							<PopoverDescription>
-								OpenRouter and generation metadata for this take.
+								Generation details for this clip.
 							</PopoverDescription>
 						</PopoverHeader>
 						<div className="flex flex-col gap-2">
@@ -196,7 +199,7 @@ function VideoClipCard({
 								label="Created"
 								value={new Date(video.createdAt).toLocaleString()}
 							/>
-							<InfoRow label="Model" value={modelId} mono />
+							<InfoRow label="Model" value={modelLabel} />
 							<InfoRow
 								label="Resolution"
 								value={video.videoParams?.resolution}

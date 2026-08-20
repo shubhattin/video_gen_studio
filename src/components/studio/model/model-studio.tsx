@@ -18,6 +18,7 @@ import {
 	VideoConfiguration,
 } from "#/components/studio/video/video-configuration";
 import { VideoModelSelector } from "#/components/studio/video/video-model-selector";
+import { VideoGenerateConfirm } from "#/components/studio/video/video-generate-confirm";
 import { VideoResult } from "#/components/studio/video/video-result";
 import { Button } from "#/components/ui/button";
 import { useCompositionTerminalFrameHandoff } from "#/hooks/use-composition-terminal-frame-handoff";
@@ -238,7 +239,7 @@ export function ModelStudio({
 		try {
 			const runId = await ensureDraft();
 			await generateVideo({ runId });
-			notifyStudioSuccess("Video appended", "Clip saved to this run.");
+			notifyStudioSuccess("Video clip saved", "Added to this run.");
 		} catch (error) {
 			notifyStudioError("Video generation failed", error);
 		} finally {
@@ -319,6 +320,13 @@ export function ModelStudio({
 		compositionJob?.status === "generating" ||
 		compositionJob?.status === "awaiting_terminal_frame";
 
+	const hasPlan = Boolean(
+		run?.imagePrompt ||
+			run?.videoScenes?.length ||
+			compositionJob ||
+			(compositionAttempts?.length ?? 0) > 0,
+	);
+
 	const isPlanningNextComposition =
 		composition.enabled &&
 		(busyStage === "planning" || run?.status === "planning") &&
@@ -335,13 +343,15 @@ export function ModelStudio({
 	};
 
 	return (
-		<div className="flex flex-col gap-8">
+		<div className="flex flex-col gap-6 rounded-2xl border border-border/80 bg-gradient-to-b from-card to-card/40 p-4 shadow-sm sm:p-6">
 			<section className="flex flex-col gap-3">
-				<div className="flex flex-col gap-2">
-					<h1 className="font-heading text-2xl font-semibold">Model Studio</h1>
+				<div className="flex flex-col gap-1.5">
+					<h1 className="font-heading text-xl font-semibold tracking-tight sm:text-2xl">
+						Model Studio
+					</h1>
 					<p className="text-sm text-muted-foreground">
-						OpenRouter video models with capability-driven controls. Each
-						generate appends another clip to the run.
+						Pick a video model and configure the clip. Each generate appends
+						another clip to the run.
 					</p>
 				</div>
 				<div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
@@ -351,7 +361,11 @@ export function ModelStudio({
 							value={selectedModel}
 							gatewayPricingById={gatewayById}
 							pricingSkusById={pricingSkusById}
-							disabled={isBusy || isModelLocked}
+							disabled={
+								busyStage === "planning" ||
+								busyStage === "video" ||
+								isModelLocked
+							}
 							onValueChange={(modelId) => {
 								setSelectedModel(modelId);
 								setVideoConfig({
@@ -383,13 +397,11 @@ export function ModelStudio({
 								}
 							}}
 						>
-							{refreshingCatalog
-								? "Refreshing catalog…"
-								: "Refresh OpenRouter catalog"}
+							{refreshingCatalog ? "Refreshing models…" : "Refresh models"}
 						</Button>
 						{catalog?.fetchedAt ? (
 							<p className="text-xs text-muted-foreground">
-								Catalog updated {new Date(catalog.fetchedAt).toLocaleString()}
+								Models updated {new Date(catalog.fetchedAt).toLocaleString()}
 							</p>
 						) : null}
 					</div>
@@ -405,7 +417,7 @@ export function ModelStudio({
 					setVideoConfig(next);
 				}}
 				showPrompt
-				disabled={isBusy}
+				disabled={busyStage === "planning" || busyStage === "video"}
 			/>
 
 			<MultiClipCompositionControls
@@ -413,8 +425,10 @@ export function ModelStudio({
 				modelId={selectedModel}
 				durationSeconds={videoConfig.durationSeconds}
 				onChange={setComposition}
+				hasPlan={hasPlan}
 				disabled={
-					isBusy ||
+					busyStage === "planning" ||
+					busyStage === "video" ||
 					compositionJob?.status === "generating" ||
 					compositionJob?.status === "awaiting_terminal_frame"
 				}
@@ -436,7 +450,8 @@ export function ModelStudio({
 				supportsLastFrame={profile.supportsLastFrame}
 				supportsInputReferences={profile.supportsInputReferences}
 				maxInputReferences={profile.maxInputReferences}
-				disabled={isBusy}
+				disabled={!activeRunId}
+				globalBusy={isBusy}
 				onSelectFirstFrame={async (id) => {
 					const runId = await ensureDraft();
 					await updateDraft({ runId, firstFrameImageId: id });
@@ -499,11 +514,14 @@ export function ModelStudio({
 						) : null}
 					</>
 				) : (
-					<Button className="min-h-11" disabled={isBusy} onClick={startVideo}>
-						{busyStage === "video"
-							? "Generating video…"
-							: "Generate video (append)"}
-					</Button>
+					<VideoGenerateConfirm
+						config={{ ...videoConfig, modelId: selectedModel }}
+						className="min-h-11"
+						disabled={isBusy}
+						generating={busyStage === "video"}
+						triggerLabel="Generate video clip"
+						onConfirm={startVideo}
+					/>
 				)}
 			</div>
 
@@ -585,7 +603,9 @@ export function ModelStudio({
 				status={run?.status}
 				busyStage={busyStage}
 				warnings={run?.warnings}
-				contextLabel={selectedModel}
+				contextLabel={
+					MODEL_CAPABILITY_PROFILES[selectedModel]?.displayName ?? null
+				}
 			/>
 		</div>
 	);

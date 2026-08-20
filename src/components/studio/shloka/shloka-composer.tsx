@@ -18,6 +18,7 @@ import {
 import { Switch } from "#/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs";
 import { Textarea } from "#/components/ui/textarea";
+import { MarkdownTextarea } from "#/components/ui/markdown-textarea";
 import {
 	DEFAULT_PLANNER_SYSTEM_PROMPT,
 	normalizePlannerSystemPromptForStorage,
@@ -62,13 +63,13 @@ export function ShlokaComposer({
 	}, [lipiEnabled]);
 
 	return (
-		<section className="space-y-6">
-			<div className="space-y-2">
+		<section className="space-y-5">
+			<div className="space-y-1.5">
 				<div className="flex flex-wrap items-center justify-between gap-2">
 					<div>
-						<p className="text-sm font-medium">System prompt</p>
+						<p className="text-sm font-medium">Planner instructions</p>
 						<p className="text-sm text-muted-foreground">
-							Planner instructions for image + video plan generation.
+							How the planner should approach image and video prompts.
 							{isCustomSystemPrompt
 								? " Customized."
 								: " Using built-in default."}
@@ -98,12 +99,11 @@ export function ShlokaComposer({
 							className="w-[min(36rem,calc(100vw-2rem))] gap-3 p-4"
 						>
 							<PopoverHeader>
-								<PopoverTitle>Planner system prompt</PopoverTitle>
+								<PopoverTitle>Planner instructions</PopoverTitle>
 								<PopoverDescription>
-									Only saved on the run when it differs from the built-in
-									default. Output shape (single vs multi-clip fields) is
-									appended automatically at plan time — keep this text focused
-									on creative direction.
+									Only saved when it differs from the built-in default. The
+									output format is chosen automatically — keep this focused on
+									creative direction.
 								</PopoverDescription>
 							</PopoverHeader>
 							<Tabs
@@ -129,15 +129,15 @@ export function ShlokaComposer({
 									</div>
 								</TabsContent>
 								<TabsContent value="edit" className="mt-0 space-y-3">
-									<Textarea
+									<MarkdownTextarea
 										value={plannerSystemPrompt}
 										onChange={(event) =>
 											onPlannerSystemPromptChange(event.target.value)
 										}
 										onBlur={() => onPersist?.()}
-										className="min-h-64 max-h-[50vh] resize-y font-mono text-xs leading-relaxed"
+										className="min-h-64 max-h-[50vh] resize-y"
 										disabled={disabled}
-										aria-label="Planner system prompt"
+										aria-label="Planner instructions"
 									/>
 									<div className="flex justify-end">
 										<Button
@@ -167,10 +167,10 @@ export function ShlokaComposer({
 			<div className="space-y-2">
 				<div className="flex items-center justify-between gap-3">
 					<div>
-						<h2 className="font-heading text-xl font-semibold">Shloka</h2>
+						<h2 className="font-heading text-lg font-semibold">Shloka</h2>
 						<p className="text-sm text-muted-foreground">
-							Enter the verse in Devanagari. Lipi Lekhika transliteration is on
-							by default.
+							Enter the verse in Devanagari. Type in English and it
+							transliterates automatically.
 						</p>
 					</div>
 					<div className="flex items-center gap-2 min-h-11">
@@ -181,7 +181,7 @@ export function ShlokaComposer({
 							disabled={disabled}
 						/>
 						<Label htmlFor="lipi-toggle" className="text-sm">
-							Lipi typing
+							Auto-transliterate
 						</Label>
 					</div>
 				</div>
@@ -209,7 +209,7 @@ export function ShlokaComposer({
 							typingContextRef.current,
 						)
 					}
-					placeholder="Enter or paste Devanagari shloka…"
+					placeholder="Enter or paste a verse in Devanagari…"
 					className={cn("min-h-32 text-base leading-relaxed")}
 					disabled={disabled}
 					aria-required="true"

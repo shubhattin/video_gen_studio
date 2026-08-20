@@ -23,6 +23,7 @@ import {
 	VideoConfiguration,
 } from "#/components/studio/video/video-configuration";
 import { VideoModelSelector } from "#/components/studio/video/video-model-selector";
+import { VideoGenerateConfirm } from "#/components/studio/video/video-generate-confirm";
 import { VideoResult } from "#/components/studio/video/video-result";
 import { Button } from "#/components/ui/button";
 import { useCompositionTerminalFrameHandoff } from "#/hooks/use-composition-terminal-frame-handoff";
@@ -48,6 +49,7 @@ import type { StudioBusyStage } from "#/lib/studio-run-status";
 import { notifyStudioError, notifyStudioSuccess } from "#/lib/studio-toast";
 import { uploadReferenceImage } from "#/lib/upload-reference-image";
 import { StudioRunSkeleton } from "#/components/studio/shell/studio-run-skeleton";
+import { NewRunSetup } from "#/components/studio/shell/new-run-setup";
 
 export const Route = createFileRoute("/")({
 	validateSearch: studioRunSearchSchema,
@@ -296,7 +298,7 @@ function ShlokaStudioPage() {
 	};
 
 	const persistComposerFields = async () => {
-		if (busyStage !== null) return;
+		if (planningBusy) return;
 		const trimmedShloka = shlokaText.trim();
 		if (!trimmedShloka) return;
 		try {
@@ -374,7 +376,7 @@ function ShlokaStudioPage() {
 		try {
 			const id = await ensureRun();
 			await generateVideo({ runId: id });
-			notifyStudioSuccess("Video appended", "Clip saved to this run.");
+			notifyStudioSuccess("Video clip saved", "Added to this run.");
 		} catch (error) {
 			notifyStudioError("Video generation failed", error);
 		} finally {
@@ -418,6 +420,10 @@ function ShlokaStudioPage() {
 
 	const extraIds = run?.extraReferenceImageIds ?? [];
 	const isRunLoading = Boolean(runId) && run === undefined;
+	// Targeted busy flags so unrelated controls stay usable while one stage runs.
+	const planningBusy = busyStage === "planning";
+	const videoBusy = busyStage === "video";
+	const anyBusy = busyStage !== null;
 
 	return (
 		<StudioShell
@@ -437,330 +443,351 @@ function ShlokaStudioPage() {
 				<StudioRunSkeleton />
 			) : (
 				<>
-					<div className="space-y-8 rounded-2xl border border-border/80 bg-card p-5 sm:p-8">
-						<section className="space-y-2">
-							<h1 className="font-heading text-2xl font-semibold">
+					<div className="space-y-6 rounded-2xl border border-border/80 bg-gradient-to-b from-card to-card/40 p-4 shadow-sm sm:p-6">
+						<section className="space-y-1.5">
+							<h1 className="font-heading text-xl font-semibold tracking-tight sm:text-2xl">
 								Shloka Video Generator
 							</h1>
 							<p className="text-sm text-muted-foreground">
-								Plan → reference stills → OpenRouter video. Default path is 9:16
-								portrait for shorts.
+								Turn a verse into a short video: plan the scenes, generate
+								reference stills, then render the clips. Defaults to 9:16
+								portrait.
 							</p>
 						</section>
 
-						<ShlokaComposer
-							shlokaText={shlokaText}
-							customInstructions={customInstructions}
-							plannerSystemPrompt={plannerSystemPrompt}
-							onShlokaChange={setShlokaText}
-							onInstructionsChange={setCustomInstructions}
-							onPlannerSystemPromptChange={setPlannerSystemPrompt}
-							onPersist={persistComposerFields}
-							disabled={busyStage !== null}
-						/>
-
-						<MultiClipCompositionControls
-							value={composition}
-							modelId={videoConfig.modelId as VideoModelId}
-							durationSeconds={videoConfig.durationSeconds}
-							onChange={setComposition}
-							disabled={
-								busyStage !== null ||
-								compositionJob?.status === "generating" ||
-								compositionJob?.status === "awaiting_terminal_frame"
-							}
-						/>
-
-						{composition.enabled ? (
-							<div className="flex flex-col gap-4 border-t border-border/80 pt-6">
-								<div className="flex flex-col gap-2">
-									<h2 className="font-heading text-xl font-semibold">
-										Video model
-									</h2>
-									<p className="text-sm text-muted-foreground">
-										Choose the model and native clip duration before generating
-										the multi-clip plan.
-									</p>
-									<VideoModelSelector
-										value={videoConfig.modelId as VideoModelId}
-										gatewayPricingById={gatewayById}
-										pricingSkusById={pricingSkusById}
-										disabled={busyStage !== null}
-										onValueChange={(modelId) => {
-											setVideoConfig(defaultVideoParams(modelId));
-										}}
-									/>
-								</div>
-								<VideoConfiguration
-									value={videoConfig}
-									onChange={setVideoConfig}
-									disabled={busyStage !== null}
+						{!runId ? (
+							<NewRunSetup
+								provenance="shloka"
+								onCreated={(id) => setRunId(id)}
+							/>
+						) : (
+							<>
+								<ShlokaComposer
+									shlokaText={shlokaText}
+									customInstructions={customInstructions}
+									plannerSystemPrompt={plannerSystemPrompt}
+									onShlokaChange={setShlokaText}
+									onInstructionsChange={setCustomInstructions}
+									onPlannerSystemPromptChange={setPlannerSystemPrompt}
+									onPersist={persistComposerFields}
+									disabled={planningBusy}
 								/>
-							</div>
-						) : null}
 
-						<div className="flex flex-wrap gap-3">
-							<Button
-								className="min-h-11"
-								disabled={!shlokaText.trim() || busyStage !== null}
-								onClick={onPlan}
-							>
-								{busyStage === "planning"
-									? "Planning…"
-									: composition.enabled
-										? (compositionAttempts?.length ?? 0) > 0
-											? "Plan another multi-clip attempt"
-											: "Generate multi-clip plan"
-										: "Generate creative plan"}
-							</Button>
-						</div>
+								<MultiClipCompositionControls
+									value={composition}
+									modelId={videoConfig.modelId as VideoModelId}
+									durationSeconds={videoConfig.durationSeconds}
+									onChange={setComposition}
+									hasPlan={planReady}
+									disabled={
+										planningBusy ||
+										videoBusy ||
+										compositionJob?.status === "generating" ||
+										compositionJob?.status === "awaiting_terminal_frame"
+									}
+								/>
 
-						{planReady ? (
-							<div className="flex flex-col gap-4">
-								{composition.enabled &&
-								(compositionJob || isPlanningNextComposition) ? (
-									<CompositionAttemptControls
-										attempts={compositionAttempts ?? []}
-										activeJobId={compositionJob?._id}
-										activeConfig={
-											compositionJob
-												? {
-														_id: compositionJob._id,
-														attemptNumber: compositionJob.attemptNumber ?? 1,
-														status: compositionJob.status,
-														mode: compositionJob.mode,
-														clipCount: compositionJob.clipCount,
-														videoParams: compositionJob.videoParams,
-														overallDescription:
-															compositionJob.overallDescription,
-														plannerModel: compositionJob.plannerModel,
-														plannerReasoning: compositionJob.plannerReasoning,
-														estimatedCostUsd: compositionJob.estimatedCostUsd,
-														actualCostUsd: compositionJob.actualCostUsd,
-														createdAt: compositionJob.createdAt,
-													}
-												: null
-										}
-										disabled={compositionSwitchDisabled}
-										isPlanningNext={isPlanningNextComposition}
-										onSelectAttempt={onSelectCompositionAttempt}
-										scenes={(compositionJob?.clips ?? []).map(
-											(clip: {
-												clipIndex: number;
-												scenePrompt: string;
-												continuityInstructions?: string;
-												transition?: string;
-											}) => ({
+								{composition.enabled ? (
+									<div className="flex flex-col gap-3 border-t border-border/80 pt-5">
+										<div className="flex flex-col gap-1.5">
+											<h2 className="font-heading text-lg font-semibold">
+												Video model
+											</h2>
+											<p className="text-sm text-muted-foreground">
+												Choose the model and clip duration before planning.
+											</p>
+											<VideoModelSelector
+												value={videoConfig.modelId as VideoModelId}
+												gatewayPricingById={gatewayById}
+												pricingSkusById={pricingSkusById}
+												disabled={planningBusy || videoBusy}
+												onValueChange={(modelId) => {
+													setVideoConfig(defaultVideoParams(modelId));
+												}}
+											/>
+										</div>
+										<VideoConfiguration
+											value={videoConfig}
+											onChange={setVideoConfig}
+											disabled={planningBusy || videoBusy}
+										/>
+									</div>
+								) : null}
+
+								<div className="flex flex-wrap gap-3">
+									<Button
+										className="min-h-11"
+										disabled={!shlokaText.trim() || anyBusy}
+										onClick={onPlan}
+									>
+										{busyStage === "planning"
+											? "Planning…"
+											: composition.enabled
+												? (compositionAttempts?.length ?? 0) > 0
+													? "Plan another multi-clip attempt"
+													: "Generate multi-clip plan"
+												: "Generate creative plan"}
+									</Button>
+								</div>
+
+								{planReady ? (
+									<div className="flex flex-col gap-3">
+										{composition.enabled &&
+										(compositionJob || isPlanningNextComposition) ? (
+											<CompositionAttemptControls
+												attempts={compositionAttempts ?? []}
+												activeJobId={compositionJob?._id}
+												activeConfig={
+													compositionJob
+														? {
+																_id: compositionJob._id,
+																attemptNumber:
+																	compositionJob.attemptNumber ?? 1,
+																status: compositionJob.status,
+																mode: compositionJob.mode,
+																clipCount: compositionJob.clipCount,
+																videoParams: compositionJob.videoParams,
+																overallDescription:
+																	compositionJob.overallDescription,
+																plannerModel: compositionJob.plannerModel,
+																plannerReasoning:
+																	compositionJob.plannerReasoning,
+																estimatedCostUsd:
+																	compositionJob.estimatedCostUsd,
+																actualCostUsd: compositionJob.actualCostUsd,
+																createdAt: compositionJob.createdAt,
+															}
+														: null
+												}
+												disabled={compositionSwitchDisabled}
+												isPlanningNext={isPlanningNextComposition}
+												onSelectAttempt={onSelectCompositionAttempt}
+												scenes={(compositionJob?.clips ?? []).map(
+													(clip: {
+														clipIndex: number;
+														scenePrompt: string;
+														continuityInstructions?: string;
+														transition?: string;
+													}) => ({
+														clipIndex: clip.clipIndex,
+														scenePrompt: clip.scenePrompt,
+														continuityInstructions: clip.continuityInstructions,
+														transition: clip.transition,
+													}),
+												)}
+											/>
+										) : null}
+										<ShlokaPlanPreview
+											imagePrompt={run?.imagePrompt}
+											videoScenes={run?.videoScenes}
+											compositionOverallDescription={
+												compositionJob?.overallDescription
+											}
+											compositionClips={compositionJob?.clips.map((clip) => ({
 												clipIndex: clip.clipIndex,
+												durationSeconds:
+													compositionJob.videoParams?.durationSeconds ?? 0,
 												scenePrompt: clip.scenePrompt,
+												globalDescription: clip.globalDescription,
 												continuityInstructions: clip.continuityInstructions,
 												transition: clip.transition,
-											}),
-										)}
-									/>
+												usesPreviousTerminalFrame:
+													compositionJob.mode === "continuation" &&
+													clip.clipIndex > 0,
+											}))}
+											plannerModel={
+												compositionJob?.plannerModel ?? run?.plannerModel
+											}
+											plannerReasoning={
+												compositionJob?.plannerReasoning ??
+												run?.plannerReasoning
+											}
+											disabled={planningBusy || !runId}
+											onSaveImagePrompt={
+												runId
+													? async (imagePrompt) => {
+															await updateDraft({ runId, imagePrompt });
+															notifyStudioSuccess(
+																"Image prompt saved",
+																"Reference image generation will use the updated prompt.",
+															);
+														}
+													: undefined
+											}
+											onSaveVideoScenes={
+												runId
+													? async (videoScenes) => {
+															await updateDraft({ runId, videoScenes });
+															notifyStudioSuccess(
+																"Video plan saved",
+																"Video generation will use the updated scenes.",
+															);
+														}
+													: undefined
+											}
+											onRegenerate={
+												runId
+													? () => {
+															void planRun({ runId, force: true });
+														}
+													: undefined
+											}
+											regenerating={busyStage === "planning"}
+										/>
+										<ReferenceImagePanel
+											imageSize={imageSize}
+											imageQuality={imageQuality}
+											onSizeChange={setImageSize}
+											onQualityChange={setImageQuality}
+											onGenerate={onGenerateImage}
+											onUpload={onUploadImage}
+											generating={busyStage === "image"}
+											uploading={busyStage === "upload"}
+											images={images}
+											firstFrameImageId={run?.firstFrameImageId}
+											lastFrameImageId={run?.lastFrameImageId}
+											extraReferenceImageIds={extraIds}
+											supportsLastFrame={profile?.supportsLastFrame}
+											supportsInputReferences={profile?.supportsInputReferences}
+											maxInputReferences={profile?.maxInputReferences}
+											disabled={!runId}
+											globalBusy={anyBusy}
+											onSelectFirstFrame={async (id) => {
+												if (!runId) return;
+												await updateDraft({ runId, firstFrameImageId: id });
+											}}
+											onSelectLastFrame={async (id) => {
+												if (!runId) return;
+												await updateDraft({ runId, lastFrameImageId: id });
+											}}
+											onToggleExtraReference={async (id) => {
+												if (!runId) return;
+												const next = extraIds.includes(id)
+													? extraIds.filter((item) => item !== id)
+													: [...extraIds, id];
+												await updateDraft({
+													runId,
+													extraReferenceImageIds: next,
+												});
+											}}
+											onRemoveImage={async (id) => {
+												if (!runId) return;
+												await removeReferenceImage({ runId, imageId: id });
+											}}
+										/>
+									</div>
 								) : null}
-								<ShlokaPlanPreview
-									imagePrompt={run?.imagePrompt}
-									videoScenes={run?.videoScenes}
-									compositionOverallDescription={
-										compositionJob?.overallDescription
-									}
-									compositionClips={compositionJob?.clips.map((clip) => ({
-										clipIndex: clip.clipIndex,
-										durationSeconds:
-											compositionJob.videoParams?.durationSeconds ?? 0,
-										scenePrompt: clip.scenePrompt,
-										globalDescription: clip.globalDescription,
-										continuityInstructions: clip.continuityInstructions,
-										transition: clip.transition,
-										usesPreviousTerminalFrame:
-											compositionJob.mode === "continuation" &&
-											clip.clipIndex > 0,
-									}))}
-									plannerModel={
-										compositionJob?.plannerModel ?? run?.plannerModel
-									}
-									plannerReasoning={
-										compositionJob?.plannerReasoning ?? run?.plannerReasoning
-									}
-									disabled={busyStage !== null || !runId}
-									onSaveImagePrompt={
-										runId
-											? async (imagePrompt) => {
-													await updateDraft({ runId, imagePrompt });
-													notifyStudioSuccess(
-														"Image prompt saved",
-														"Reference image generation will use the updated prompt.",
-													);
-												}
-											: undefined
-									}
-									onSaveVideoScenes={
-										runId
-											? async (videoScenes) => {
-													await updateDraft({ runId, videoScenes });
-													notifyStudioSuccess(
-														"Video plan saved",
-														"Video generation will use the updated scenes.",
-													);
-												}
-											: undefined
-									}
-									onRegenerate={
-										runId
-											? () => {
-													void planRun({ runId, force: true });
-												}
-											: undefined
-									}
-									regenerating={busyStage === "planning"}
-								/>
-								<ReferenceImagePanel
-									imageSize={imageSize}
-									imageQuality={imageQuality}
-									onSizeChange={setImageSize}
-									onQualityChange={setImageQuality}
-									onGenerate={onGenerateImage}
-									onUpload={onUploadImage}
-									generating={busyStage === "image"}
-									uploading={busyStage === "upload"}
-									images={images}
-									firstFrameImageId={run?.firstFrameImageId}
-									lastFrameImageId={run?.lastFrameImageId}
-									extraReferenceImageIds={extraIds}
-									supportsLastFrame={profile?.supportsLastFrame}
-									supportsInputReferences={profile?.supportsInputReferences}
-									maxInputReferences={profile?.maxInputReferences}
-									disabled={busyStage !== null || !runId}
-									onSelectFirstFrame={async (id) => {
-										if (!runId) return;
-										await updateDraft({ runId, firstFrameImageId: id });
-									}}
-									onSelectLastFrame={async (id) => {
-										if (!runId) return;
-										await updateDraft({ runId, lastFrameImageId: id });
-									}}
-									onToggleExtraReference={async (id) => {
-										if (!runId) return;
-										const next = extraIds.includes(id)
-											? extraIds.filter((item) => item !== id)
-											: [...extraIds, id];
-										await updateDraft({ runId, extraReferenceImageIds: next });
-									}}
-									onRemoveImage={async (id) => {
-										if (!runId) return;
-										await removeReferenceImage({ runId, imageId: id });
-									}}
-								/>
-							</div>
-						) : null}
 
-						{planReady && !composition.enabled ? (
-							<div className="flex flex-col gap-4 border-t border-border/80 pt-6">
-								<div className="flex flex-col gap-2">
-									<h2 className="font-heading text-xl font-semibold">
-										Video model
-									</h2>
-									<p className="text-sm text-muted-foreground">
-										Compact picker with capabilities, limits, and pricing notes.
-									</p>
-									<VideoModelSelector
-										value={videoConfig.modelId as VideoModelId}
-										gatewayPricingById={gatewayById}
-										pricingSkusById={pricingSkusById}
-										disabled={busyStage !== null}
-										onValueChange={(modelId) => {
-											setVideoConfig({
-												...defaultVideoParams(modelId),
-											});
-										}}
-									/>
-								</div>
-								<VideoConfiguration
-									value={videoConfig}
-									onChange={setVideoConfig}
-									disabled={busyStage !== null}
-								/>
-								<Button
-									className="min-h-11"
-									disabled={busyStage !== null}
-									onClick={onGenerateVideo}
-								>
-									{busyStage === "video"
-										? "Generating video…"
-										: "Generate video (append)"}
-								</Button>
-							</div>
-						) : null}
+								{planReady && !composition.enabled ? (
+									<div className="flex flex-col gap-3 border-t border-border/80 pt-5">
+										<div className="flex flex-col gap-1.5">
+											<h2 className="font-heading text-lg font-semibold">
+												Video model
+											</h2>
+											<p className="text-sm text-muted-foreground">
+												Pick a model — capabilities, limits, and pricing shown
+												below.
+											</p>
+											<VideoModelSelector
+												value={videoConfig.modelId as VideoModelId}
+												gatewayPricingById={gatewayById}
+												pricingSkusById={pricingSkusById}
+												disabled={planningBusy || videoBusy}
+												onValueChange={(modelId) => {
+													setVideoConfig({
+														...defaultVideoParams(modelId),
+													});
+												}}
+											/>
+										</div>
+										<VideoConfiguration
+											value={videoConfig}
+											onChange={setVideoConfig}
+											disabled={planningBusy || videoBusy}
+										/>
+										<VideoGenerateConfirm
+											config={videoConfig}
+											className="min-h-11"
+											disabled={anyBusy}
+											generating={busyStage === "video"}
+											triggerLabel="Generate video clip"
+											onConfirm={onGenerateVideo}
+										/>
+									</div>
+								) : null}
 
-						{planReady && composition.enabled && compositionJob ? (
-							<div className="flex flex-wrap gap-3 border-t border-border/80 pt-6">
-								{compositionJob.status === "planned" ||
-								compositionJob.status === "failed" ? (
-									<Button
-										className="min-h-11"
-										disabled={busyStage !== null}
-										onClick={onStartComposition}
+								{planReady && composition.enabled && compositionJob ? (
+									<div className="flex flex-wrap gap-3 border-t border-border/80 pt-5">
+										{compositionJob.status === "planned" ||
+										compositionJob.status === "failed" ? (
+											<Button
+												className="min-h-11"
+												disabled={anyBusy}
+												onClick={onStartComposition}
+											>
+												{busyStage === "video"
+													? "Starting composition…"
+													: `Generate ${composition.multiplier} clips`}
+											</Button>
+										) : null}
+										{compositionJob.status === "generating" ||
+										compositionJob.status === "awaiting_terminal_frame" ? (
+											<Button
+												className="min-h-11"
+												variant="outline"
+												disabled={anyBusy}
+												onClick={() => runId && cancelComposition({ runId })}
+											>
+												Cancel composition
+											</Button>
+										) : null}
+									</div>
+								) : null}
+
+								{compositionJobWithUrls ? (
+									<div
+										className={
+											isPlanningNextComposition
+												? "opacity-70 transition-opacity"
+												: undefined
+										}
 									>
-										{busyStage === "video"
-											? "Starting composition…"
-											: `Generate ${composition.multiplier} clips`}
-									</Button>
+										{isPlanningNextComposition ? (
+											<p className="mb-2 text-xs text-amber-800 dark:text-amber-200">
+												Showing previous plan clips while the next plan is
+												generated.
+											</p>
+										) : null}
+										<CompositionResult
+											status={compositionJobWithUrls.status}
+											clips={
+												compositionJobWithUrls.clips as CompositionClipResult[]
+											}
+											totalDurationSeconds={
+												compositionJobWithUrls.totalDurationSeconds
+											}
+											aspectRatio={
+												compositionJobWithUrls.videoParams?.aspectRatio
+											}
+											mergeSources={(compositionJobWithUrls.clips ?? []).map(
+												(clip: {
+													video?: {
+														url?: string | null;
+														objectKey?: string | null;
+													};
+												}) => ({
+													url: clip.video?.url,
+													objectKey: clip.video?.objectKey,
+													runId,
+												}),
+											)}
+										/>
+									</div>
 								) : null}
-								{compositionJob.status === "generating" ||
-								compositionJob.status === "awaiting_terminal_frame" ? (
-									<Button
-										className="min-h-11"
-										variant="outline"
-										disabled={busyStage !== null}
-										onClick={() => runId && cancelComposition({ runId })}
-									>
-										Cancel composition
-									</Button>
-								) : null}
-							</div>
-						) : null}
 
-						{compositionJobWithUrls ? (
-							<div
-								className={
-									isPlanningNextComposition
-										? "opacity-70 transition-opacity"
-										: undefined
-								}
-							>
-								{isPlanningNextComposition ? (
-									<p className="mb-2 text-xs text-amber-800 dark:text-amber-200">
-										Showing previous plan clips while the next plan is
-										generated.
-									</p>
-								) : null}
-								<CompositionResult
-									status={compositionJobWithUrls.status}
-									clips={
-										compositionJobWithUrls.clips as CompositionClipResult[]
-									}
-									totalDurationSeconds={
-										compositionJobWithUrls.totalDurationSeconds
-									}
-									aspectRatio={compositionJobWithUrls.videoParams?.aspectRatio}
-									mergeSources={(compositionJobWithUrls.clips ?? []).map(
-										(clip: {
-											video?: {
-												url?: string | null;
-												objectKey?: string | null;
-											};
-										}) => ({
-											url: clip.video?.url,
-											objectKey: clip.video?.objectKey,
-											runId,
-										}),
-									)}
-								/>
-							</div>
-						) : null}
-
-						<VideoResult runId={runId} videos={videos} />
+								<VideoResult runId={runId} videos={videos} />
+							</>
+						)}
 					</div>
 					<GenerationProgressDock
 						status={run?.status}
@@ -768,7 +795,7 @@ function ShlokaStudioPage() {
 						warnings={run?.warnings}
 						contextLabel={
 							busyStage === "video" || run?.status === "video_generating"
-								? videoConfig.modelId
+								? (profile?.displayName ?? null)
 								: shlokaText.slice(0, 40) || null
 						}
 					/>

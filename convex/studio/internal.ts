@@ -47,6 +47,29 @@ export const setRunStatus = internalMutation({
 	},
 });
 
+export const setRunTitle = internalMutation({
+	args: {
+		runId: v.id("generationRuns"),
+		title: v.string(),
+	},
+	returns: v.null(),
+	handler: async (ctx, args) => {
+		const run = await ctx.db.get(args.runId);
+		if (!run) {
+			throw new Error("Run not found.");
+		}
+		const trimmed = args.title.trim();
+		if (!trimmed) {
+			return null;
+		}
+		await ctx.db.patch(args.runId, {
+			title: trimmed.slice(0, 90),
+			updatedAt: Date.now(),
+		});
+		return null;
+	},
+});
+
 export const commitPlan = internalMutation({
 	args: {
 		runId: v.id("generationRuns"),
@@ -71,6 +94,12 @@ export const commitPlan = internalMutation({
 			lastError: undefined,
 			updatedAt: Date.now(),
 		});
+		// Summarize the run into a short title once real content exists.
+		await ctx.scheduler.runAfter(
+			4000,
+			internal.studio.actions.generateRunTitleScheduled,
+			{ runId: args.runId },
+		);
 		return null;
 	},
 });
@@ -156,6 +185,11 @@ export const commitCompositionPlan = internalMutation({
 			lastError: undefined,
 			updatedAt: now,
 		});
+		await ctx.scheduler.runAfter(
+			4000,
+			internal.studio.actions.generateRunTitleScheduled,
+			{ runId: args.runId },
+		);
 		return jobId;
 	},
 });

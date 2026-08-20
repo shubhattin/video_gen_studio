@@ -1,7 +1,14 @@
 import { Link } from "@tanstack/react-router";
-import { useMutation, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import { formatDistanceToNow } from "date-fns";
-import { Clapperboard, MoreHorizontal, Sparkles, Trash2 } from "lucide-react";
+import {
+	Clapperboard,
+	MoreHorizontal,
+	Pencil,
+	RefreshCw,
+	Sparkles,
+	Trash2,
+} from "lucide-react";
 import { useState } from "react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
@@ -17,11 +24,23 @@ import {
 } from "#/components/ui/alert-dialog";
 import { Badge } from "#/components/ui/badge";
 import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "#/components/ui/dialog";
+import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
+	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "#/components/ui/dropdown-menu";
+import { Input } from "#/components/ui/input";
+import { Button } from "#/components/ui/button";
+import { Label } from "#/components/ui/label";
 import {
 	SidebarMenu,
 	SidebarMenuAction,
@@ -40,6 +59,7 @@ type HistoryRun = {
 	_id: Id<"generationRuns">;
 	provenance: "shloka" | "model-studio" | string;
 	status: string;
+	title?: string;
 	shlokaText?: string;
 	selectedModelId?: string;
 	createdAt: number;
@@ -62,9 +82,16 @@ function isShlokaRun(provenance: string) {
 export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 	const runs = useQuery(api.studio.queries.listRecentRuns, { limit: 24 });
 	const deleteRun = useMutation(api.studio.mutations.deleteRun);
+	const renameRun = useMutation(api.studio.mutations.renameRun);
+	const generateRunTitle = useAction(api.studio.actions.generateRunTitle);
 	const [pendingDeleteId, setPendingDeleteId] =
 		useState<Id<"generationRuns"> | null>(null);
 	const [deleting, setDeleting] = useState(false);
+	const [renameTarget, setRenameTarget] = useState<HistoryRun | null>(null);
+	const [renameValue, setRenameValue] = useState("");
+	const [renaming, setRenaming] = useState(false);
+	const [regeneratingId, setRegeneratingId] =
+		useState<Id<"generationRuns"> | null>(null);
 
 	const historyRuns = runs as HistoryRun[] | undefined;
 
@@ -82,6 +109,33 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 		}
 	};
 
+	const openRename = (run: HistoryRun) => {
+		setRenameTarget(run);
+		setRenameValue(run.title ?? "");
+	};
+
+	const confirmRename = async () => {
+		if (!renameTarget) {
+			return;
+		}
+		setRenaming(true);
+		try {
+			await renameRun({ runId: renameTarget._id, title: renameValue });
+			setRenameTarget(null);
+		} finally {
+			setRenaming(false);
+		}
+	};
+
+	const regenerateTitle = async (runId: Id<"generationRuns">) => {
+		setRegeneratingId(runId);
+		try {
+			await generateRunTitle({ runId, force: true });
+		} finally {
+			setRegeneratingId(null);
+		}
+	};
+
 	return (
 		<div className="flex min-h-0 flex-col gap-2">
 			{historyRuns === undefined ? (
@@ -93,9 +147,8 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 					{historyRuns.map((run) => {
 						const shloka = isShlokaRun(run.provenance);
 						const to = pathForProvenance(run.provenance);
-						const title = shloka
-							? run.shlokaText?.slice(0, 48) || "Shloka run"
-							: run.selectedModelId || "Model studio";
+						const title =
+							run.title?.trim() || (shloka ? "Shloka Run" : "Model Run");
 						const meta = [
 							formatDistanceToNow(run.createdAt, { addSuffix: true }),
 							run.videos?.length
@@ -167,7 +220,29 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 									>
 										<MoreHorizontal />
 									</DropdownMenuTrigger>
-									<DropdownMenuContent align="end" className="min-w-40">
+									<DropdownMenuContent align="end" className="min-w-44">
+										<DropdownMenuItem
+											className="gap-2"
+											onClick={() => openRename(run)}
+										>
+											<Pencil />
+											Rename title
+										</DropdownMenuItem>
+										<DropdownMenuItem
+											className="gap-2"
+											disabled={regeneratingId === run._id}
+											onClick={() => void regenerateTitle(run._id)}
+										>
+											<RefreshCw
+												className={
+													regeneratingId === run._id ? "animate-spin" : ""
+												}
+											/>
+											{regeneratingId === run._id
+												? "Generating…"
+												: "Regenerate title"}
+										</DropdownMenuItem>
+										<DropdownMenuSeparator />
 										<DropdownMenuItem
 											variant="destructive"
 											className="gap-2"
@@ -212,6 +287,58 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 					</AlertDialogFooter>
 				</AlertDialogContent>
 			</AlertDialog>
+
+			<Dialog
+				open={renameTarget != null}
+				onOpenChange={(open) => {
+					if (!open) {
+						setRenameTarget(null);
+					}
+				}}
+			>
+				<DialogContent>
+					<DialogHeader>
+						<DialogTitle>Rename run</DialogTitle>
+						<DialogDescription>
+							Give this run a custom title. It’s used in your history sidebar.
+						</DialogDescription>
+					</DialogHeader>
+					<div className="flex flex-col gap-2">
+						<Label htmlFor="run-title" className="text-xs">
+							Title
+						</Label>
+						<Input
+							id="run-title"
+							value={renameValue}
+							onChange={(event) => setRenameValue(event.target.value)}
+							onKeyDown={(event) => {
+								if (event.key === "Enter") {
+									event.preventDefault();
+									void confirmRename();
+								}
+							}}
+							maxLength={90}
+							placeholder="Untitled run"
+							autoFocus
+						/>
+					</div>
+					<DialogFooter>
+						<Button
+							variant="outline"
+							disabled={renaming}
+							onClick={() => setRenameTarget(null)}
+						>
+							Cancel
+						</Button>
+						<Button
+							disabled={renaming || !renameValue.trim()}
+							onClick={() => void confirmRename()}
+						>
+							{renaming ? "Saving…" : "Save"}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 		</div>
 	);
 }

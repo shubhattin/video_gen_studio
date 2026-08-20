@@ -139,8 +139,8 @@ export function StudioShell({
 								{waitingForStudioData
 									? mainLabel
 									: activePath === "/studio"
-										? "OpenRouter video models and reference stills"
-										: "Plan → reference stills → OpenRouter video"}
+										? "Browse video models and generate reference stills"
+										: "Plan scenes → reference stills → render video"}
 							</p>
 						</div>
 					</header>

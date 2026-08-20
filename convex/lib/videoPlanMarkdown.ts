@@ -82,24 +82,40 @@ function labelToField(label: string): SceneField | null {
 	return null;
 }
 
+export type MarkdownToVideoScenesResult = {
+	scenes: EditableVideoScene[];
+	/** Non-blocking notice about non-conforming input. Null when input is clean. */
+	warning: string | null;
+};
+
 /**
  * Parse markdown produced by {@link videoScenesToMarkdown}.
- * Throws if no scenes can be recovered.
+ *
+ * Never throws. Recovers every scene it can and reports non-conformance
+ * (skipped sections, unrecognized field lines) via {@link MarkdownToVideoScenesResult.warning}.
+ * `scenes` is empty only when nothing recognizable could be recovered.
  */
-export function markdownToVideoScenes(markdown: string): EditableVideoScene[] {
+export function markdownToVideoScenes(
+	markdown: string,
+): MarkdownToVideoScenesResult {
 	const trimmed = markdown.trim();
 	if (!trimmed) {
-		throw new Error("Video plan markdown is empty.");
+		return { scenes: [], warning: "Video plan markdown is empty." };
 	}
 
 	const chunks = trimmed.split(/^###\s+/m).filter((chunk) => chunk.trim());
 	const scenes: EditableVideoScene[] = [];
+	let skippedSections = 0;
+	let unrecognizedFields = 0;
 
 	for (const chunk of chunks) {
 		const lines = chunk.split("\n");
 		const header = lines[0]?.trim() ?? "";
-		const headerMatch = /^Scene\s+(\d+)\s*:\s*(.*)$/i.exec(header);
+		// Accept "Scene 1: intent", "Scene 1 - intent", "Scene 1 — intent",
+		// or even "Scene 1 intent" / "Scene 1".
+		const headerMatch = /^Scene\s+(\d+)\s*[:\-—]?\s*(.*)$/i.exec(header);
 		if (!headerMatch) {
+			skippedSections++;
 			continue;
 		}
 		const sceneNumber = Number(headerMatch[1]);
@@ -111,10 +127,21 @@ export function markdownToVideoScenes(markdown: string): EditableVideoScene[] {
 		scene.intent = headerMatch[2]?.trim() || scene.intent;
 
 		for (const line of lines.slice(1)) {
-			const fieldMatch = /^-\s+\*\*(.+?):\*\*\s*(.*)$/.exec(line.trim());
-			if (!fieldMatch) continue;
+			const trimmedLine = line.trim();
+			if (!trimmedLine) continue;
+			const fieldMatch = /^-\s+\*\*(.+?):\*\*\s*(.*)$/.exec(trimmedLine);
+			if (!fieldMatch) {
+				// A bullet-looking line that didn't match the bold-label shape.
+				if (/^[-*]\s+/.test(trimmedLine)) {
+					unrecognizedFields++;
+				}
+				continue;
+			}
 			const field = labelToField(fieldMatch[1] ?? "");
-			if (!field) continue;
+			if (!field) {
+				unrecognizedFields++;
+				continue;
+			}
 			const value = (fieldMatch[2] ?? "").trim();
 			scene[field] = value === "—" ? "" : value;
 		}
@@ -122,15 +149,34 @@ export function markdownToVideoScenes(markdown: string): EditableVideoScene[] {
 	}
 
 	if (scenes.length === 0) {
-		throw new Error(
-			'Could not parse scenes. Keep headings like "### Scene 1: …" and bullet fields.',
+		return {
+			scenes: [],
+			warning:
+				'Could not parse any scenes. Keep headings like "### Scene 1: …" with bullet fields ("- **Label:** value").',
+		};
+	}
+
+	const warnings: string[] = [];
+	if (skippedSections > 0) {
+		warnings.push(
+			`${skippedSections} section${skippedSections === 1 ? "" : "s"} skipped — headings must look like "### Scene 1: …".`,
+		);
+	}
+	if (unrecognizedFields > 0) {
+		warnings.push(
+			`${unrecognizedFields} field line${unrecognizedFields === 1 ? "" : "s"} not recognized — use "- **Label:** value".`,
 		);
 	}
 
-	return scenes
+	const sorted = scenes
 		.sort((a, b) => a.sceneNumber - b.sceneNumber)
 		.map((scene, index) => ({
 			...scene,
 			sceneNumber: index + 1,
 		}));
+
+	return {
+		scenes: sorted,
+		warning: warnings.length > 0 ? warnings.join(" ") : null,
+	};
 }

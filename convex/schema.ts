@@ -114,6 +114,7 @@ export default defineSchema({
 		status: runStatusValidator,
 		revisionNumber: v.number(),
 		parentRunId: v.optional(v.id("generationRuns")),
+		title: v.optional(v.string()),
 		shlokaText: v.optional(v.string()),
 		customInstructions: v.optional(v.string()),
 		/** Custom planner system prompt; omit to use the built-in default. */

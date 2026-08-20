@@ -49,8 +49,6 @@ type GroupBy = "none" | "provider";
 function providerForModel(modelId: VideoModelId): string {
 	const [provider] = modelId.split("/");
 	if (provider === "google") return "google";
-	if (provider === "x-ai") return "xai";
-	if (provider === "openai") return "openai";
 	if (provider === "alibaba") return "alibaba";
 	if (provider === "runway") return "runway";
 	if (provider === "bytedance") return "openrouter";
@@ -147,38 +145,52 @@ function ModelRow({
 				onValueChange(modelId);
 				onClose();
 			}}
-			className="items-start gap-3 px-3 py-3"
+			className="items-start gap-2 px-2.5 py-2"
 		>
 			<ModelSelectorLogo
 				provider={providerForModel(modelId)}
-				className="mt-0.5 size-4 shrink-0"
+				className="mt-0.5 size-3.5 shrink-0"
 			/>
-			<span className="flex min-w-0 flex-1 flex-col gap-1.5">
-				<span className="flex flex-wrap items-center gap-2">
-					<ModelSelectorName className="font-medium">
+			<span className="flex min-w-0 flex-1 flex-col gap-1">
+				<span className="flex flex-wrap items-center gap-1.5">
+					<ModelSelectorName className="text-sm font-medium">
 						{profile.displayName}
 					</ModelSelectorName>
 					{priceLabel ? (
-						<Badge variant="secondary" className="font-normal">
+						<Badge
+							variant="secondary"
+							className="h-5 px-1.5 text-[10px] font-normal"
+						>
 							{priceLabel}
 							{audioPriceLabel && audioPriceLabel !== priceLabel
 								? ` · ${audioPriceLabel} audio`
 								: ""}
 						</Badge>
 					) : null}
-					{isSelected ? <Badge variant="outline">Selected</Badge> : null}
+					{isSelected ? (
+						<Badge
+							variant="outline"
+							className="h-5 px-1.5 text-[10px] font-normal"
+						>
+							Selected
+						</Badge>
+					) : null}
 				</span>
-				<span className="text-xs text-muted-foreground">
+				<span className="line-clamp-2 text-[11px] leading-snug text-muted-foreground">
 					{profile.description}
 				</span>
-				<span className="flex flex-wrap gap-1.5">
+				<span className="flex flex-wrap gap-1">
 					{chips.map((chip) => (
-						<Badge key={chip} variant="outline" className="font-normal">
+						<Badge
+							key={chip}
+							variant="outline"
+							className="h-5 px-1.5 text-[10px] font-normal"
+						>
 							{chip}
 						</Badge>
 					))}
 				</span>
-				<span className="text-xs text-muted-foreground">
+				<span className="text-[11px] leading-none text-muted-foreground">
 					{profile.aspectRatios.slice(0, 4).join(" · ")}
 					{profile.aspectRatios.length > 4 ? "…" : ""}
 					{" · "}
@@ -186,15 +198,15 @@ function ModelRow({
 					{" · "}
 					{durations[0]}–{durations[durations.length - 1]}s
 				</span>
-				<span className="text-xs text-muted-foreground">
+				<span className="text-[11px] leading-none text-muted-foreground">
 					{pricing?.output
-						? `OpenRouter SKU: ${pricing.output}`
+						? `Pricing ref: ${pricing.output}`
 						: profile.pricingNotes}
 				</span>
 			</span>
 			<CheckIcon
 				className={cn(
-					"mt-0.5 size-4 shrink-0",
+					"mt-0.5 size-3.5 shrink-0",
 					isSelected ? "opacity-100" : "opacity-0",
 				)}
 			/>
@@ -212,6 +224,7 @@ export function VideoModelSelector({
 }: VideoModelSelectorProps) {
 	const [open, setOpen] = useState(false);
 	const [groupBy, setGroupBy] = useState<GroupBy>("none");
+	const [search, setSearch] = useState("");
 
 	const pricingByModelId = useMemo(() => {
 		if (!pricingSkusById || pricingSkusById.size === 0) {
@@ -236,16 +249,48 @@ export function VideoModelSelector({
 		[pricingByModelId],
 	);
 
+	const normalizedSearch = search.trim().toLowerCase();
+	const matchesModel = useMemo(() => {
+		if (!normalizedSearch) return () => true;
+		return (modelId: VideoModelId, extra = "") => {
+			const profile = MODEL_CAPABILITY_PROFILES[modelId];
+			const chips = capabilityChips(modelId).join(" ");
+			const familyLabel = VIDEO_MODEL_FAMILY_META[profile.family].label;
+			const haystack =
+				`${profile.displayName} ${modelId} ${familyLabel} ${profile.family} ${profile.description} ${chips} ${extra}`.toLowerCase();
+			return haystack.includes(normalizedSearch);
+		};
+	}, [normalizedSearch]);
+
+	const filteredFlatSorted = useMemo(
+		() => flatSorted.filter((id) => matchesModel(id)),
+		[flatSorted, matchesModel],
+	);
+
+	const filteredGroupedModels = useMemo(
+		() =>
+			groupedModels
+				.map((group) => ({
+					...group,
+					modelIds: group.modelIds.filter((id) =>
+						matchesModel(id, group.label),
+					),
+				}))
+				.filter((group) => group.modelIds.length > 0),
+		[groupedModels, matchesModel],
+	);
+
 	const selected = MODEL_CAPABILITY_PROFILES[value];
 	const selectedPricing = gatewayPricingById?.get(value);
-	const selectedSortPrice = resolveVideoModelSortPrice(
-		value,
-		pricingSkusById?.get(value),
-	);
-	const selectedPriceLabel = formatUsdPerSecond(selectedSortPrice);
 
 	return (
-		<Popover open={open} onOpenChange={setOpen}>
+		<Popover
+			open={open}
+			onOpenChange={(next) => {
+				setOpen(next);
+				if (!next) setSearch("");
+			}}
+		>
 			<PopoverTrigger
 				render={
 					<Button
@@ -268,11 +313,6 @@ export function VideoModelSelector({
 					<span className="flex min-w-0 flex-col gap-0.5">
 						<span className="truncate text-sm font-medium">
 							{selected.displayName}
-							{selectedPriceLabel ? (
-								<span className="ml-2 font-normal text-muted-foreground">
-									{selectedPriceLabel}
-								</span>
-							) : null}
 						</span>
 						<span className="truncate text-xs text-muted-foreground">
 							{VIDEO_MODEL_FAMILY_META[selected.family].label} ·{" "}
@@ -290,7 +330,7 @@ export function VideoModelSelector({
 				sideOffset={6}
 				className="w-(--anchor-width) min-w-80 max-w-xl gap-0 overflow-hidden p-0"
 			>
-				<div className="flex flex-col gap-2.5 border-b border-border/80 px-3 py-2.5">
+				<div className="flex flex-col gap-2 border-b border-border/80 px-3 py-2">
 					<div className="flex flex-wrap items-center gap-2">
 						<span className="w-14 shrink-0 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
 							Group by
@@ -312,13 +352,20 @@ export function VideoModelSelector({
 					</div>
 				</div>
 
-				<Command className="rounded-none! border-0 shadow-none">
-					<CommandInput placeholder="Search models…" />
-					<CommandList className="max-h-80">
+				<Command
+					shouldFilter={false}
+					className="rounded-none! border-0 shadow-none"
+				>
+					<CommandInput
+						placeholder="Search models…"
+						value={search}
+						onValueChange={setSearch}
+					/>
+					<CommandList className="max-h-72">
 						<CommandEmpty>No models found.</CommandEmpty>
 						{groupBy === "none" ? (
 							<CommandGroup heading="Cheapest first">
-								{flatSorted.map((modelId) => (
+								{filteredFlatSorted.map((modelId) => (
 									<ModelRow
 										key={modelId}
 										modelId={modelId}
@@ -331,7 +378,7 @@ export function VideoModelSelector({
 								))}
 							</CommandGroup>
 						) : (
-							groupedModels.map((group) => (
+							filteredGroupedModels.map((group) => (
 								<CommandGroup key={group.family} heading={group.label}>
 									{group.modelIds.map((modelId) => (
 										<ModelRow
@@ -352,10 +399,14 @@ export function VideoModelSelector({
 				</Command>
 				{selectedPricing?.output || selected.pricingNotes ? (
 					<div className="border-t border-border/80 px-3 py-2 text-xs text-muted-foreground">
-						Current:{" "}
-						{selectedPricing?.output
-							? `OpenRouter SKU ${selectedPricing.output}`
-							: selected.pricingNotes}
+						{selectedPricing?.output || selected.pricingNotes ? (
+							<>
+								Current:{" "}
+								{selectedPricing?.output
+									? `pricing ref ${selectedPricing.output}`
+									: selected.pricingNotes}
+							</>
+						) : null}
 					</div>
 				) : null}
 			</PopoverContent>

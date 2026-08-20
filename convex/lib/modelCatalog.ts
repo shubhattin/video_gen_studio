@@ -4,15 +4,10 @@ export const VIDEO_MODEL_IDS = [
 	"bytedance/seedance-2.5",
 	"bytedance/seedance-2.0",
 	"bytedance/seedance-2.0-fast",
-	"google/veo-3.1",
-	"google/veo-3.1-fast",
 	"google/veo-3.1-lite",
 	"kwaivgi/kling-v3.0-pro",
 	"kwaivgi/kling-v3.0-std",
-	"openai/sora-2-pro",
 	"runway/gen-4.5",
-	"x-ai/grok-imagine-video",
-	"x-ai/grok-imagine-video-1.5",
 ] as const;
 
 export type VideoModelId = (typeof VIDEO_MODEL_IDS)[number];
@@ -22,8 +17,6 @@ export type VideoModelFamily =
 	| "bytedance"
 	| "kling"
 	| "alibaba"
-	| "xai"
-	| "openai"
 	| "runway";
 
 export const VIDEO_MODEL_FAMILY_META: Record<
@@ -34,12 +27,12 @@ export const VIDEO_MODEL_FAMILY_META: Record<
 	bytedance: { label: "ByteDance", order: 2 },
 	kling: { label: "Kling", order: 3 },
 	alibaba: { label: "Alibaba", order: 4 },
-	xai: { label: "xAI", order: 5 },
-	openai: { label: "OpenAI / Sora", order: 6 },
-	runway: { label: "Runway", order: 7 },
+	runway: { label: "Runway", order: 5 },
 };
 
 export const PLANNER_MODEL_ID = "openai/gpt-5.6-terra";
+/** Fast, no-reasoning model used to summarize a run into a short title. */
+export const TITLE_MODEL_ID = "openai/gpt-5.6-luna";
 export const REFERENCE_IMAGE_MODEL_ID = "gpt-image-2";
 
 export type AspectRatio =
@@ -122,60 +115,6 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 		pricingNotes: "~$0.03–0.05/s silent · ~$0.05–0.08/s with audio.",
 		fallbackEstimateUsdPerSecond: 0.05,
 		fallbackEstimateUsdPerSecondWithAudio: 0.08,
-	},
-	"google/veo-3.1-fast": {
-		id: "google/veo-3.1-fast",
-		displayName: "Veo 3.1 Fast",
-		description:
-			"Google Veo 3.1 Fast — quicker cinematic generation with optional audio.",
-		family: "google",
-		requiresFirstFrame: false,
-		supportsTextToVideo: true,
-		supportsFirstFrame: true,
-		supportsLastFrame: true,
-		supportsInputReferences: false,
-		maxInputReferences: 0,
-		aspectRatios: ["16:9", "9:16"],
-		resolutions: ["720p", "1080p", "4K"],
-		supportedDurations: [4, 6, 8],
-		supportsAudio: true,
-		supportsSeed: true,
-		supportsNegativePrompt: true,
-		passthroughParams: [
-			"personGeneration",
-			"aspectRatio",
-			"negativePrompt",
-			"conditioningScale",
-			"enhancePrompt",
-		],
-		maxPromptChars: 4000,
-		pricingNotes:
-			"~$0.08–0.10/s silent · ~$0.10–0.12/s with audio (higher at 4K).",
-		fallbackEstimateUsdPerSecond: 0.1,
-		fallbackEstimateUsdPerSecondWithAudio: 0.12,
-	},
-	"x-ai/grok-imagine-video": {
-		id: "x-ai/grok-imagine-video",
-		displayName: "Grok Imagine Video",
-		description:
-			"xAI Grok Imagine Video — fast text/image/reference video (1–15s, 480p/720p).",
-		family: "xai",
-		requiresFirstFrame: false,
-		supportsTextToVideo: true,
-		supportsFirstFrame: true,
-		supportsLastFrame: false,
-		supportsInputReferences: true,
-		maxInputReferences: 7,
-		aspectRatios: ["16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3"],
-		resolutions: ["480p", "720p"],
-		supportedDurations: range(1, 15),
-		supportsAudio: false,
-		supportsSeed: false,
-		supportsNegativePrompt: false,
-		passthroughParams: [],
-		maxPromptChars: 4000,
-		pricingNotes: "~$0.05/s at 480p · ~$0.07/s at 720p (OpenRouter).",
-		fallbackEstimateUsdPerSecond: 0.05,
 	},
 	"bytedance/seedance-2.0-fast": {
 		id: "bytedance/seedance-2.0-fast",
@@ -294,29 +233,6 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 		fallbackEstimateUsdPerSecond: 0.112,
 		fallbackEstimateUsdPerSecondWithAudio: 0.168,
 	},
-	"x-ai/grok-imagine-video-1.5": {
-		id: "x-ai/grok-imagine-video-1.5",
-		displayName: "Grok Imagine Video 1.5",
-		description:
-			"xAI Grok Imagine Video 1.5 — stronger motion/physics, up to 1080p.",
-		family: "xai",
-		requiresFirstFrame: false,
-		supportsTextToVideo: true,
-		supportsFirstFrame: true,
-		supportsLastFrame: false,
-		supportsInputReferences: true,
-		maxInputReferences: 2,
-		aspectRatios: ["16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3"],
-		resolutions: ["480p", "720p", "1080p"],
-		supportedDurations: range(1, 15),
-		supportsAudio: false,
-		supportsSeed: false,
-		supportsNegativePrompt: false,
-		passthroughParams: [],
-		maxPromptChars: 4000,
-		pricingNotes: "~$0.08/s at 480p · ~$0.14/s at 720p · ~$0.25/s at 1080p.",
-		fallbackEstimateUsdPerSecond: 0.08,
-	},
 	"alibaba/wan-2.6": {
 		id: "alibaba/wan-2.6",
 		displayName: "Wan 2.6",
@@ -371,59 +287,6 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 		pricingNotes: "$0.10/s on OpenRouter (flat).",
 		fallbackEstimateUsdPerSecond: 0.1,
 		fallbackEstimateUsdPerSecondWithAudio: 0.1,
-	},
-	"google/veo-3.1": {
-		id: "google/veo-3.1",
-		displayName: "Veo 3.1",
-		description:
-			"Google Veo 3.1 — cinematic text/image-to-video with optional audio.",
-		family: "google",
-		requiresFirstFrame: false,
-		supportsTextToVideo: true,
-		supportsFirstFrame: true,
-		supportsLastFrame: true,
-		supportsInputReferences: false,
-		maxInputReferences: 0,
-		aspectRatios: ["16:9", "9:16"],
-		resolutions: ["720p", "1080p", "4K"],
-		supportedDurations: [4, 6, 8],
-		supportsAudio: true,
-		supportsSeed: true,
-		supportsNegativePrompt: true,
-		passthroughParams: [
-			"personGeneration",
-			"negativePrompt",
-			"conditioningScale",
-			"enhancePrompt",
-		],
-		maxPromptChars: 4000,
-		pricingNotes: "~$0.20/s silent · ~$0.40/s with audio (OpenRouter).",
-		fallbackEstimateUsdPerSecond: 0.2,
-		fallbackEstimateUsdPerSecondWithAudio: 0.4,
-	},
-	"openai/sora-2-pro": {
-		id: "openai/sora-2-pro",
-		displayName: "Sora 2 Pro",
-		description:
-			"OpenAI Sora 2 Pro — production-quality text-to-video with synced audio (OpenRouter).",
-		family: "openai",
-		requiresFirstFrame: false,
-		supportsTextToVideo: true,
-		supportsFirstFrame: false,
-		supportsLastFrame: false,
-		supportsInputReferences: false,
-		maxInputReferences: 0,
-		aspectRatios: ["16:9", "9:16"],
-		resolutions: ["720p", "1080p"],
-		supportedDurations: [4, 8, 12, 16, 20],
-		supportsAudio: true,
-		supportsSeed: false,
-		supportsNegativePrompt: false,
-		passthroughParams: ["quality", "style"],
-		maxPromptChars: 4000,
-		pricingNotes: "~$0.30/s at 720p · ~$0.50/s at 1080p (audio included).",
-		fallbackEstimateUsdPerSecond: 0.3,
-		fallbackEstimateUsdPerSecondWithAudio: 0.3,
 	},
 	"runway/gen-4.5": {
 		id: "runway/gen-4.5",

@@ -50,6 +50,9 @@ type ReferenceImagePanelProps = {
 	supportsInputReferences?: boolean;
 	maxInputReferences?: number;
 	disabled?: boolean;
+	/** True while any background stage is running — blocks starting new image
+	 * generation, but leaves upload usable. */
+	globalBusy?: boolean;
 };
 
 function RoleChip({
@@ -285,6 +288,7 @@ export function ReferenceImagePanel({
 	supportsInputReferences,
 	maxInputReferences = 0,
 	disabled,
+	globalBusy,
 }: ReferenceImagePanelProps) {
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const [dragActive, setDragActive] = useState(false);
@@ -293,12 +297,18 @@ export function ReferenceImagePanel({
 			(imageSize as keyof typeof GPT_IMAGE_ESTIMATES_USD) ?? "1024x1536"
 		]?.[imageQuality as "low" | "medium" | "high"] ??
 		GPT_IMAGE_ESTIMATES_USD["1024x1536"].medium;
-	const busy = Boolean(disabled || generating || uploading);
+	// Upload is independent of image generation — only the upload action itself
+	// (and a missing run) blocks it. Generate also respects globalBusy.
+	const uploadBusy = Boolean(disabled || uploading);
+	const generateBusy = Boolean(
+		disabled || generating || uploading || globalBusy,
+	);
+	const configBusy = Boolean(disabled || generating);
 	const styleRefFull = extraReferenceImageIds.length >= maxInputReferences;
 
 	const handleFiles = async (files: FileList | null) => {
 		const file = files?.[0];
-		if (!file || busy) {
+		if (!file || uploadBusy) {
 			return;
 		}
 		await onUpload(file);
@@ -308,10 +318,10 @@ export function ReferenceImagePanel({
 	};
 
 	return (
-		<section className="flex flex-col gap-4 border-t border-border/80 pt-6">
-			<div className="flex flex-wrap items-end justify-between gap-3">
+		<section className="space-y-4 border-t border-border/80 pt-5">
+			<div className="flex flex-wrap items-start justify-between gap-3">
 				<div>
-					<h2 className="font-heading text-xl font-semibold">
+					<h2 className="font-heading text-lg font-semibold">
 						Reference images
 					</h2>
 					<p className="text-sm text-muted-foreground">
@@ -334,19 +344,25 @@ export function ReferenceImagePanel({
 			<div className="rounded-2xl border border-border/70 bg-muted/15 p-3 sm:p-4">
 				<div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto_auto] sm:items-end">
 					<div className="flex flex-col gap-1.5">
-						<Label className="text-xs">Size</Label>
+						<Label className="text-xs">Aspect ratio</Label>
 						<Select
 							value={imageSize}
 							onValueChange={(value) => value && onSizeChange(value)}
-							disabled={busy}
+							disabled={configBusy}
 						>
 							<SelectTrigger className="h-9">
-								<SelectValue />
+								<SelectValue>
+									{imageSize === "1024x1024"
+										? "Square 1:1"
+										: imageSize === "1536x1024"
+											? "Landscape 3:2"
+											: "Portrait 2:3"}
+								</SelectValue>
 							</SelectTrigger>
 							<SelectContent>
-								<SelectItem value="1024x1536">Portrait 1024×1536</SelectItem>
-								<SelectItem value="1024x1024">Square 1024×1024</SelectItem>
-								<SelectItem value="1536x1024">Landscape 1536×1024</SelectItem>
+								<SelectItem value="1024x1536">Portrait 2:3</SelectItem>
+								<SelectItem value="1024x1024">Square 1:1</SelectItem>
+								<SelectItem value="1536x1024">Landscape 3:2</SelectItem>
 							</SelectContent>
 						</Select>
 					</div>
@@ -355,7 +371,7 @@ export function ReferenceImagePanel({
 						<Select
 							value={imageQuality}
 							onValueChange={(value) => value && onQualityChange(value)}
-							disabled={busy}
+							disabled={configBusy}
 						>
 							<SelectTrigger className="h-9">
 								<SelectValue />
@@ -368,28 +384,50 @@ export function ReferenceImagePanel({
 							</SelectContent>
 						</Select>
 					</div>
-					<Button className="h-9" onClick={onGenerate} disabled={busy}>
+					<Button className="h-9" onClick={onGenerate} disabled={generateBusy}>
 						{generating ? "Generating…" : "Generate"}
 					</Button>
 					<Button
 						className="h-9"
 						variant="outline"
-						disabled={busy}
+						disabled={uploadBusy}
 						onClick={() => fileInputRef.current?.click()}
 					>
 						<Upload data-icon="inline-start" />
 						{uploading ? "Uploading…" : "Upload"}
 					</Button>
 				</div>
-				<p className="mt-2 text-xs text-muted-foreground">
-					GPT Image 2 · ~${estimate.toFixed(3)} per {imageQuality} generate
-				</p>
+				<div className="mt-2 flex items-center">
+					<Popover>
+						<PopoverTrigger
+							render={
+								<button
+									type="button"
+									className="inline-flex h-6 items-center gap-1 rounded px-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+								>
+									<Info data-icon="inline-start" className="size-3.5" />
+									Pricing
+								</button>
+							}
+						/>
+						<PopoverContent align="end" className="w-72 gap-3 p-4">
+							<PopoverHeader>
+								<PopoverTitle>Image pricing</PopoverTitle>
+								<PopoverDescription>
+									Rough estimate for a {imageQuality} image: ~$
+									{estimate.toFixed(3)}. Actual cost depends on the provider and
+									appears in each image’s details.
+								</PopoverDescription>
+							</PopoverHeader>
+						</PopoverContent>
+					</Popover>
+				</div>
 				<input
 					ref={fileInputRef}
 					type="file"
 					accept="image/png,image/jpeg,image/webp,image/gif"
 					className="sr-only"
-					disabled={busy}
+					disabled={uploadBusy}
 					onChange={(event) => {
 						void handleFiles(event.target.files);
 					}}
@@ -402,17 +440,17 @@ export function ReferenceImagePanel({
 					dragActive
 						? "border-primary bg-primary/5 text-foreground"
 						: "border-border/70 text-muted-foreground",
-					busy ? "opacity-60" : "cursor-pointer",
+					uploadBusy ? "opacity-60" : "cursor-pointer",
 				)}
 				onDragEnter={(event) => {
 					event.preventDefault();
 					event.stopPropagation();
-					if (!busy) setDragActive(true);
+					if (!uploadBusy) setDragActive(true);
 				}}
 				onDragOver={(event) => {
 					event.preventDefault();
 					event.stopPropagation();
-					if (!busy) setDragActive(true);
+					if (!uploadBusy) setDragActive(true);
 				}}
 				onDragLeave={(event) => {
 					event.preventDefault();
@@ -426,17 +464,17 @@ export function ReferenceImagePanel({
 					void handleFiles(event.dataTransfer.files);
 				}}
 				onClick={() => {
-					if (!busy) fileInputRef.current?.click();
+					if (!uploadBusy) fileInputRef.current?.click();
 				}}
 				onKeyDown={(event) => {
-					if (busy) return;
+					if (uploadBusy) return;
 					if (event.key === "Enter" || event.key === " ") {
 						event.preventDefault();
 						fileInputRef.current?.click();
 					}
 				}}
 				role="button"
-				tabIndex={busy ? -1 : 0}
+				tabIndex={uploadBusy ? -1 : 0}
 			>
 				Drop an image here, or click to browse · PNG / JPEG / WebP / GIF · max
 				20MB
@@ -451,7 +489,7 @@ export function ReferenceImagePanel({
 							isFirst={firstFrameImageId === image.id}
 							isLast={lastFrameImageId === image.id}
 							isExtra={extraReferenceImageIds.includes(image.id)}
-							busy={busy}
+							busy={Boolean(disabled)}
 							supportsLastFrame={supportsLastFrame}
 							supportsInputReferences={supportsInputReferences}
 							styleRefFull={styleRefFull}
