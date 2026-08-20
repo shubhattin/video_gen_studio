@@ -135,7 +135,7 @@ export function ShlokaComposer({
 											onPlannerSystemPromptChange(event.target.value)
 										}
 										onBlur={() => onPersist?.()}
-										className="min-h-64 max-h-[50vh] resize-y"
+										className="min-h-96 max-h-[70vh] resize-y"
 										disabled={disabled}
 										aria-label="Planner instructions"
 									/>
