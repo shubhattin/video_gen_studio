@@ -1,4 +1,4 @@
-import { Info, Trash2, Upload } from "lucide-react";
+import { Download, Info, Loader2, Trash2, Upload } from "lucide-react";
 import { useRef, useState } from "react";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
@@ -19,6 +19,7 @@ import {
 	SelectValue,
 } from "#/components/ui/select";
 import { GPT_IMAGE_ESTIMATES_USD } from "#/lib/model-catalog";
+import { notifyStudioError } from "#/lib/studio-toast";
 import { cn } from "#/lib/utils";
 
 export type ReferenceImageItem = {
@@ -82,6 +83,27 @@ function RoleChip({
 	);
 }
 
+async function downloadImageFile(sourceUrl: string, filename: string): Promise<void> {
+	const response = await fetch(sourceUrl, { cache: "no-store" });
+	if (!response.ok) {
+		throw new Error(`Download failed (${response.status})`);
+	}
+	const blob = await response.blob();
+	const objectUrl = URL.createObjectURL(blob);
+	try {
+		const link = document.createElement("a");
+		link.href = objectUrl;
+		link.download = filename;
+		link.rel = "noopener";
+		link.style.display = "none";
+		document.body.append(link);
+		link.click();
+		link.remove();
+	} finally {
+		window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+	}
+}
+
 function ReferenceImageCard({
 	image,
 	isFirst,
@@ -109,6 +131,7 @@ function ReferenceImageCard({
 	onToggleExtraReference: (id: string) => void;
 	onRemoveImage: (id: string) => void;
 }) {
+	const [downloading, setDownloading] = useState(false);
 	const isUnassigned = !isFirst && !isLast && !isExtra;
 	const sourceLabel =
 		image.source === "uploaded"
@@ -124,6 +147,21 @@ function ReferenceImageCard({
 		]
 			.filter(Boolean)
 			.join(" · ") || "In gallery";
+
+	const onDownload = async () => {
+		if (!image.url || downloading) {
+			return;
+		}
+		setDownloading(true);
+		try {
+			const filename = `reference-image-${image.id.slice(0, 8)}.png`;
+			await downloadImageFile(image.url, filename);
+		} catch (error) {
+			notifyStudioError("Could not download image", error);
+		} finally {
+			setDownloading(false);
+		}
+	};
 
 	return (
 		<article
@@ -222,6 +260,21 @@ function ReferenceImageCard({
 							</PopoverContent>
 						</Popover>
 					)}
+
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon-sm"
+						disabled={busy || downloading || !image.url}
+						aria-label="Download image"
+						onClick={() => void onDownload()}
+					>
+						{downloading ? (
+							<Loader2 className="animate-spin" />
+						) : (
+							<Download />
+						)}
+					</Button>
 
 					<Button
 						type="button"

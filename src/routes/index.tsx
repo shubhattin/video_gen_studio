@@ -3,30 +3,37 @@ import type { Id } from "@convex/_generated/dataModel";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { useEffect, useMemo, useState } from "react";
+import { CompositionAttemptControls } from "#/components/studio/composition/composition-attempt-controls";
 import {
 	type CompositionClipResult,
 	CompositionResult,
 } from "#/components/studio/composition/composition-result";
-import { CompositionAttemptControls } from "#/components/studio/composition/composition-attempt-controls";
-import { GenerationProgressDock } from "#/components/studio/video/generation-progress-dock";
-import { HistoryPanel } from "#/components/studio/shell/history-panel";
 import {
 	type CompositionSettings,
 	MultiClipCompositionControls,
 } from "#/components/studio/composition/multi-clip-composition-controls";
-import { ReferenceImagePanel } from "#/components/studio/video/reference-image-panel";
+import { AutosaveStatus } from "#/components/studio/shell/autosave-status";
+import { HistoryPanel } from "#/components/studio/shell/history-panel";
+import { NewRunSetup } from "#/components/studio/shell/new-run-setup";
+import { StudioRunSkeleton } from "#/components/studio/shell/studio-run-skeleton";
+import { StudioShell } from "#/components/studio/shell/studio-shell";
 import { ShlokaComposer } from "#/components/studio/shloka/shloka-composer";
 import { ShlokaPlanPreview } from "#/components/studio/shloka/shloka-plan-preview";
-import { StudioShell } from "#/components/studio/shell/studio-shell";
+import { GenerationProgressDock } from "#/components/studio/video/generation-progress-dock";
+import { ReferenceImagePanel } from "#/components/studio/video/reference-image-panel";
 import {
 	type VideoConfigState,
 	VideoConfiguration,
 } from "#/components/studio/video/video-configuration";
-import { VideoModelSelector } from "#/components/studio/video/video-model-selector";
 import { VideoGenerateConfirm } from "#/components/studio/video/video-generate-confirm";
+import { VideoModelSelector } from "#/components/studio/video/video-model-selector";
 import { VideoResult } from "#/components/studio/video/video-result";
 import { Button } from "#/components/ui/button";
 import { useCompositionTerminalFrameHandoff } from "#/hooks/use-composition-terminal-frame-handoff";
+import {
+	isTextOnlyConfigChange,
+	useRunAutosave,
+} from "#/hooks/use-run-autosave";
 import {
 	useSignedMediaUrls,
 	withSignedUrl,
@@ -48,8 +55,6 @@ import {
 import type { StudioBusyStage } from "#/lib/studio-run-status";
 import { notifyStudioError, notifyStudioSuccess } from "#/lib/studio-toast";
 import { uploadReferenceImage } from "#/lib/upload-reference-image";
-import { StudioRunSkeleton } from "#/components/studio/shell/studio-run-skeleton";
-import { NewRunSetup } from "#/components/studio/shell/new-run-setup";
 
 export const Route = createFileRoute("/")({
 	validateSearch: studioRunSearchSchema,
@@ -121,6 +126,12 @@ function ShlokaStudioPage() {
 	const selectCompositionJob = useMutation(
 		api.studio.mutations.selectCompositionJob,
 	);
+
+	const autosave = useRunAutosave({
+		runId,
+		runStatus: run?.status ?? null,
+		onError: (error) => notifyStudioError("Could not save draft", error),
+	});
 
 	const rawImages = run?.referenceImages ?? [];
 	const rawVideos = run?.videos ?? [];
@@ -297,34 +308,64 @@ function ShlokaStudioPage() {
 		return id;
 	};
 
-	const persistComposerFields = async () => {
-		if (planningBusy) return;
-		const trimmedShloka = shlokaText.trim();
-		if (!trimmedShloka) return;
-		try {
-			if (!runId) {
-				const storedPlannerSystemPrompt =
-					normalizePlannerSystemPromptForStorage(plannerSystemPrompt) ?? null;
-				const id = await createDraft({
-					shlokaText: trimmedShloka,
-					customInstructions,
-					...(storedPlannerSystemPrompt
-						? { plannerSystemPrompt: storedPlannerSystemPrompt }
-						: {}),
-				});
-				setRunId(id);
-				return;
-			}
-			await updateDraft({
-				runId,
-				shlokaText: trimmedShloka,
-				customInstructions,
-				plannerSystemPrompt:
-					normalizePlannerSystemPromptForStorage(plannerSystemPrompt) ?? null,
-			});
-		} catch (error) {
-			notifyStudioError("Could not save draft", error);
+	const onShlokaChange = (value: string) => {
+		setShlokaText(value);
+		// Server requires non-empty shloka text — skip while cleared.
+		if (value.trim()) {
+			autosave.save({ shlokaText: value }, "debounced");
 		}
+	};
+
+	const onInstructionsChange = (value: string) => {
+		setCustomInstructions(value);
+		autosave.save({ customInstructions: value }, "debounced");
+	};
+
+	const onPlannerSystemPromptChange = (value: string) => {
+		setPlannerSystemPrompt(value);
+		autosave.save(
+			{
+				plannerSystemPrompt:
+					normalizePlannerSystemPromptForStorage(value) ?? null,
+			},
+			"debounced",
+		);
+	};
+
+	const onVideoConfigChange = (next: VideoConfigState) => {
+		const mode = isTextOnlyConfigChange(videoConfig, next)
+			? "debounced"
+			: "immediate";
+		setVideoConfig(next);
+		autosave.save({ videoParams: next, selectedModelId: next.modelId }, mode);
+	};
+
+	const onModelChange = (modelId: VideoModelId) => {
+		const next = defaultVideoParams(modelId);
+		setVideoConfig(next);
+		autosave.save({ selectedModelId: modelId, videoParams: next }, "immediate");
+	};
+
+	const onCompositionChange = (next: CompositionSettings) => {
+		setComposition(next);
+		autosave.save(
+			{
+				compositionMode: next.enabled ? next.mode : null,
+				compositionMultiplier: next.enabled ? next.multiplier : null,
+				compositionClipCount: next.enabled ? next.multiplier : null,
+			},
+			"immediate",
+		);
+	};
+
+	const onImageSizeChange = (value: string) => {
+		setImageSize(value);
+		autosave.save({ imageSize: value }, "immediate");
+	};
+
+	const onImageQualityChange = (value: string) => {
+		setImageQuality(value);
+		autosave.save({ imageQuality: value }, "immediate");
 	};
 
 	const onPlan = async () => {
@@ -402,6 +443,7 @@ function ShlokaStudioPage() {
 
 	const profile =
 		MODEL_CAPABILITY_PROFILES[videoConfig.modelId as VideoModelId];
+	const isModelLocked = Boolean(run?.videos?.length);
 
 	const planReady =
 		run?.status === "planning" ||
@@ -444,15 +486,23 @@ function ShlokaStudioPage() {
 			) : (
 				<>
 					<div className="space-y-6 rounded-2xl border border-border/80 bg-gradient-to-b from-card to-card/40 p-4 shadow-sm sm:p-6">
-						<section className="space-y-1.5">
-							<h1 className="font-heading text-xl font-semibold tracking-tight sm:text-2xl">
-								Shloka Video Generator
-							</h1>
-							<p className="text-sm text-muted-foreground">
-								Turn a verse into a short video: plan the scenes, generate
-								reference stills, then render the clips. Defaults to 9:16
-								portrait.
-							</p>
+						<section className="flex flex-wrap items-start justify-between gap-3">
+							<div className="space-y-1.5">
+								<h1 className="font-heading text-xl font-semibold tracking-tight sm:text-2xl">
+									Shloka Video Generator
+								</h1>
+								<p className="text-sm text-muted-foreground">
+									Turn a verse into a short video: plan the scenes, generate
+									reference stills, then render the clips. Defaults to 9:16
+									portrait.
+								</p>
+							</div>
+							<AutosaveStatus
+								status={autosave.status}
+								hasPending={autosave.hasPending}
+								onRetry={autosave.retry}
+								className="pt-1"
+							/>
 						</section>
 
 						{!runId ? (
@@ -466,10 +516,10 @@ function ShlokaStudioPage() {
 									shlokaText={shlokaText}
 									customInstructions={customInstructions}
 									plannerSystemPrompt={plannerSystemPrompt}
-									onShlokaChange={setShlokaText}
-									onInstructionsChange={setCustomInstructions}
-									onPlannerSystemPromptChange={setPlannerSystemPrompt}
-									onPersist={persistComposerFields}
+									onShlokaChange={onShlokaChange}
+									onInstructionsChange={onInstructionsChange}
+									onPlannerSystemPromptChange={onPlannerSystemPromptChange}
+									onPersist={() => void autosave.flush()}
 									disabled={planningBusy}
 								/>
 
@@ -477,7 +527,7 @@ function ShlokaStudioPage() {
 									value={composition}
 									modelId={videoConfig.modelId as VideoModelId}
 									durationSeconds={videoConfig.durationSeconds}
-									onChange={setComposition}
+									onChange={onCompositionChange}
 									hasPlan={planReady}
 									disabled={
 										planningBusy ||
@@ -500,15 +550,19 @@ function ShlokaStudioPage() {
 												value={videoConfig.modelId as VideoModelId}
 												gatewayPricingById={gatewayById}
 												pricingSkusById={pricingSkusById}
-												disabled={planningBusy || videoBusy}
-												onValueChange={(modelId) => {
-													setVideoConfig(defaultVideoParams(modelId));
-												}}
+												disabled={planningBusy || videoBusy || isModelLocked}
+												onValueChange={onModelChange}
 											/>
+											{isModelLocked ? (
+												<p className="text-xs text-muted-foreground">
+													The video model is fixed after single-clip generation
+													begins for this run.
+												</p>
+											) : null}
 										</div>
 										<VideoConfiguration
 											value={videoConfig}
-											onChange={setVideoConfig}
+											onChange={onVideoConfigChange}
 											disabled={planningBusy || videoBusy}
 										/>
 									</div>
@@ -637,8 +691,8 @@ function ShlokaStudioPage() {
 										<ReferenceImagePanel
 											imageSize={imageSize}
 											imageQuality={imageQuality}
-											onSizeChange={setImageSize}
-											onQualityChange={setImageQuality}
+											onSizeChange={onImageSizeChange}
+											onQualityChange={onImageQualityChange}
 											onGenerate={onGenerateImage}
 											onUpload={onUploadImage}
 											generating={busyStage === "image"}
@@ -652,24 +706,61 @@ function ShlokaStudioPage() {
 											maxInputReferences={profile?.maxInputReferences}
 											disabled={!runId}
 											globalBusy={anyBusy}
-											onSelectFirstFrame={async (id) => {
-												if (!runId) return;
-												await updateDraft({ runId, firstFrameImageId: id });
-											}}
-											onSelectLastFrame={async (id) => {
-												if (!runId) return;
-												await updateDraft({ runId, lastFrameImageId: id });
-											}}
-											onToggleExtraReference={async (id) => {
-												if (!runId) return;
-												const next = extraIds.includes(id)
-													? extraIds.filter((item) => item !== id)
-													: [...extraIds, id];
-												await updateDraft({
-													runId,
+onSelectFirstFrame={(id) => {
+											if (!runId) return;
+											autosave.save(
+												{
+													firstFrameImageId: id,
+													lastFrameImageId:
+														id && run?.lastFrameImageId === id
+															? null
+															: (run?.lastFrameImageId ?? null),
+													extraReferenceImageIds:
+														id && extraIds.includes(id)
+															? extraIds.filter((item) => item !== id)
+															: extraIds,
+												},
+												"immediate",
+											);
+										}}
+										onSelectLastFrame={(id) => {
+											if (!runId) return;
+											autosave.save(
+												{
+													lastFrameImageId: id,
+													firstFrameImageId:
+														id && run?.firstFrameImageId === id
+															? null
+															: (run?.firstFrameImageId ?? null),
+													extraReferenceImageIds:
+														id && extraIds.includes(id)
+															? extraIds.filter((item) => item !== id)
+															: extraIds,
+												},
+												"immediate",
+											);
+										}}
+										onToggleExtraReference={(id) => {
+											if (!runId) return;
+											const adding = !extraIds.includes(id);
+											const next = adding
+												? [...extraIds, id]
+												: extraIds.filter((item) => item !== id);
+											autosave.save(
+												{
 													extraReferenceImageIds: next,
-												});
-											}}
+													firstFrameImageId:
+														adding && run?.firstFrameImageId === id
+															? null
+															: (run?.firstFrameImageId ?? null),
+													lastFrameImageId:
+														adding && run?.lastFrameImageId === id
+															? null
+															: (run?.lastFrameImageId ?? null),
+												},
+												"immediate",
+											);
+										}}
 											onRemoveImage={async (id) => {
 												if (!runId) return;
 												await removeReferenceImage({ runId, imageId: id });
@@ -692,17 +783,19 @@ function ShlokaStudioPage() {
 												value={videoConfig.modelId as VideoModelId}
 												gatewayPricingById={gatewayById}
 												pricingSkusById={pricingSkusById}
-												disabled={planningBusy || videoBusy}
-												onValueChange={(modelId) => {
-													setVideoConfig({
-														...defaultVideoParams(modelId),
-													});
-												}}
+												disabled={planningBusy || videoBusy || isModelLocked}
+												onValueChange={onModelChange}
 											/>
+											{isModelLocked ? (
+												<p className="text-xs text-muted-foreground">
+													The video model is fixed after single-clip generation
+													begins for this run.
+												</p>
+											) : null}
 										</div>
 										<VideoConfiguration
 											value={videoConfig}
-											onChange={setVideoConfig}
+											onChange={onVideoConfigChange}
 											disabled={planningBusy || videoBusy}
 										/>
 										<VideoGenerateConfirm

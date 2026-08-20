@@ -2,26 +2,31 @@ import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { useEffect, useMemo, useState } from "react";
+import { CompositionAttemptControls } from "#/components/studio/composition/composition-attempt-controls";
 import {
 	type CompositionClipResult,
 	CompositionResult,
 } from "#/components/studio/composition/composition-result";
-import { CompositionAttemptControls } from "#/components/studio/composition/composition-attempt-controls";
-import { GenerationProgressDock } from "#/components/studio/video/generation-progress-dock";
 import {
 	type CompositionSettings,
 	MultiClipCompositionControls,
 } from "#/components/studio/composition/multi-clip-composition-controls";
+import { AutosaveStatus } from "#/components/studio/shell/autosave-status";
+import { GenerationProgressDock } from "#/components/studio/video/generation-progress-dock";
 import { ReferenceImagePanel } from "#/components/studio/video/reference-image-panel";
 import {
 	type VideoConfigState,
 	VideoConfiguration,
 } from "#/components/studio/video/video-configuration";
-import { VideoModelSelector } from "#/components/studio/video/video-model-selector";
 import { VideoGenerateConfirm } from "#/components/studio/video/video-generate-confirm";
+import { VideoModelSelector } from "#/components/studio/video/video-model-selector";
 import { VideoResult } from "#/components/studio/video/video-result";
 import { Button } from "#/components/ui/button";
 import { useCompositionTerminalFrameHandoff } from "#/hooks/use-composition-terminal-frame-handoff";
+import {
+	isTextOnlyConfigChange,
+	useRunAutosave,
+} from "#/hooks/use-run-autosave";
 import {
 	useSignedMediaUrls,
 	withSignedUrl,
@@ -91,6 +96,11 @@ export function ModelStudio({
 		api.studio.queries.getRun,
 		activeRunId ? { runId: activeRunId } : "skip",
 	);
+	const autosave = useRunAutosave({
+		runId: activeRunId,
+		runStatus: run?.status ?? null,
+		onError: (error) => notifyStudioError("Could not save draft", error),
+	});
 	const compositionJob = useQuery(
 		api.studio.queries.getCompositionForRun,
 		activeRunId ? { runId: activeRunId } : "skip",
@@ -342,17 +352,83 @@ export function ModelStudio({
 		);
 	};
 
+	const onModelChange = (modelId: VideoModelId) => {
+		const next = {
+			...defaultVideoParams(modelId),
+			prompt: videoConfig.prompt,
+		};
+		setSelectedModel(modelId);
+		setVideoConfig(next);
+		autosave.save(
+			{
+				selectedModelId: modelId,
+				videoParams: next,
+				videoPrompt: next.prompt ?? "",
+			},
+			"immediate",
+		);
+	};
+
+	const onVideoConfigChange = (next: VideoConfigState) => {
+		const previous = { ...videoConfig, modelId: selectedModel };
+		const mode = isTextOnlyConfigChange(previous, next)
+			? "debounced"
+			: "immediate";
+		if (isVideoModelId(next.modelId)) {
+			setSelectedModel(next.modelId);
+		}
+		setVideoConfig(next);
+		autosave.save(
+			{
+				videoParams: next,
+				videoPrompt: next.prompt ?? "",
+				selectedModelId: next.modelId,
+			},
+			mode,
+		);
+	};
+
+	const onCompositionChange = (next: CompositionSettings) => {
+		setComposition(next);
+		autosave.save(
+			{
+				compositionMode: next.enabled ? next.mode : null,
+				compositionMultiplier: next.enabled ? next.multiplier : null,
+				compositionClipCount: next.enabled ? next.multiplier : null,
+			},
+			"immediate",
+		);
+	};
+
+	const onImageSizeChange = (value: string) => {
+		setImageSize(value);
+		autosave.save({ imageSize: value }, "immediate");
+	};
+
+	const onImageQualityChange = (value: string) => {
+		setImageQuality(value);
+		autosave.save({ imageQuality: value }, "immediate");
+	};
+
 	return (
 		<div className="flex flex-col gap-6 rounded-2xl border border-border/80 bg-gradient-to-b from-card to-card/40 p-4 shadow-sm sm:p-6">
 			<section className="flex flex-col gap-3">
-				<div className="flex flex-col gap-1.5">
-					<h1 className="font-heading text-xl font-semibold tracking-tight sm:text-2xl">
-						Model Studio
-					</h1>
-					<p className="text-sm text-muted-foreground">
-						Pick a video model and configure the clip. Each generate appends
-						another clip to the run.
-					</p>
+				<div className="flex flex-wrap items-start justify-between gap-3">
+					<div className="flex flex-col gap-1.5">
+						<h1 className="font-heading text-xl font-semibold tracking-tight sm:text-2xl">
+							Model Studio
+						</h1>
+						<p className="text-sm text-muted-foreground">
+							Pick a video model and configure the clip. Each generate appends
+							another clip to the run.
+						</p>
+					</div>
+					<AutosaveStatus
+						status={autosave.status}
+						hasPending={autosave.hasPending}
+						onRetry={autosave.retry}
+						className="pt-1"
+					/>
 				</div>
 				<div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
 					<div className="min-w-0 flex-1 sm:max-w-xl">
@@ -366,13 +442,7 @@ export function ModelStudio({
 								busyStage === "video" ||
 								isModelLocked
 							}
-							onValueChange={(modelId) => {
-								setSelectedModel(modelId);
-								setVideoConfig({
-									...defaultVideoParams(modelId),
-									prompt: videoConfig.prompt,
-								});
-							}}
+							onValueChange={onModelChange}
 						/>
 						{isModelLocked ? (
 							<p className="mt-2 text-xs text-muted-foreground">
@@ -410,12 +480,7 @@ export function ModelStudio({
 
 			<VideoConfiguration
 				value={{ ...videoConfig, modelId: selectedModel }}
-				onChange={(next) => {
-					if (isVideoModelId(next.modelId)) {
-						setSelectedModel(next.modelId);
-					}
-					setVideoConfig(next);
-				}}
+				onChange={onVideoConfigChange}
 				showPrompt
 				disabled={busyStage === "planning" || busyStage === "video"}
 			/>
@@ -424,7 +489,7 @@ export function ModelStudio({
 				value={composition}
 				modelId={selectedModel}
 				durationSeconds={videoConfig.durationSeconds}
-				onChange={setComposition}
+				onChange={onCompositionChange}
 				hasPlan={hasPlan}
 				disabled={
 					busyStage === "planning" ||
@@ -437,8 +502,8 @@ export function ModelStudio({
 			<ReferenceImagePanel
 				imageSize={imageSize}
 				imageQuality={imageQuality}
-				onSizeChange={setImageSize}
-				onQualityChange={setImageQuality}
+				onSizeChange={onImageSizeChange}
+				onQualityChange={onImageQualityChange}
 				onGenerate={onGenerateImage}
 				onUpload={onUploadImage}
 				generating={busyStage === "image"}
@@ -452,20 +517,60 @@ export function ModelStudio({
 				maxInputReferences={profile.maxInputReferences}
 				disabled={!activeRunId}
 				globalBusy={isBusy}
-				onSelectFirstFrame={async (id) => {
-					const runId = await ensureDraft();
-					await updateDraft({ runId, firstFrameImageId: id });
+				onSelectFirstFrame={(id) => {
+					if (!activeRunId) return;
+					autosave.save(
+						{
+							firstFrameImageId: id,
+							lastFrameImageId:
+								id && run?.lastFrameImageId === id
+									? null
+									: (run?.lastFrameImageId ?? null),
+							extraReferenceImageIds:
+								id && extraIds.includes(id)
+									? extraIds.filter((item) => item !== id)
+									: extraIds,
+						},
+						"immediate",
+					);
 				}}
-				onSelectLastFrame={async (id) => {
-					const runId = await ensureDraft();
-					await updateDraft({ runId, lastFrameImageId: id });
+				onSelectLastFrame={(id) => {
+					if (!activeRunId) return;
+					autosave.save(
+						{
+							lastFrameImageId: id,
+							firstFrameImageId:
+								id && run?.firstFrameImageId === id
+									? null
+									: (run?.firstFrameImageId ?? null),
+							extraReferenceImageIds:
+								id && extraIds.includes(id)
+									? extraIds.filter((item) => item !== id)
+									: extraIds,
+						},
+						"immediate",
+					);
 				}}
-				onToggleExtraReference={async (id) => {
-					const runId = await ensureDraft();
-					const next = extraIds.includes(id)
-						? extraIds.filter((item) => item !== id)
-						: [...extraIds, id];
-					await updateDraft({ runId, extraReferenceImageIds: next });
+				onToggleExtraReference={(id) => {
+					if (!activeRunId) return;
+					const adding = !extraIds.includes(id);
+					const next = adding
+						? [...extraIds, id]
+						: extraIds.filter((item) => item !== id);
+					autosave.save(
+						{
+							extraReferenceImageIds: next,
+							firstFrameImageId:
+								adding && run?.firstFrameImageId === id
+									? null
+									: (run?.firstFrameImageId ?? null),
+							lastFrameImageId:
+								adding && run?.lastFrameImageId === id
+									? null
+									: (run?.lastFrameImageId ?? null),
+						},
+						"immediate",
+					);
 				}}
 				onRemoveImage={async (id) => {
 					if (!activeRunId) return;

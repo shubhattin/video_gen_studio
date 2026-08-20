@@ -219,7 +219,7 @@ export const updateDraft = mutation({
 			}
 		}
 
-		await ctx.db.patch(args.runId, {
+		const patch = {
 			shlokaText,
 			customInstructions:
 				args.customInstructions !== undefined
@@ -250,7 +250,22 @@ export const updateDraft = mutation({
 			extraReferenceImageIds:
 				args.extraReferenceImageIds ?? run.extraReferenceImageIds,
 			updatedAt: Date.now(),
-		});
+		};
+		// Enforce role exclusivity: an image may only hold one of
+		// first-frame, last-frame, or style-reference.
+		const first = patch.firstFrameImageId;
+		const last = patch.lastFrameImageId;
+		const extras = patch.extraReferenceImageIds ?? [];
+		if (first && last === first) patch.lastFrameImageId = undefined;
+		if (first && extras.includes(first)) {
+			patch.extraReferenceImageIds = extras.filter((id) => id !== first);
+		}
+		if (last && extras.includes(last)) {
+			patch.extraReferenceImageIds = (patch.extraReferenceImageIds ?? []).filter(
+				(id) => id !== last,
+			);
+		}
+		await ctx.db.patch(args.runId, patch);
 
 		// Generate a title once real content (shloka / prompt) first arrives and
 		// the run still has none. The action no-ops when a title already exists.
