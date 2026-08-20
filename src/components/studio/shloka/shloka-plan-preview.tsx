@@ -29,6 +29,7 @@ import {
 	videoScenesToMarkdown,
 	type EditableVideoScene,
 } from "#/lib/video-plan-markdown";
+import { cn } from "#/lib/utils";
 
 type VideoScene = EditableVideoScene;
 
@@ -69,6 +70,7 @@ function PlanEditor({
 	onSave,
 	editMode,
 	onEditModeChange,
+	editorClassName,
 }: {
 	title: string;
 	description: string;
@@ -80,6 +82,7 @@ function PlanEditor({
 	onSave: (next: string) => Promise<string | void> | void;
 	editMode: "view" | "edit";
 	onEditModeChange: (mode: "view" | "edit") => void;
+	editorClassName?: string;
 }) {
 	const [draft, setDraft] = useState(value);
 	const [error, setError] = useState<string | null>(null);
@@ -124,7 +127,10 @@ function PlanEditor({
 							setError(null);
 							setWarning(null);
 						}}
-						className="min-h-96 max-h-[70vh] resize-y"
+						className={cn(
+							"min-h-96 max-h-[70vh] resize-y",
+							editorClassName,
+						)}
 						disabled={disabled || saving}
 						aria-label={ariaLabel}
 					/>
@@ -352,6 +358,7 @@ export function ShlokaPlanPreview({
 							disabled={disabled}
 							saving={savingImage}
 							ariaLabel="Edit reference image prompt"
+							editorClassName="min-h-40"
 							editMode={editMode}
 							onEditModeChange={setEditMode}
 							onSave={async (next) => {

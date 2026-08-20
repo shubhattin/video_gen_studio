@@ -362,14 +362,14 @@ function ShlokaStudioPage() {
 		autosave.save({ customInstructions: value }, "debounced");
 	};
 
-	const onPlannerSystemPromptChange = (value: string) => {
+	const onSavePlannerSystemPrompt = (value: string) => {
 		setPlannerSystemPrompt(value);
 		autosave.save(
 			{
 				plannerSystemPrompt:
 					normalizePlannerSystemPromptForStorage(value) ?? null,
 			},
-			"debounced",
+			"immediate",
 		);
 	};
 
@@ -576,7 +576,7 @@ function ShlokaStudioPage() {
 									plannerSystemPrompt={plannerSystemPrompt}
 									onShlokaChange={onShlokaChange}
 									onInstructionsChange={onInstructionsChange}
-									onPlannerSystemPromptChange={onPlannerSystemPromptChange}
+									onSavePlannerSystemPrompt={onSavePlannerSystemPrompt}
 									onPersist={() => void autosave.flush()}
 									disabled={planningBusy}
 								/>

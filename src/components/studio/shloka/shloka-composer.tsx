@@ -31,8 +31,9 @@ type ShlokaComposerProps = {
 	plannerSystemPrompt: string;
 	onShlokaChange: (value: string) => void;
 	onInstructionsChange: (value: string) => void;
-	onPlannerSystemPromptChange: (value: string) => void;
-	/** Persist shloka / instructions / system prompt (typically on blur). */
+	/** Persist the planner instructions editor when the user presses Save. */
+	onSavePlannerSystemPrompt: (value: string) => void;
+	/** Persist shloka / instructions (typically on blur). */
 	onPersist?: () => void;
 	disabled?: boolean;
 };
@@ -43,18 +44,20 @@ export function ShlokaComposer({
 	plannerSystemPrompt,
 	onShlokaChange,
 	onInstructionsChange,
-	onPlannerSystemPromptChange,
+	onSavePlannerSystemPrompt,
 	onPersist,
 	disabled,
 }: ShlokaComposerProps) {
 	const [lipiEnabled, setLipiEnabled] = useState(true);
 	const [promptTab, setPromptTab] = useState<"view" | "edit">("view");
+	const [plannerDraft, setPlannerDraft] = useState(plannerSystemPrompt);
 	const typingContextRef = useRef(
 		createTypingContext("Devanagari", { useNativeNumerals: true }),
 	);
 	const isCustomSystemPrompt = Boolean(
 		normalizePlannerSystemPromptForStorage(plannerSystemPrompt),
 	);
+	const plannerDirty = plannerDraft !== plannerSystemPrompt;
 
 	useEffect(() => {
 		typingContextRef.current = createTypingContext("Devanagari", {
@@ -79,6 +82,7 @@ export function ShlokaComposer({
 						onOpenChange={(open) => {
 							if (open) {
 								setPromptTab("view");
+								setPlannerDraft(plannerSystemPrompt);
 							}
 						}}
 					>
@@ -130,31 +134,43 @@ export function ShlokaComposer({
 								</TabsContent>
 								<TabsContent value="edit" className="mt-0 space-y-3">
 									<MarkdownTextarea
-										value={plannerSystemPrompt}
-										onChange={(event) =>
-											onPlannerSystemPromptChange(event.target.value)
-										}
-										onBlur={() => onPersist?.()}
+										value={plannerDraft}
+										onChange={(event) => setPlannerDraft(event.target.value)}
 										className="min-h-96 max-h-[70vh] resize-y"
 										disabled={disabled}
 										aria-label="Planner instructions"
 									/>
-									<div className="flex justify-end">
+									<div className="flex flex-wrap justify-end gap-2">
 										<Button
 											type="button"
 											variant="ghost"
 											size="sm"
-											disabled={
-												disabled ||
-												plannerSystemPrompt === DEFAULT_PLANNER_SYSTEM_PROMPT
-											}
+											disabled={disabled}
 											onClick={() =>
-												onPlannerSystemPromptChange(
-													DEFAULT_PLANNER_SYSTEM_PROMPT,
-												)
+												setPlannerDraft(DEFAULT_PLANNER_SYSTEM_PROMPT)
 											}
 										>
 											Reset to default
+										</Button>
+										<Button
+											type="button"
+											variant="outline"
+											size="sm"
+											disabled={disabled || !plannerDirty}
+											onClick={() => setPlannerDraft(plannerSystemPrompt)}
+										>
+											Discard
+										</Button>
+										<Button
+											type="button"
+											size="sm"
+											disabled={disabled || !plannerDirty}
+											onClick={() => {
+												onSavePlannerSystemPrompt(plannerDraft);
+												setPromptTab("view");
+											}}
+										>
+											Save
 										</Button>
 									</div>
 								</TabsContent>
