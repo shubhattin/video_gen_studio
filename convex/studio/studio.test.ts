@@ -5,16 +5,15 @@ import schema from "../schema";
 import { modules } from "../test.setup";
 import {
 	compositionPlannerOutputSchema,
+	defaultVideoParams,
 	validateVideoParams,
 } from "../lib/schemas";
 
 vi.mock("../lib/r2", () => ({
 	buildStudioObjectKey: ({
-		runId,
 		kind,
 		mimeType,
 	}: {
-		runId: string;
 		kind: string;
 		mimeType: string;
 	}) => {
@@ -23,7 +22,7 @@ vi.mock("../lib/r2", () => ({
 			: mimeType.includes("jpeg")
 				? "jpg"
 				: "bin";
-		return `studio/runs/${runId}/${kind}/test.${ext}`;
+		return `studio/gallery/${kind}/test.${ext}`;
 	},
 	createPresignedPutUrl: async ({ objectKey }: { objectKey: string }) =>
 		`https://r2.example/put/${objectKey}`,
@@ -72,6 +71,8 @@ describe("studio mutations", () => {
 		expect(run?.status).toBe("draft");
 		expect(run?.imageSize).toBe("1024x1536");
 		expect(run?.videoParams?.aspectRatio).toBe("9:16");
+		expect(run?.attachedImageIds).toEqual([]);
+		expect(run?.attachedVideoIds).toEqual([]);
 		expect(run?.referenceImages).toEqual([]);
 		expect(run?.videos).toEqual([]);
 	});
@@ -128,21 +129,17 @@ describe("studio mutations", () => {
 			prompt: "Temple courtyard at dusk",
 		});
 
-		const objectKey = `studio/runs/${runId}/refs/test.png`;
-		await t.mutation(internal.studio.internal.appendReferenceImage, {
+		const objectKey = "studio/gallery/images/test.png";
+		const imageId = await t.mutation(internal.studio.internal.insertGalleryImage, {
 			runId,
-			image: {
-				id: "img_test",
-				objectKey,
-				meta: {
-					mimeType: "image/png",
-					width: 1024,
-					height: 1536,
-					bytes: 4,
-				},
-				source: "uploaded",
-				createdAt: Date.now(),
+			objectKey,
+			meta: {
+				mimeType: "image/png",
+				width: 1024,
+				height: 1536,
+				bytes: 4,
 			},
+			source: "uploaded",
 		});
 
 		const run = await t.query(api.studio.queries.getRun, { runId });
@@ -152,21 +149,115 @@ describe("studio mutations", () => {
 		expect(run?.referenceImages?.[0]?.source).toBe("uploaded");
 		expect(run?.referenceImages?.[0]?.meta.mimeType).toBe("image/png");
 		expect(run?.referenceImages?.[0]?.objectKey).toBe(objectKey);
-		expect(run?.referenceImages?.[0]?.id).toBe("img_test");
+		expect(run?.referenceImages?.[0]?.id).toBe(imageId);
 
 		const belongs = await t.query(
 			internal.studio.queries.objectKeyBelongsToRun,
 			{ runId, objectKey },
 		);
 		expect(belongs).toBe(true);
+		const inGallery = await t.query(internal.studio.queries.objectKeyInGallery, {
+			objectKey,
+		});
+		expect(inGallery).toBe(true);
 		const foreign = await t.query(
 			internal.studio.queries.objectKeyBelongsToRun,
 			{
 				runId,
-				objectKey: "studio/runs/other/refs/x.png",
+				objectKey: "studio/gallery/images/other.png",
 			},
 		);
 		expect(foreign).toBe(false);
+	});
+
+	it("keeps gallery media when a run is deleted or an image is removed from the run", async () => {
+		const t = adminConvex();
+		const runId = await t.mutation(api.studio.mutations.createShlokaDraft, {
+			shlokaText: "Keep media",
+		});
+		const objectKey = "studio/gallery/images/keep.png";
+		const imageId = await t.mutation(internal.studio.internal.insertGalleryImage, {
+			runId,
+			objectKey,
+			meta: { mimeType: "image/png", bytes: 4 },
+			source: "uploaded",
+		});
+
+		await t.mutation(api.studio.mutations.removeReferenceImage, {
+			runId,
+			imageId,
+		});
+		const afterUnlink = await t.query(api.studio.queries.getRun, { runId });
+		expect(afterUnlink?.referenceImages).toEqual([]);
+		const stillThere = await t.query(internal.studio.queries.objectKeyInGallery, {
+			objectKey,
+		});
+		expect(stillThere).toBe(true);
+
+		await t.mutation(api.studio.mutations.attachGalleryImageToRun, {
+			runId,
+			imageId,
+		});
+		const reattached = await t.query(api.studio.queries.getRun, { runId });
+		expect(reattached?.referenceImages).toHaveLength(1);
+
+		await t.mutation(api.studio.mutations.deleteRun, { runId });
+		expect(await t.query(api.studio.queries.getRun, { runId })).toBeNull();
+		expect(
+			await t.query(internal.studio.queries.objectKeyInGallery, { objectKey }),
+		).toBe(true);
+	});
+
+	it("keeps previous shloka plans when planning again", async () => {
+		const t = adminConvex();
+		const runId = await t.mutation(api.studio.mutations.createShlokaDraft, {
+			shlokaText: "Multi plan shloka",
+		});
+		const scene = {
+			sceneNumber: 1,
+			intent: "Opening",
+			subjects: "Temple path",
+			locationTime: "Twilight",
+			composition: "Centered portrait",
+			lensCamera: "Slow push-in",
+			lighting: "Soft gold",
+			paletteAesthetics: "Warm marigold and sandalwood",
+			actionMotion: "Gentle drift",
+			soundDirection: "Quiet ambience",
+			transition: "Fade",
+			negativeConstraints: "No text overlays",
+		};
+		const firstPlanId = await t.mutation(internal.studio.internal.commitPlan, {
+			runId,
+			plannerModel: "openai/gpt-5.6-terra",
+			plannerReasoning: "medium",
+			imagePrompt: "Portrait warm temple courtyard with soft diya glow",
+			videoScenes: [scene],
+			planningKey: "plan-1",
+		});
+		const secondPlanId = await t.mutation(internal.studio.internal.commitPlan, {
+			runId,
+			plannerModel: "openai/gpt-5.6-terra",
+			plannerReasoning: "medium",
+			imagePrompt: "A dusk temple courtyard with cooler blue light",
+			videoScenes: [{ ...scene, intent: "Dusk" }],
+			planningKey: "plan-2",
+		});
+		const plans = await t.query(api.studio.queries.listShlokaPlansForRun, {
+			runId,
+		});
+		expect(plans).toHaveLength(2);
+		const run = await t.query(api.studio.queries.getRun, { runId });
+		expect(run?.activePlanId).toBe(secondPlanId);
+		expect(run?.imagePrompt).toContain("dusk");
+
+		await t.mutation(api.studio.mutations.selectShlokaPlan, {
+			runId,
+			planId: firstPlanId,
+		});
+		const selected = await t.query(api.studio.queries.getRun, { runId });
+		expect(selected?.activePlanId).toBe(firstPlanId);
+		expect(selected?.imagePrompt).toContain("Portrait");
 	});
 
 	it("persists a bounded composition plan as ordered clip rows", async () => {
@@ -405,21 +496,17 @@ describe("studio authorization", () => {
 		const runId = await admin.mutation(api.studio.mutations.createShlokaDraft, {
 			shlokaText: "Action auth shloka",
 		});
-		const objectKey = `studio/runs/${runId}/refs/test.png`;
-		await admin.mutation(internal.studio.internal.appendReferenceImage, {
+		const objectKey = "studio/gallery/images/auth.png";
+		await admin.mutation(internal.studio.internal.insertGalleryImage, {
 			runId,
-			image: {
-				id: "img_auth",
-				objectKey,
-				meta: {
-					mimeType: "image/png",
-					width: 1024,
-					height: 1536,
-					bytes: 4,
-				},
-				source: "uploaded",
-				createdAt: Date.now(),
+			objectKey,
+			meta: {
+				mimeType: "image/png",
+				width: 1024,
+				height: 1536,
+				bytes: 4,
 			},
+			source: "uploaded",
 		});
 
 		await expect(
@@ -455,21 +542,17 @@ describe("studio authorization", () => {
 		const runId = await admin.mutation(api.studio.mutations.createShlokaDraft, {
 			shlokaText: "Internal still works",
 		});
-		const objectKey = `studio/runs/${runId}/refs/test.png`;
-		await backend.mutation(internal.studio.internal.appendReferenceImage, {
+		const objectKey = "studio/gallery/images/internal.png";
+		await backend.mutation(internal.studio.internal.insertGalleryImage, {
 			runId,
-			image: {
-				id: "img_internal",
-				objectKey,
-				meta: {
-					mimeType: "image/png",
-					width: 64,
-					height: 64,
-					bytes: 4,
-				},
-				source: "uploaded",
-				createdAt: Date.now(),
+			objectKey,
+			meta: {
+				mimeType: "image/png",
+				width: 64,
+				height: 64,
+				bytes: 4,
 			},
+			source: "uploaded",
 		});
 		const belongs = await backend.query(
 			internal.studio.queries.objectKeyBelongsToRun,
@@ -485,24 +568,20 @@ describe("studio authorization", () => {
 		const runId = await admin.mutation(api.studio.mutations.createShlokaDraft, {
 			shlokaText: "Media proxy auth",
 		});
-		const objectKey = `studio/runs/${runId}/refs/test.png`;
-		await admin.mutation(internal.studio.internal.appendReferenceImage, {
+		const objectKey = "studio/gallery/images/media.png";
+		await admin.mutation(internal.studio.internal.insertGalleryImage, {
 			runId,
-			image: {
-				id: "img_media",
-				objectKey,
-				meta: {
-					mimeType: "image/png",
-					width: 64,
-					height: 64,
-					bytes: 4,
-				},
-				source: "uploaded",
-				createdAt: Date.now(),
+			objectKey,
+			meta: {
+				mimeType: "image/png",
+				width: 64,
+				height: 64,
+				bytes: 4,
 			},
+			source: "uploaded",
 		});
 
-		const mediaPath = `/studio/media?runId=${runId}&objectKey=${encodeURIComponent(objectKey)}`;
+		const mediaPath = `/studio/media?objectKey=${encodeURIComponent(objectKey)}`;
 		const missing = await backend.fetch(mediaPath);
 		expect(missing.status).toBe(401);
 		expect(await missing.text()).toBe("Not authenticated.");
@@ -533,5 +612,102 @@ describe("studio authorization", () => {
 		} finally {
 			globalThis.fetch = originalFetch;
 		}
+	});
+});
+
+describe("legacy studio media migration", () => {
+	it("lifts embedded images and videos into the gallery and remaps img_* ids", async () => {
+		const t = adminConvex();
+		const now = Date.now();
+		const runId = await t.run(async (ctx) => {
+			return await ctx.db.insert("generationRuns", {
+				provenance: "shloka",
+				status: "completed",
+				shlokaText: "legacy shloka",
+				createdAt: now,
+				updatedAt: now,
+				firstFrameImageId: "img_legacy_first",
+				extraReferenceImageIds: ["img_legacy_style"],
+				referenceImages: [
+					{
+						id: "img_legacy_first",
+						objectKey: "studio/runs/old/images/first.png",
+						meta: { mimeType: "image/png" },
+						source: "generated",
+						createdAt: now,
+					},
+					{
+						id: "img_legacy_style",
+						objectKey: "studio/runs/old/images/style.png",
+						meta: { mimeType: "image/png" },
+						source: "uploaded",
+						createdAt: now,
+					},
+				],
+				videos: [
+					{
+						id: "vid_legacy_1",
+						objectKey: "studio/runs/old/videos/clip.mp4",
+						meta: { mimeType: "video/mp4" },
+						openRouterJobId: "or-job",
+						videoParams: defaultVideoParams("bytedance/seedance-2.5"),
+						createdAt: now,
+					},
+				],
+			} as never);
+		});
+
+		const migrated = await t.mutation(
+			api.studio.mutations.migrateLegacyStudioMedia,
+			{},
+		);
+		expect(migrated.runsMigrated).toBe(1);
+		expect(migrated.imagesCreated).toBe(2);
+		expect(migrated.videosCreated).toBe(1);
+
+		const run = await t.query(api.studio.queries.getRun, { runId });
+		expect(run?.referenceImages).toHaveLength(2);
+		expect(run?.videos).toHaveLength(1);
+		expect(run?.firstFrameImageId).toBe(run?.referenceImages?.[0]?.id);
+		expect(run?.extraReferenceImageIds).toEqual([run?.referenceImages?.[1]?.id]);
+		expect(run?.referenceImages?.[0]?.objectKey).toBe(
+			"studio/runs/old/images/first.png",
+		);
+		expect(
+			await t.query(internal.studio.queries.objectKeyInGallery, {
+				objectKey: "studio/runs/old/videos/clip.mp4",
+			}),
+		).toBe(true);
+
+		const again = await t.mutation(
+			api.studio.mutations.migrateLegacyStudioMedia,
+			{},
+		);
+		expect(again.imagesCreated).toBe(0);
+		expect(again.videosCreated).toBe(0);
+		const after = await t.query(api.studio.queries.getRun, { runId });
+		expect(after?.referenceImages).toHaveLength(2);
+		expect(after?.firstFrameImageId).toBe(run?.firstFrameImageId);
+	});
+
+	it("drops leftover img_* role ids that have no matching media", async () => {
+		const t = adminConvex();
+		const now = Date.now();
+		const runId = await t.run(async (ctx) => {
+			return await ctx.db.insert("generationRuns", {
+				provenance: "model-studio",
+				status: "draft",
+				createdAt: now,
+				updatedAt: now,
+				firstFrameImageId: "img_orphan",
+				lastFrameImageId: "img_also_orphan",
+			} as never);
+		});
+
+		await t.mutation(api.studio.mutations.migrateLegacyStudioMedia, {});
+		const run = await t.query(api.studio.queries.getRun, { runId });
+		expect(run?.firstFrameImageId).toBeUndefined();
+		expect(run?.lastFrameImageId).toBeUndefined();
+		expect(run?.referenceImages).toEqual([]);
 	});
 });

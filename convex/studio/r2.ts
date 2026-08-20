@@ -2,6 +2,7 @@
 
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
+import type { Id } from "../_generated/dataModel";
 import { action, internalAction } from "../_generated/server";
 import { requireAdmin } from "../lib/auth";
 import {
@@ -22,10 +23,6 @@ const ALLOWED_REFERENCE_UPLOAD_MIME_TYPES = new Set([
 
 const MAX_REFERENCE_UPLOAD_BYTES = 20 * 1024 * 1024;
 const MAX_TERMINAL_FRAME_BYTES = 10 * 1024 * 1024;
-
-function newReferenceImageId() {
-	return `img_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-}
 
 function normalizeMimeType(mimeType: string) {
 	return mimeType.toLowerCase();
@@ -72,8 +69,7 @@ export const prepareReferenceImageUpload = action({
 			throw new Error("Image is too large. Max size is 20MB.");
 		}
 		const objectKey = buildStudioObjectKey({
-			runId: args.runId,
-			kind: "refs",
+			kind: "images",
 			mimeType,
 		});
 		const uploadUrl = await createPresignedPutUrl({
@@ -95,9 +91,9 @@ export const finalizeReferenceImageUpload = action({
 		setAsFirstFrame: v.optional(v.boolean()),
 	},
 	returns: v.object({
-		imageId: v.string(),
+		imageId: v.id("galleryImages"),
 	}),
-	handler: async (ctx, args) => {
+	handler: async (ctx, args): Promise<{ imageId: Id<"galleryImages"> }> => {
 		await requireAdmin(ctx);
 		const run = await ctx.runQuery(internal.studio.queries.getRunDoc, {
 			runId: args.runId,
@@ -105,8 +101,8 @@ export const finalizeReferenceImageUpload = action({
 		if (!run) {
 			throw new Error("Run not found.");
 		}
-		if (!args.objectKey.startsWith(`studio/runs/${args.runId}/refs/`)) {
-			throw new Error("Uploaded object key is invalid for this run.");
+		if (!args.objectKey.startsWith("studio/gallery/images/")) {
+			throw new Error("Uploaded object key is invalid for the gallery.");
 		}
 		const mimeType = normalizeMimeType(args.mimeType);
 		if (!ALLOWED_REFERENCE_UPLOAD_MIME_TYPES.has(mimeType)) {
@@ -139,11 +135,10 @@ export const finalizeReferenceImageUpload = action({
 			throw new Error("Unsupported image type. Use PNG, JPEG, WebP, or GIF.");
 		}
 
-		const imageId = newReferenceImageId();
-		await ctx.runMutation(internal.studio.internal.appendReferenceImage, {
-			runId: args.runId,
-			image: {
-				id: imageId,
+		const imageId = await ctx.runMutation(
+			internal.studio.internal.insertGalleryImage,
+			{
+				runId: args.runId,
 				objectKey: args.objectKey,
 				meta: {
 					mimeType,
@@ -152,10 +147,9 @@ export const finalizeReferenceImageUpload = action({
 					bytes: contentLength ?? args.bytes ?? undefined,
 				},
 				source: "uploaded",
-				createdAt: Date.now(),
+				setAsFirstFrame: args.setAsFirstFrame === true,
 			},
-			setAsFirstFrame: args.setAsFirstFrame === true,
-		});
+		);
 		return { imageId };
 	},
 });
@@ -194,7 +188,6 @@ export const prepareTerminalFrameUpload = action({
 			throw new Error("Unsupported continuity-frame type.");
 		}
 		const objectKey = buildStudioObjectKey({
-			runId: args.runId,
 			kind: "frames",
 			mimeType,
 		});
@@ -234,9 +227,9 @@ export const finalizeTerminalFrameUpload = action({
 			await deleteR2Objects([args.objectKey]);
 			throw new Error("Composition clip was not found.");
 		}
-		if (!args.objectKey.startsWith(`studio/runs/${args.runId}/frames/`)) {
+		if (!args.objectKey.startsWith("studio/gallery/frames/")) {
 			await deleteR2Objects([args.objectKey]);
-			throw new Error("Uploaded object key is invalid for this run.");
+			throw new Error("Uploaded object key is invalid for the gallery.");
 		}
 		let head: Awaited<ReturnType<typeof headObject>>;
 		try {
@@ -251,12 +244,24 @@ export const finalizeTerminalFrameUpload = action({
 			await deleteR2Objects([args.objectKey]);
 			throw new Error("Continuity frame is too large.");
 		}
+		const terminalFrameImageId = await ctx.runMutation(
+			internal.studio.internal.insertGalleryImage,
+			{
+				objectKey: args.objectKey,
+				meta: {
+					mimeType: head.contentType ?? "image/jpeg",
+					bytes: head.contentLength ?? undefined,
+				},
+				source: "terminal_frame",
+				attachToRun: false,
+			},
+		);
 		await ctx.runMutation(
 			internal.studio.internal.attachCompositionTerminalFrame,
 			{
 				jobId: job._id,
 				clipId: args.clipId,
-				terminalFrameObjectKey: args.objectKey,
+				terminalFrameImageId,
 			},
 		);
 		return null;
@@ -265,7 +270,7 @@ export const finalizeTerminalFrameUpload = action({
 
 export const getReadUrls = action({
 	args: {
-		runId: v.id("generationRuns"),
+		runId: v.optional(v.id("generationRuns")),
 		objectKeys: v.array(v.string()),
 	},
 	returns: v.record(v.string(), v.union(v.string(), v.null())),
@@ -276,8 +281,8 @@ export const getReadUrls = action({
 		await Promise.all(
 			uniqueKeys.map(async (objectKey) => {
 				const allowed = await ctx.runQuery(
-					internal.studio.queries.objectKeyBelongsToRun,
-					{ runId: args.runId, objectKey },
+					internal.studio.queries.objectKeyInGallery,
+					{ objectKey },
 				);
 				if (!allowed) {
 					result[objectKey] = null;
@@ -305,14 +310,13 @@ export const getDownloadUrl = action({
 	handler: async (ctx, args) => {
 		await requireAdmin(ctx);
 		const allowed = await ctx.runQuery(
-			internal.studio.queries.objectKeyBelongsToRun,
+			internal.studio.queries.objectKeyInGallery,
 			{
-				runId: args.runId,
 				objectKey: args.objectKey,
 			},
 		);
 		if (!allowed) {
-			throw new Error("Object was not found for this run.");
+			throw new Error("Object was not found in the gallery.");
 		}
 		return await createPresignedGetUrl({
 			objectKey: args.objectKey,

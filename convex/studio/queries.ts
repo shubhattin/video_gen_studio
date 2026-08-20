@@ -11,6 +11,15 @@ import {
 	MODEL_CAPABILITY_PROFILES,
 	VIDEO_MODEL_IDS,
 } from "../lib/modelCatalog";
+import {
+	findGalleryByObjectKey,
+	galleryVideoToResult,
+	listShlokaPlansForRunCtx,
+	loadImagesByIds,
+	loadVideosByIds,
+	asGalleryImageId,
+	asGalleryVideoId,
+} from "./media";
 
 type DbCtx = QueryCtx | MutationCtx;
 
@@ -53,9 +62,50 @@ async function compositionWithClips(
 		.withIndex("by_jobId_and_clipIndex", (q) => q.eq("jobId", job._id))
 		.order("asc")
 		.take(6);
+	const hydrated = await Promise.all(
+		clips.map(async (clip) => {
+			const videoId = asGalleryVideoId(ctx, clip.galleryVideoId);
+			const frameId = asGalleryImageId(ctx, clip.terminalFrameImageId);
+			const videoDoc = videoId ? await ctx.db.get(videoId) : null;
+			const frameDoc = frameId ? await ctx.db.get(frameId) : null;
+			return {
+				...clip,
+				video: videoDoc ? galleryVideoToResult(videoDoc) : undefined,
+				terminalFrameObjectKey: frameDoc?.objectKey,
+			};
+		}),
+	);
 	return {
 		...job,
-		clips,
+		clips: hydrated,
+	};
+}
+
+async function hydrateRun(ctx: QueryCtx, run: Doc<"generationRuns">) {
+	const attachedImageIds = (run.attachedImageIds ?? []).flatMap((id) => {
+		const ok = asGalleryImageId(ctx, id);
+		return ok ? [ok] : [];
+	});
+	const attachedVideoIds = (run.attachedVideoIds ?? []).flatMap((id) => {
+		const ok = asGalleryVideoId(ctx, id);
+		return ok ? [ok] : [];
+	});
+	const [referenceImages, videos] = await Promise.all([
+		loadImagesByIds(ctx, attachedImageIds),
+		loadVideosByIds(ctx, attachedVideoIds),
+	]);
+	return {
+		...run,
+		attachedImageIds,
+		attachedVideoIds,
+		firstFrameImageId: asGalleryImageId(ctx, run.firstFrameImageId),
+		lastFrameImageId: asGalleryImageId(ctx, run.lastFrameImageId),
+		extraReferenceImageIds: (run.extraReferenceImageIds ?? []).flatMap((id) => {
+			const ok = asGalleryImageId(ctx, id);
+			return ok ? [ok] : [];
+		}),
+		referenceImages,
+		videos,
 	};
 }
 
@@ -66,7 +116,11 @@ export const getRun = query({
 	returns: v.union(v.null(), v.any()),
 	handler: async (ctx, args) => {
 		await requireAdmin(ctx);
-		return await ctx.db.get(args.runId);
+		const run = await ctx.db.get(args.runId);
+		if (!run) {
+			return null;
+		}
+		return await hydrateRun(ctx, run);
 	},
 });
 
@@ -122,6 +176,32 @@ export const listCompositionJobsForRun = query({
 	},
 });
 
+export const listShlokaPlansForRun = query({
+	args: {
+		runId: v.id("generationRuns"),
+	},
+	returns: v.array(v.any()),
+	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
+		const plans = await listShlokaPlansForRunCtx(ctx, args.runId);
+		return plans.map((plan) => ({
+			_id: plan._id,
+			attemptNumber: plan.attemptNumber,
+			status: plan.status,
+			plannerSystemPrompt: plan.plannerSystemPrompt,
+			plannerModel: plan.plannerModel,
+			plannerReasoning: plan.plannerReasoning,
+			imagePrompt: plan.imagePrompt,
+			videoScenes: plan.videoScenes,
+			planningKey: plan.planningKey,
+			warnings: plan.warnings,
+			lastError: plan.lastError,
+			createdAt: plan.createdAt,
+			updatedAt: plan.updatedAt,
+		}));
+	},
+});
+
 export const listRecentRuns = query({
 	args: {
 		limit: v.optional(v.number()),
@@ -130,11 +210,56 @@ export const listRecentRuns = query({
 	handler: async (ctx, args) => {
 		await requireAdmin(ctx);
 		const limit = Math.min(args.limit ?? 20, 50);
-		return await ctx.db
+		const runs = await ctx.db
 			.query("generationRuns")
 			.withIndex("by_createdAt")
 			.order("desc")
 			.take(limit);
+		return runs.map((run) => ({
+			...run,
+			videos: (run.attachedVideoIds ?? []).map((id) => ({ id })),
+		}));
+	},
+});
+
+export const listGalleryImages = query({
+	args: {
+		limit: v.optional(v.number()),
+	},
+	returns: v.array(v.any()),
+	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
+		const limit = Math.min(args.limit ?? 80, 200);
+		const docs = await ctx.db
+			.query("galleryImages")
+			.withIndex("by_createdAt")
+			.order("desc")
+			.take(limit);
+		return docs.map((doc) => ({
+			id: doc._id,
+			objectKey: doc.objectKey,
+			meta: doc.meta,
+			source: doc.source,
+			revisedImagePrompt: doc.revisedImagePrompt,
+			createdAt: doc.createdAt,
+		}));
+	},
+});
+
+export const listGalleryVideos = query({
+	args: {
+		limit: v.optional(v.number()),
+	},
+	returns: v.array(v.any()),
+	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
+		const limit = Math.min(args.limit ?? 80, 200);
+		const docs = await ctx.db
+			.query("galleryVideos")
+			.withIndex("by_createdAt")
+			.order("desc")
+			.take(limit);
+		return docs.map((doc) => galleryVideoToResult(doc));
 	},
 });
 
@@ -176,7 +301,11 @@ export const getRunDoc = internalQuery({
 	},
 	returns: v.union(v.null(), v.any()),
 	handler: async (ctx, args) => {
-		return await ctx.db.get(args.runId);
+		const run = await ctx.db.get(args.runId);
+		if (!run) {
+			return null;
+		}
+		return await hydrateRun(ctx, run);
 	},
 });
 
@@ -200,6 +329,18 @@ export const getCompositionClip = internalQuery({
 	},
 });
 
+export const objectKeyInGallery = internalQuery({
+	args: {
+		objectKey: v.string(),
+	},
+	returns: v.boolean(),
+	handler: async (ctx, args) => {
+		const found = await findGalleryByObjectKey(ctx, args.objectKey);
+		return found !== null;
+	},
+});
+
+/** @deprecated Use objectKeyInGallery. Kept so existing callers/tests compile. */
 export const objectKeyBelongsToRun = internalQuery({
 	args: {
 		runId: v.id("generationRuns"),
@@ -211,30 +352,6 @@ export const objectKeyBelongsToRun = internalQuery({
 		if (!run) {
 			return false;
 		}
-		const inRun =
-			(run.referenceImages ?? []).some(
-				(image) => image.objectKey === args.objectKey,
-			) ||
-			(run.videos ?? []).some((video) => video.objectKey === args.objectKey);
-		if (inRun) {
-			return true;
-		}
-		const jobs = await listCompositionJobsForRunCtx(ctx, args.runId);
-		for (const job of jobs) {
-			const compositionClips = await ctx.db
-				.query("compositionClips")
-				.withIndex("by_jobId_and_clipIndex", (q) => q.eq("jobId", job._id))
-				.take(6);
-			if (
-				compositionClips.some(
-					(clip) =>
-						clip.video?.objectKey === args.objectKey ||
-						clip.terminalFrameObjectKey === args.objectKey,
-				)
-			) {
-				return true;
-			}
-		}
-		return false;
+		return (await findGalleryByObjectKey(ctx, args.objectKey)) !== null;
 	},
 });

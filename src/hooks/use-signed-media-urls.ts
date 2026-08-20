@@ -30,14 +30,17 @@ export function useSignedMediaUrls(
 	);
 
 	useEffect(() => {
-		if (!runId || keys.length === 0) {
+		if (keys.length === 0) {
 			setUrlsByKey({});
 			return;
 		}
 		let cancelled = false;
 		void (async () => {
 			try {
-				const next = await getReadUrls({ runId, objectKeys: keys });
+				const next = await getReadUrls({
+					runId: runId ?? undefined,
+					objectKeys: keys,
+				});
 				if (!cancelled) {
 					setUrlsByKey(next);
 				}

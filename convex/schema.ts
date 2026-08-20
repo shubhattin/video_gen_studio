@@ -51,21 +51,24 @@ export const videoParamsValidator = v.object({
 	prompt: v.optional(v.string()),
 });
 
-export const referenceImageSourceValidator = v.union(
+export const galleryImageSourceValidator = v.union(
 	v.literal("generated"),
 	v.literal("uploaded"),
+	v.literal("terminal_frame"),
 );
 
-export const referenceImageValidator = v.object({
+const referenceImageValidator = v.object({
 	id: v.string(),
 	objectKey: v.string(),
 	meta: mediaMetaValidator,
-	source: v.optional(referenceImageSourceValidator),
+	source: v.optional(
+		v.union(v.literal("generated"), v.literal("uploaded"), v.literal("terminal_frame")),
+	),
 	revisedImagePrompt: v.optional(v.string()),
 	createdAt: v.number(),
 });
 
-export const generatedVideoValidator = v.object({
+const generatedVideoValidator = v.object({
 	id: v.string(),
 	objectKey: v.string(),
 	meta: mediaMetaValidator,
@@ -108,12 +111,16 @@ export const compositionClipPlanValidator = v.object({
 	transition: v.string(),
 });
 
+export const shlokaPlanStatusValidator = v.union(
+	v.literal("planning"),
+	v.literal("ready"),
+	v.literal("failed"),
+);
+
 export default defineSchema({
 	generationRuns: defineTable({
 		provenance: provenanceValidator,
 		status: runStatusValidator,
-		revisionNumber: v.number(),
-		parentRunId: v.optional(v.id("generationRuns")),
 		title: v.optional(v.string()),
 		shlokaText: v.optional(v.string()),
 		customInstructions: v.optional(v.string()),
@@ -131,17 +138,26 @@ export default defineSchema({
 		compositionMode: v.optional(compositionModeValidator),
 		compositionMultiplier: v.optional(v.number()),
 		compositionClipCount: v.optional(v.number()),
+		attachedImageIds: v.optional(v.array(v.id("galleryImages"))),
+		attachedVideoIds: v.optional(v.array(v.id("galleryVideos"))),
+		/** Gallery document id, or a leftover client `img_*` id until migration. */
+		firstFrameImageId: v.optional(v.union(v.id("galleryImages"), v.string())),
+		lastFrameImageId: v.optional(v.union(v.id("galleryImages"), v.string())),
+		extraReferenceImageIds: v.optional(
+			v.array(v.union(v.id("galleryImages"), v.string())),
+		),
+		/** @deprecated Embedded media; migrateLegacyStudioMedia lifts these into gallery tables. */
 		referenceImages: v.optional(v.array(referenceImageValidator)),
-		firstFrameImageId: v.optional(v.string()),
-		lastFrameImageId: v.optional(v.string()),
-		extraReferenceImageIds: v.optional(v.array(v.string())),
 		videos: v.optional(v.array(generatedVideoValidator)),
+		revisionNumber: v.optional(v.number()),
+		parentRunId: v.optional(v.id("generationRuns")),
 		warnings: v.optional(v.array(v.string())),
 		lastError: v.optional(v.string()),
 		planningKey: v.optional(v.string()),
 		planningCompletedAt: v.optional(v.number()),
 		imageCompletedAt: v.optional(v.number()),
 		videoCompletedAt: v.optional(v.number()),
+		activePlanId: v.optional(v.id("shlokaPlans")),
 		/** Selected multi-clip composition attempt for this run. */
 		activeCompositionJobId: v.optional(v.id("compositionJobs")),
 		createdAt: v.number(),
@@ -150,6 +166,49 @@ export default defineSchema({
 		.index("by_createdAt", ["createdAt"])
 		.index("by_status_createdAt", ["status", "createdAt"])
 		.index("by_model_status", ["selectedModelId", "status"]),
+
+	galleryImages: defineTable({
+		objectKey: v.string(),
+		meta: mediaMetaValidator,
+		source: galleryImageSourceValidator,
+		revisedImagePrompt: v.optional(v.string()),
+		createdAt: v.number(),
+	})
+		.index("by_createdAt", ["createdAt"])
+		.index("by_objectKey", ["objectKey"]),
+
+	galleryVideos: defineTable({
+		objectKey: v.string(),
+		meta: mediaMetaValidator,
+		openRouterJobId: v.string(),
+		openRouterGenerationId: v.optional(v.string()),
+		actualCostUsd: v.optional(v.number()),
+		videoParams: videoParamsValidator,
+		videoPrompt: v.optional(v.string()),
+		warnings: v.optional(v.array(v.string())),
+		sourceRunId: v.optional(v.id("generationRuns")),
+		createdAt: v.number(),
+	})
+		.index("by_createdAt", ["createdAt"])
+		.index("by_objectKey", ["objectKey"]),
+
+	shlokaPlans: defineTable({
+		runId: v.id("generationRuns"),
+		attemptNumber: v.number(),
+		status: shlokaPlanStatusValidator,
+		plannerSystemPrompt: v.optional(v.string()),
+		plannerModel: v.optional(v.string()),
+		plannerReasoning: v.optional(v.string()),
+		imagePrompt: v.string(),
+		videoScenes: v.array(videoSceneValidator),
+		planningKey: v.string(),
+		warnings: v.optional(v.array(v.string())),
+		lastError: v.optional(v.string()),
+		createdAt: v.number(),
+		updatedAt: v.number(),
+	})
+		.index("by_runId", ["runId"])
+		.index("by_runId_and_createdAt", ["runId", "createdAt"]),
 
 	catalogCache: defineTable({
 		key: v.string(),
@@ -189,7 +248,10 @@ export default defineSchema({
 		scenePrompt: v.string(),
 		continuityInstructions: v.string(),
 		transition: v.string(),
-		referenceImageId: v.optional(v.string()),
+		referenceImageId: v.optional(v.union(v.id("galleryImages"), v.string())),
+		terminalFrameImageId: v.optional(v.id("galleryImages")),
+		galleryVideoId: v.optional(v.id("galleryVideos")),
+		/** @deprecated Embedded clip media; migrateLegacyStudioMedia lifts these into gallery tables. */
 		terminalFrameObjectKey: v.optional(v.string()),
 		video: v.optional(generatedVideoValidator),
 		attempts: v.number(),

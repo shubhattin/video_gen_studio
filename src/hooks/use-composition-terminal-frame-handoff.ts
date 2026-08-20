@@ -5,7 +5,7 @@ import { useAction } from "convex/react";
 import { useEffect, useEffectEvent, useRef } from "react";
 
 type CompositionHandoffClip = {
-	_id: Id<"compositionClips">;
+	_id: string;
 	clipIndex: number;
 	status: string;
 	terminalFrameObjectKey?: string;
@@ -88,7 +88,7 @@ export function useCompositionTerminalFrameHandoff(args: {
 				if (cancelled) return;
 				const prepared = await prepareUpload({
 					runId,
-					clipId,
+					clipId: clipId as Id<"compositionClips">,
 					mimeType: frame.type || "image/jpeg",
 				});
 				const uploaded = await fetch(prepared.uploadUrl, {
@@ -104,7 +104,7 @@ export function useCompositionTerminalFrameHandoff(args: {
 				if (cancelled) return;
 				await finalizeUpload({
 					runId,
-					clipId,
+					clipId: clipId as Id<"compositionClips">,
 					objectKey: prepared.objectKey,
 				});
 			} catch (error) {

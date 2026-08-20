@@ -102,14 +102,13 @@ function extensionForMime(mimeType: string) {
 }
 
 export function buildStudioObjectKey(args: {
-	runId: string;
-	kind: "refs" | "videos" | "frames";
+	kind: "images" | "videos" | "frames";
 	mimeType: string;
 	mediaId?: string;
 }) {
 	const id = args.mediaId ?? randomId();
 	const ext = extensionForMime(args.mimeType);
-	return `studio/runs/${args.runId}/${args.kind}/${id}.${ext}`;
+	return `studio/gallery/${args.kind}/${id}.${ext}`;
 }
 
 export async function putObjectBytes(args: {

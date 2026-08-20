@@ -19,9 +19,9 @@ export type DraftPatch = {
 	compositionMode?: "continuation" | "cut-scenes" | null;
 	compositionMultiplier?: number | null;
 	compositionClipCount?: number | null;
-	firstFrameImageId?: string | null;
-	lastFrameImageId?: string | null;
-	extraReferenceImageIds?: string[];
+	firstFrameImageId?: Id<"galleryImages"> | null;
+	lastFrameImageId?: Id<"galleryImages"> | null;
+	extraReferenceImageIds?: Id<"galleryImages">[];
 };
 
 export type SaveMode = "debounced" | "immediate";

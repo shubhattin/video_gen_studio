@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { api } from "@convex/_generated/api";
 import { useConvexAuth, useQuery } from "convex/react";
-import { Clapperboard, Sparkles } from "lucide-react";
+import { Clapperboard, Images, Sparkles } from "lucide-react";
 import { Activity, type CSSProperties, type ReactNode } from "react";
 import { AccountPopover } from "#/components/studio/shell/account-popover";
 import {
@@ -33,7 +33,7 @@ const emptyStudioSearch = {} as const;
 type StudioShellProps = {
 	children: ReactNode;
 	history: ReactNode;
-	activePath?: "/" | "/studio";
+	activePath?: "/" | "/studio" | "/gallery";
 };
 
 export function StudioShell({
@@ -99,6 +99,16 @@ export function StudioShell({
 											<span>Model Studio</span>
 										</SidebarMenuButton>
 									</SidebarMenuItem>
+									<SidebarMenuItem>
+										<SidebarMenuButton
+											isActive={activePath === "/gallery"}
+											tooltip="Video gallery"
+											render={<Link to="/gallery" />}
+										>
+											<Images />
+											<span>Video gallery</span>
+										</SidebarMenuButton>
+									</SidebarMenuItem>
 								</SidebarMenu>
 							</SidebarGroupContent>
 						</SidebarGroup>
@@ -133,14 +143,20 @@ export function StudioShell({
 						<SidebarTrigger />
 						<div className="min-w-0">
 							<p className="truncate font-heading text-base font-semibold tracking-tight sm:text-lg">
-								{activePath === "/studio" ? "Model Studio" : "Shloka Studio"}
+								{activePath === "/studio"
+									? "Model Studio"
+									: activePath === "/gallery"
+										? "Video gallery"
+										: "Shloka Studio"}
 							</p>
 							<p className="truncate text-xs text-muted-foreground sm:text-sm">
 								{waitingForStudioData
 									? mainLabel
 									: activePath === "/studio"
 										? "Browse video models and generate reference stills"
-										: "Plan scenes → reference stills → render video"}
+										: activePath === "/gallery"
+											? "Browse and download generated clips"
+											: "Plan scenes → reference stills → render video"}
 							</p>
 						</div>
 					</header>

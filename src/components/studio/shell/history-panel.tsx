@@ -271,8 +271,8 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 					<AlertDialogHeader>
 						<AlertDialogTitle>Delete this run?</AlertDialogTitle>
 						<AlertDialogDescription>
-							This permanently deletes the run and all associated reference
-							images and videos from storage. This cannot be undone.
+							This deletes the run’s plans and text. Images and videos stay in
+							the shared gallery.
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					<AlertDialogFooter>

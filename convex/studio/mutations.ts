@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
+import type { Id } from "../_generated/dataModel";
 import { mutation } from "../_generated/server";
 import { requireAdmin } from "../lib/auth";
 import { VIDEO_MODEL_IDS, type VideoModelId } from "../lib/modelCatalog";
@@ -13,9 +14,20 @@ import {
 	videoSceneValidator,
 } from "../schema";
 import {
+	asGalleryImageId,
+	listShlokaPlansForRunCtx,
+	uniqueIds,
+	unlinkGalleryImageFromRuns,
+	unlinkGalleryVideoFromRuns,
+} from "./media";
+import {
 	listCompositionJobsForRunCtx,
 	resolveActiveCompositionJob,
 } from "./queries";
+
+const galleryIdOrNull = v.optional(
+	v.union(v.id("galleryImages"), v.string(), v.null()),
+);
 
 export const selectCompositionJob = mutation({
 	args: {
@@ -41,6 +53,70 @@ export const selectCompositionJob = mutation({
 	},
 });
 
+export const selectShlokaPlan = mutation({
+	args: {
+		runId: v.id("generationRuns"),
+		planId: v.id("shlokaPlans"),
+	},
+	returns: v.null(),
+	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
+		await ctx.runMutation(internal.studio.internal.applyActiveShlokaPlan, {
+			runId: args.runId,
+			planId: args.planId,
+		});
+		return null;
+	},
+});
+
+export const deleteShlokaPlan = mutation({
+	args: {
+		runId: v.id("generationRuns"),
+		planId: v.id("shlokaPlans"),
+	},
+	returns: v.null(),
+	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
+		const [run, plan] = await Promise.all([
+			ctx.db.get(args.runId),
+			ctx.db.get(args.planId),
+		]);
+		if (!run) {
+			throw new Error("Run not found.");
+		}
+		if (!plan || plan.runId !== args.runId) {
+			throw new Error("Plan not found for this run.");
+		}
+		const wasActive = run.activePlanId === plan._id;
+		await ctx.db.delete(plan._id);
+		if (!wasActive) {
+			return null;
+		}
+		const remaining = await listShlokaPlansForRunCtx(ctx, args.runId);
+		const next = remaining[0];
+		if (!next) {
+			await ctx.db.patch(args.runId, {
+				activePlanId: undefined,
+				updatedAt: Date.now(),
+			});
+			return null;
+		}
+		await ctx.runMutation(internal.studio.internal.applyActiveShlokaPlan, {
+			runId: args.runId,
+			planId: next._id,
+		});
+		return null;
+	},
+});
+
+function emptyRunMedia() {
+	return {
+		attachedImageIds: [] as Id<"galleryImages">[],
+		attachedVideoIds: [] as Id<"galleryVideos">[],
+		extraReferenceImageIds: [] as Id<"galleryImages">[],
+	};
+}
+
 export const createShlokaDraft = mutation({
 	args: {
 		shlokaText: v.string(),
@@ -63,7 +139,6 @@ export const createShlokaDraft = mutation({
 		return await ctx.db.insert("generationRuns", {
 			provenance: "shloka",
 			status: "draft",
-			revisionNumber: 1,
 			shlokaText,
 			customInstructions: args.customInstructions?.trim() || undefined,
 			...(plannerSystemPrompt ? { plannerSystemPrompt } : {}),
@@ -71,9 +146,7 @@ export const createShlokaDraft = mutation({
 			imageSize: imageConfig.size,
 			imageQuality: imageConfig.quality,
 			videoParams: defaultVideoParams(defaultModel),
-			referenceImages: [],
-			extraReferenceImageIds: [],
-			videos: [],
+			...emptyRunMedia(),
 			createdAt: now,
 			updatedAt: now,
 		});
@@ -96,16 +169,13 @@ export const createModelStudioDraft = mutation({
 		return await ctx.db.insert("generationRuns", {
 			provenance: "model-studio",
 			status: "draft",
-			revisionNumber: 1,
 			selectedModelId: modelId,
 			videoParams: {
 				...defaultVideoParams(modelId),
 				prompt: args.prompt?.trim() || undefined,
 			},
 			videoPrompt: args.prompt?.trim() || undefined,
-			referenceImages: [],
-			extraReferenceImageIds: [],
-			videos: [],
+			...emptyRunMedia(),
 			createdAt: now,
 			updatedAt: now,
 		});
@@ -128,9 +198,11 @@ export const updateDraft = mutation({
 		compositionMode: v.optional(v.union(compositionModeValidator, v.null())),
 		compositionMultiplier: v.optional(v.union(v.number(), v.null())),
 		compositionClipCount: v.optional(v.union(v.number(), v.null())),
-		firstFrameImageId: v.optional(v.union(v.string(), v.null())),
-		lastFrameImageId: v.optional(v.union(v.string(), v.null())),
-		extraReferenceImageIds: v.optional(v.array(v.string())),
+		firstFrameImageId: galleryIdOrNull,
+		lastFrameImageId: galleryIdOrNull,
+		extraReferenceImageIds: v.optional(
+			v.array(v.union(v.id("galleryImages"), v.string())),
+		),
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
@@ -144,9 +216,8 @@ export const updateDraft = mutation({
 		}
 		const requestedModelId = args.selectedModelId ?? args.videoParams?.modelId;
 		const currentModelId = run.selectedModelId ?? run.videoParams?.modelId;
-		// Single-clip videos lock the model; composition attempts may use different models.
 		if (
-			(run.videos?.length ?? 0) > 0 &&
+			(run.attachedVideoIds?.length ?? 0) > 0 &&
 			requestedModelId &&
 			currentModelId &&
 			requestedModelId !== currentModelId
@@ -212,12 +283,31 @@ export const updateDraft = mutation({
 				throw new Error("Video plan must include between 1 and 12 scenes.");
 			}
 			videoScenes = args.videoScenes;
-			// Prefer the derived provider prompt when scenes are edited unless an
-			// explicit videoPrompt was also supplied in this same update.
 			if (args.videoPrompt === undefined) {
 				videoPrompt = buildVideoPromptFromScenes(args.videoScenes);
 			}
 		}
+
+		const firstFrameImageId =
+			args.firstFrameImageId === null
+				? undefined
+				: args.firstFrameImageId !== undefined
+					? asGalleryImageId(ctx, args.firstFrameImageId)
+					: asGalleryImageId(ctx, run.firstFrameImageId);
+		const lastFrameImageId =
+			args.lastFrameImageId === null
+				? undefined
+				: args.lastFrameImageId !== undefined
+					? asGalleryImageId(ctx, args.lastFrameImageId)
+					: asGalleryImageId(ctx, run.lastFrameImageId);
+		const extraReferenceImageIds = (
+			args.extraReferenceImageIds ??
+			run.extraReferenceImageIds ??
+			[]
+		).flatMap((id) => {
+			const ok = asGalleryImageId(ctx, id);
+			return ok ? [ok] : [];
+		});
 
 		const patch = {
 			shlokaText,
@@ -239,20 +329,11 @@ export const updateDraft = mutation({
 					: (args.compositionMode ?? run.compositionMode),
 			compositionMultiplier,
 			compositionClipCount,
-			firstFrameImageId:
-				args.firstFrameImageId === null
-					? undefined
-					: (args.firstFrameImageId ?? run.firstFrameImageId),
-			lastFrameImageId:
-				args.lastFrameImageId === null
-					? undefined
-					: (args.lastFrameImageId ?? run.lastFrameImageId),
-			extraReferenceImageIds:
-				args.extraReferenceImageIds ?? run.extraReferenceImageIds,
+			firstFrameImageId,
+			lastFrameImageId,
+			extraReferenceImageIds,
 			updatedAt: Date.now(),
 		};
-		// Enforce role exclusivity: an image may only hold one of
-		// first-frame, last-frame, or style-reference.
 		const first = patch.firstFrameImageId;
 		const last = patch.lastFrameImageId;
 		const extras = patch.extraReferenceImageIds ?? [];
@@ -267,13 +348,30 @@ export const updateDraft = mutation({
 		}
 		await ctx.db.patch(args.runId, patch);
 
-		// Generate a title once real content (shloka / prompt) first arrives and
-		// the run still has none. The action no-ops when a title already exists.
+		if (
+			run.activePlanId &&
+			(args.imagePrompt !== undefined ||
+				args.videoScenes !== undefined ||
+				args.plannerSystemPrompt !== undefined)
+		) {
+			const activePlan = await ctx.db.get(run.activePlanId);
+			if (activePlan && activePlan.runId === args.runId) {
+				await ctx.db.patch(run.activePlanId, {
+					imagePrompt: imagePrompt ?? activePlan.imagePrompt,
+					videoScenes: videoScenes ?? activePlan.videoScenes,
+					plannerSystemPrompt,
+					updatedAt: Date.now(),
+				});
+			}
+		}
+
 		const hasContent = Boolean(shlokaText?.trim() || videoPrompt?.trim());
 		if (!run.title && hasContent) {
-			await ctx.scheduler.runAfter(1500, internal.studio.actions.generateRunTitleScheduled, {
-				runId: args.runId,
-			});
+			await ctx.scheduler.runAfter(
+				1500,
+				internal.studio.actions.generateRunTitleScheduled,
+				{ runId: args.runId },
+			);
 		}
 		return null;
 	},
@@ -382,7 +480,6 @@ export const renameRun = mutation({
 	},
 });
 
-/** Create a run from the new-run setup screen (no text content yet). */
 export const createStudioRun = mutation({
 	args: {
 		provenance: provenanceValidator,
@@ -410,15 +507,12 @@ export const createStudioRun = mutation({
 		const runId = await ctx.db.insert("generationRuns", {
 			provenance: args.provenance,
 			status: "draft",
-			revisionNumber: 1,
 			selectedModelId: modelId,
 			videoParams: prompt ? { ...videoParams, prompt } : videoParams,
 			...(prompt ? { videoPrompt: prompt } : {}),
 			imageSize: imageConfig.size,
 			imageQuality: imageConfig.quality,
-			referenceImages: [],
-			extraReferenceImageIds: [],
-			videos: [],
+			...emptyRunMedia(),
 			compositionMode: args.compositionMode,
 			compositionMultiplier: args.compositionMultiplier,
 			compositionClipCount: args.compositionClipCount,
@@ -426,10 +520,11 @@ export const createStudioRun = mutation({
 			updatedAt: now,
 		});
 
-		// Generate a title for the new run shortly after creation.
-		await ctx.scheduler.runAfter(1500, internal.studio.actions.generateRunTitleScheduled, {
-			runId,
-		});
+		await ctx.scheduler.runAfter(
+			1500,
+			internal.studio.actions.generateRunTitleScheduled,
+			{ runId },
+		);
 		return runId;
 	},
 });
@@ -445,7 +540,6 @@ export const deleteRun = mutation({
 		if (!run) {
 			return null;
 		}
-		const keysToDelete: string[] = [];
 		const compositionJobs = await listCompositionJobsForRunCtx(ctx, args.runId);
 		for (const compositionJob of compositionJobs) {
 			const compositionClips = await ctx.db
@@ -455,28 +549,47 @@ export const deleteRun = mutation({
 				)
 				.take(6);
 			for (const clip of compositionClips) {
-				if (clip.video) {
-					keysToDelete.push(clip.video.objectKey);
-				}
-				if (clip.terminalFrameObjectKey) {
-					keysToDelete.push(clip.terminalFrameObjectKey);
-				}
 				await ctx.db.delete(clip._id);
 			}
 			await ctx.db.delete(compositionJob._id);
 		}
-		for (const image of run.referenceImages ?? []) {
-			keysToDelete.push(image.objectKey);
-		}
-		for (const video of run.videos ?? []) {
-			keysToDelete.push(video.objectKey);
+		const plans = await listShlokaPlansForRunCtx(ctx, args.runId);
+		for (const plan of plans) {
+			await ctx.db.delete(plan._id);
 		}
 		await ctx.db.delete(args.runId);
-		if (keysToDelete.length > 0) {
-			await ctx.scheduler.runAfter(0, internal.studio.r2.deleteObjects, {
-				objectKeys: keysToDelete,
-			});
+		return null;
+	},
+});
+
+export const attachGalleryImageToRun = mutation({
+	args: {
+		runId: v.id("generationRuns"),
+		imageId: v.id("galleryImages"),
+	},
+	returns: v.null(),
+	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
+		const [run, image] = await Promise.all([
+			ctx.db.get(args.runId),
+			ctx.db.get(args.imageId),
+		]);
+		if (!run) {
+			throw new Error("Run not found.");
 		}
+		if (!image) {
+			throw new Error("Gallery image not found.");
+		}
+		const attached = uniqueIds([...(run.attachedImageIds ?? []), args.imageId]);
+		await ctx.db.patch(args.runId, {
+			attachedImageIds: attached,
+			status:
+				run.status === "draft" || run.status === "plan_ready"
+					? "image_ready"
+					: run.status,
+			imageCompletedAt: Date.now(),
+			updatedAt: Date.now(),
+		});
 		return null;
 	},
 });
@@ -493,39 +606,65 @@ export const removeReferenceImage = mutation({
 		if (!run) {
 			throw new Error("Run not found.");
 		}
-		const target = (run.referenceImages ?? []).find(
-			(image) => image.id === args.imageId,
-		);
-		if (!target) {
-			return null;
-		}
-		const referenceImages = (run.referenceImages ?? []).filter(
-			(image) => image.id !== args.imageId,
-		);
+		const imageId = args.imageId as Id<"galleryImages">;
+		const attached = (run.attachedImageIds ?? []).filter((id) => id !== imageId);
 		await ctx.db.patch(args.runId, {
-			referenceImages,
+			attachedImageIds: attached,
 			firstFrameImageId:
-				run.firstFrameImageId === args.imageId
-					? undefined
-					: run.firstFrameImageId,
+				run.firstFrameImageId === imageId ? undefined : run.firstFrameImageId,
 			lastFrameImageId:
-				run.lastFrameImageId === args.imageId
-					? undefined
-					: run.lastFrameImageId,
+				run.lastFrameImageId === imageId ? undefined : run.lastFrameImageId,
 			extraReferenceImageIds: (run.extraReferenceImageIds ?? []).filter(
-				(id) => id !== args.imageId,
+				(id) => id !== imageId,
 			),
-			status: referenceImages.length > 0 ? run.status : "plan_ready",
+			status: attached.length > 0 ? run.status : "plan_ready",
 			updatedAt: Date.now(),
-		});
-		await ctx.scheduler.runAfter(0, internal.studio.r2.deleteObjects, {
-			objectKeys: [target.objectKey],
 		});
 		return null;
 	},
 });
 
-/** One-time cleanup: deletes all runs, media files, and catalog cache. */
+export const deleteGalleryImage = mutation({
+	args: {
+		imageId: v.id("galleryImages"),
+	},
+	returns: v.null(),
+	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
+		const image = await ctx.db.get(args.imageId);
+		if (!image) {
+			return null;
+		}
+		await unlinkGalleryImageFromRuns(ctx, args.imageId);
+		await ctx.db.delete(args.imageId);
+		await ctx.scheduler.runAfter(0, internal.studio.r2.deleteObjects, {
+			objectKeys: [image.objectKey],
+		});
+		return null;
+	},
+});
+
+export const deleteGalleryVideo = mutation({
+	args: {
+		videoId: v.id("galleryVideos"),
+	},
+	returns: v.null(),
+	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
+		const video = await ctx.db.get(args.videoId);
+		if (!video) {
+			return null;
+		}
+		await unlinkGalleryVideoFromRuns(ctx, args.videoId);
+		await ctx.db.delete(args.videoId);
+		await ctx.scheduler.runAfter(0, internal.studio.r2.deleteObjects, {
+			objectKeys: [video.objectKey],
+		});
+		return null;
+	},
+});
+
+/** One-time cleanup: deletes all runs, gallery media files, and catalog cache. */
 export const wipeAllStudioData = mutation({
 	args: {},
 	returns: v.object({
@@ -540,5 +679,30 @@ export const wipeAllStudioData = mutation({
 	}> => {
 		await requireAdmin(ctx);
 		return await ctx.runMutation(internal.studio.internal.wipeAllStudioData, {});
+	},
+});
+
+/** Lift embedded run/clip media into the gallery and drop leftover img_* ids. */
+export const migrateLegacyStudioMedia = mutation({
+	args: {},
+	returns: v.object({
+		runsMigrated: v.number(),
+		clipsMigrated: v.number(),
+		imagesCreated: v.number(),
+		videosCreated: v.number(),
+	}),
+	handler: async (
+		ctx,
+	): Promise<{
+		runsMigrated: number;
+		clipsMigrated: number;
+		imagesCreated: number;
+		videosCreated: number;
+	}> => {
+		await requireAdmin(ctx);
+		return await ctx.runMutation(
+			internal.studio.migrateLegacy.migrateLegacyStudioMedia,
+			{},
+		);
 	},
 });

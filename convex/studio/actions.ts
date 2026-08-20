@@ -115,14 +115,12 @@ function warningMessages(
 }
 
 async function storeBytes(args: {
-	runId: string;
-	kind: "refs" | "videos" | "frames";
+	kind: "images" | "videos" | "frames";
 	bytes: Uint8Array;
 	mimeType: string;
 	mediaId?: string;
 }) {
 	const objectKey = buildStudioObjectKey({
-		runId: args.runId,
 		kind: args.kind,
 		mimeType: args.mimeType,
 		mediaId: args.mediaId,
@@ -133,10 +131,6 @@ async function storeBytes(args: {
 		mimeType: args.mimeType,
 	});
 	return objectKey;
-}
-
-function newMediaId(prefix: string) {
-	return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 async function signedReadUrl(objectKey: string) {
@@ -161,10 +155,10 @@ export const planShlokaRun = action({
 			throw new Error("Shloka text is required before planning.");
 		}
 
-		const planningKey = `plan-${args.runId}-${run.revisionNumber}`;
+		const planningKey = `plan-${args.runId}-${Date.now().toString(36)}`;
 		if (
 			!args.force &&
-			run.planningKey === planningKey &&
+			run.activePlanId &&
 			run.status === "plan_ready" &&
 			run.imagePrompt &&
 			run.videoScenes
@@ -268,7 +262,7 @@ export const planModelStudioComposition = action({
 		if (!composition) {
 			throw new Error("Enable multi-clip composition before planning.");
 		}
-		const planningKey = `model-composition-plan-${args.runId}-${run.revisionNumber}`;
+		const planningKey = `model-composition-plan-${args.runId}`;
 		if (
 			!args.force &&
 			run.planningKey === planningKey &&
@@ -363,8 +357,7 @@ export const generateReferenceImage = action({
 
 			const image = result.image;
 			const objectKey = await storeBytes({
-				runId: args.runId,
-				kind: "refs",
+				kind: "images",
 				bytes: image.uint8Array,
 				mimeType: image.mediaType,
 			});
@@ -374,21 +367,17 @@ export const generateReferenceImage = action({
 				| { revisedPrompt?: string }
 				| undefined;
 
-			await ctx.runMutation(internal.studio.internal.appendReferenceImage, {
+			await ctx.runMutation(internal.studio.internal.insertGalleryImage, {
 				runId: args.runId,
-				image: {
-					id: newMediaId("img"),
-					objectKey,
-					meta: {
-						mimeType: image.mediaType,
-						width,
-						height,
-						bytes: image.uint8Array.byteLength,
-					},
-					source: "generated",
-					revisedImagePrompt: openaiMeta?.revisedPrompt,
-					createdAt: Date.now(),
+				objectKey,
+				meta: {
+					mimeType: image.mediaType,
+					width,
+					height,
+					bytes: image.uint8Array.byteLength,
 				},
+				source: "generated",
+				revisedImagePrompt: openaiMeta?.revisedPrompt,
 				setAsFirstFrame: false,
 				warnings: warnings.length > 0 ? warnings : undefined,
 			});
@@ -438,13 +427,14 @@ export const generateVideoForRun = action({
 		const last = images.find(
 			(image: RefImage) => image.id === run.lastFrameImageId,
 		);
-		const extraIds = new Set((run.extraReferenceImageIds ?? []) as string[]);
-		const extras = images.filter(
-			(image: RefImage) =>
-				extraIds.has(image.id) &&
-				image.id !== first?.id &&
-				image.id !== last?.id,
+		const extraIds = (run.extraReferenceImageIds ?? []) as string[];
+		const imagesById = new Map(
+			images.map((image: RefImage) => [image.id, image]),
 		);
+		const extras = extraIds
+			.filter((id: string) => id !== first?.id && id !== last?.id)
+			.map((id: string) => imagesById.get(id))
+			.filter((image): image is RefImage => Boolean(image));
 
 		if (profile.requiresFirstFrame && !first) {
 			throw new Error("This model requires a first-frame reference image.");
@@ -497,16 +487,14 @@ export const generateVideoForRun = action({
 			});
 			const downloaded = await downloadOpenRouterVideo(apiKey, completed);
 			const objectKey = await storeBytes({
-				runId: args.runId,
 				kind: "videos",
 				bytes: downloaded.bytes,
 				mimeType: downloaded.mimeType,
 			});
 
-			await ctx.runMutation(internal.studio.internal.appendVideo, {
+			await ctx.runMutation(internal.studio.internal.insertGalleryVideo, {
 				runId: args.runId,
 				video: {
-					id: newMediaId("vid"),
 					objectKey,
 					meta: {
 						mimeType: downloaded.mimeType,
@@ -647,7 +635,6 @@ export const generateNextCompositionClip = internalAction({
 			});
 			const downloaded = await downloadOpenRouterVideo(apiKey, completed);
 			const objectKey = await storeBytes({
-				runId: job.runId,
 				kind: "videos",
 				bytes: downloaded.bytes,
 				mimeType: downloaded.mimeType,
@@ -665,7 +652,6 @@ export const generateNextCompositionClip = internalAction({
 				jobId: args.jobId,
 				clipId: clip._id,
 				video: {
-					id: newMediaId("composition_vid"),
 					objectKey,
 					meta: {
 						mimeType: downloaded.mimeType,
