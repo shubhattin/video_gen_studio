@@ -44,25 +44,29 @@ export function ModelStudio({
 	runId: controlledRunId = null,
 	onRunIdChange,
 }: ModelStudioProps) {
-	const catalog = useQuery(api.studio.getCachedOpenRouterCatalog);
-	const refreshCatalog = useAction(api.studioActions.refreshModelCatalog);
-	const createDraft = useMutation(api.studio.createModelStudioDraft);
-	const updateDraft = useMutation(api.studio.updateDraft);
-	const removeReferenceImage = useMutation(api.studio.removeReferenceImage);
+	const catalog = useQuery(api.studio.queries.getCachedOpenRouterCatalog);
+	const refreshCatalog = useAction(api.studio.actions.refreshModelCatalog);
+	const createDraft = useMutation(api.studio.mutations.createModelStudioDraft);
+	const updateDraft = useMutation(api.studio.mutations.updateDraft);
+	const removeReferenceImage = useMutation(
+		api.studio.mutations.removeReferenceImage,
+	);
 	const prepareReferenceImageUpload = useAction(
-		api.studioR2.prepareReferenceImageUpload,
+		api.studio.r2.prepareReferenceImageUpload,
 	);
 	const finalizeReferenceImageUpload = useAction(
-		api.studioR2.finalizeReferenceImageUpload,
+		api.studio.r2.finalizeReferenceImageUpload,
 	);
-	const generateImage = useAction(api.studioActions.generateReferenceImage);
-	const generateVideo = useAction(api.studioActions.generateVideoForRun);
+	const generateImage = useAction(api.studio.actions.generateReferenceImage);
+	const generateVideo = useAction(api.studio.actions.generateVideoForRun);
 	const planComposition = useAction(
-		api.studioActions.planModelStudioComposition,
+		api.studio.actions.planModelStudioComposition,
 	);
-	const startComposition = useMutation(api.studio.startComposition);
-	const cancelComposition = useMutation(api.studio.cancelComposition);
-	const selectCompositionJob = useMutation(api.studio.selectCompositionJob);
+	const startComposition = useMutation(api.studio.mutations.startComposition);
+	const cancelComposition = useMutation(api.studio.mutations.cancelComposition);
+	const selectCompositionJob = useMutation(
+		api.studio.mutations.selectCompositionJob,
+	);
 
 	const [selectedModel, setSelectedModel] = useState<VideoModelId>(
 		"bytedance/seedance-2.0-fast",
@@ -83,15 +87,15 @@ export function ModelStudio({
 
 	const activeRunId = controlledRunId;
 	const run = useQuery(
-		api.studio.getRun,
+		api.studio.queries.getRun,
 		activeRunId ? { runId: activeRunId } : "skip",
 	);
 	const compositionJob = useQuery(
-		api.studio.getCompositionForRun,
+		api.studio.queries.getCompositionForRun,
 		activeRunId ? { runId: activeRunId } : "skip",
 	);
 	const compositionAttempts = useQuery(
-		api.studio.listCompositionJobsForRun,
+		api.studio.queries.listCompositionJobsForRun,
 		activeRunId ? { runId: activeRunId } : "skip",
 	);
 	const profile = MODEL_CAPABILITY_PROFILES[selectedModel];

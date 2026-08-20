@@ -38,7 +38,7 @@ function ModelStudioPage() {
 	};
 
 	const run = useQuery(
-		api.studio.getRun,
+		api.studio.queries.getRun,
 		selectedRunId ? { runId: selectedRunId } : "skip",
 	);
 

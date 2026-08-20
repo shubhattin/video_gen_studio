@@ -1,6 +1,6 @@
 import { v } from "convex/values";
-import { internal } from "./_generated/api";
-import { internalMutation, type MutationCtx } from "./_generated/server";
+import { internal } from "../_generated/api";
+import { internalMutation, type MutationCtx } from "../_generated/server";
 import {
 	compositionClipPlanValidator,
 	generatedVideoValidator,
@@ -8,8 +8,8 @@ import {
 	runStatusValidator,
 	videoParamsValidator,
 	videoSceneValidator,
-} from "./schema";
-import { estimateVideoCostUsd } from "./lib/videoAdapters";
+} from "../schema";
+import { estimateVideoCostUsd } from "../lib/videoAdapters";
 
 async function scheduleObjectDeletes(
 	ctx: MutationCtx,
@@ -21,7 +21,7 @@ async function scheduleObjectDeletes(
 	if (keys.length === 0) {
 		return;
 	}
-	await ctx.scheduler.runAfter(0, internal.studioR2.deleteObjects, {
+	await ctx.scheduler.runAfter(0, internal.studio.r2.deleteObjects, {
 		objectKeys: keys,
 	});
 }
@@ -366,7 +366,7 @@ export const completeCompositionClip = internalMutation({
 		}
 		await ctx.scheduler.runAfter(
 			0,
-			internal.studioActions.generateNextCompositionClip,
+			internal.studio.actions.generateNextCompositionClip,
 			{ jobId: job._id },
 		);
 		return null;
@@ -419,7 +419,7 @@ export const attachCompositionTerminalFrame = internalMutation({
 		});
 		await ctx.scheduler.runAfter(
 			0,
-			internal.studioActions.generateNextCompositionClip,
+			internal.studio.actions.generateNextCompositionClip,
 			{ jobId: job._id },
 		);
 		return null;

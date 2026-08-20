@@ -1,14 +1,14 @@
 import { convexTest } from "convex-test";
 import { describe, expect, it, vi } from "vitest";
-import { api, internal } from "./_generated/api";
-import schema from "./schema";
-import { modules } from "./test.setup";
+import { api, internal } from "../_generated/api";
+import schema from "../schema";
+import { modules } from "../test.setup";
 import {
 	compositionPlannerOutputSchema,
 	validateVideoParams,
-} from "./lib/schemas";
+} from "../lib/schemas";
 
-vi.mock("./lib/r2", () => ({
+vi.mock("../lib/r2", () => ({
 	buildStudioObjectKey: ({
 		runId,
 		kind,
@@ -62,12 +62,12 @@ function adminConvex() {
 describe("studio mutations", () => {
 	it("creates a shloka draft with portrait defaults", async () => {
 		const t = adminConvex();
-		const runId = await t.mutation(api.studio.createShlokaDraft, {
+		const runId = await t.mutation(api.studio.mutations.createShlokaDraft, {
 			shlokaText: "धर्मक्षेत्रे कुरुक्षेत्रे",
 			customInstructions: "Twilight forest mood",
 		});
 
-		const run = await t.query(api.studio.getRun, { runId });
+		const run = await t.query(api.studio.queries.getRun, { runId });
 		expect(run?.provenance).toBe("shloka");
 		expect(run?.status).toBe("draft");
 		expect(run?.imageSize).toBe("1024x1536");
@@ -78,11 +78,11 @@ describe("studio mutations", () => {
 
 	it("transitions plan commit to plan_ready", async () => {
 		const t = adminConvex();
-		const runId = await t.mutation(api.studio.createShlokaDraft, {
+		const runId = await t.mutation(api.studio.mutations.createShlokaDraft, {
 			shlokaText: "Test shloka",
 		});
 
-		await t.mutation(internal.studioInternal.commitPlan, {
+		await t.mutation(internal.studio.internal.commitPlan, {
 			runId,
 			plannerModel: "openai/gpt-5.6-terra",
 			plannerReasoning: "medium",
@@ -106,30 +106,30 @@ describe("studio mutations", () => {
 			planningKey: "plan-test",
 		});
 
-		const run = await t.query(api.studio.getRun, { runId });
+		const run = await t.query(api.studio.queries.getRun, { runId });
 		expect(run?.status).toBe("plan_ready");
 		expect(run?.imagePrompt).toContain("Portrait");
 	});
 
 	it("deletes a run", async () => {
 		const t = adminConvex();
-		const runId = await t.mutation(api.studio.createShlokaDraft, {
+		const runId = await t.mutation(api.studio.mutations.createShlokaDraft, {
 			shlokaText: "Delete me",
 		});
-		await t.mutation(api.studio.deleteRun, { runId });
-		const run = await t.query(api.studio.getRun, { runId });
+		await t.mutation(api.studio.mutations.deleteRun, { runId });
+		const run = await t.query(api.studio.queries.getRun, { runId });
 		expect(run).toBeNull();
 	});
 
 	it("attaches an uploaded reference image via object key", async () => {
 		const t = adminConvex();
-		const runId = await t.mutation(api.studio.createModelStudioDraft, {
+		const runId = await t.mutation(api.studio.mutations.createModelStudioDraft, {
 			modelId: "google/veo-3.1-lite",
 			prompt: "Temple courtyard at dusk",
 		});
 
 		const objectKey = `studio/runs/${runId}/refs/test.png`;
-		await t.mutation(internal.studioInternal.appendReferenceImage, {
+		await t.mutation(internal.studio.internal.appendReferenceImage, {
 			runId,
 			image: {
 				id: "img_test",
@@ -145,7 +145,7 @@ describe("studio mutations", () => {
 			},
 		});
 
-		const run = await t.query(api.studio.getRun, { runId });
+		const run = await t.query(api.studio.queries.getRun, { runId });
 		expect(run?.status).toBe("image_ready");
 		expect(run?.firstFrameImageId).toBeUndefined();
 		expect(run?.referenceImages).toHaveLength(1);
@@ -155,12 +155,12 @@ describe("studio mutations", () => {
 		expect(run?.referenceImages?.[0]?.id).toBe("img_test");
 
 		const belongs = await t.query(
-			internal.studioQueries.objectKeyBelongsToRun,
+			internal.studio.queries.objectKeyBelongsToRun,
 			{ runId, objectKey },
 		);
 		expect(belongs).toBe(true);
 		const foreign = await t.query(
-			internal.studioQueries.objectKeyBelongsToRun,
+			internal.studio.queries.objectKeyBelongsToRun,
 			{
 				runId,
 				objectKey: "studio/runs/other/refs/x.png",
@@ -171,16 +171,16 @@ describe("studio mutations", () => {
 
 	it("persists a bounded composition plan as ordered clip rows", async () => {
 		const t = adminConvex();
-		const runId = await t.mutation(api.studio.createShlokaDraft, {
+		const runId = await t.mutation(api.studio.mutations.createShlokaDraft, {
 			shlokaText: "वसुदेवसुतं देवं",
 		});
-		await t.mutation(api.studio.updateDraft, {
+		await t.mutation(api.studio.mutations.updateDraft, {
 			runId,
 			compositionMode: "continuation",
 			compositionMultiplier: 2,
 			compositionClipCount: 2,
 		});
-		await t.mutation(internal.studioInternal.commitCompositionPlan, {
+		await t.mutation(internal.studio.internal.commitCompositionPlan, {
 			runId,
 			plannerModel: "openai/gpt-5.6-terra",
 			plannerReasoning: "medium",
@@ -210,7 +210,7 @@ describe("studio mutations", () => {
 			planningKey: "composition-plan-test",
 		});
 
-		const composition = await t.query(api.studio.getCompositionForRun, {
+		const composition = await t.query(api.studio.queries.getCompositionForRun, {
 			runId,
 		});
 		expect(composition?.status).toBe("planned");
@@ -221,10 +221,10 @@ describe("studio mutations", () => {
 			1,
 		]);
 
-		const runAfterFirst = await t.query(api.studio.getRun, { runId });
+		const runAfterFirst = await t.query(api.studio.queries.getRun, { runId });
 		expect(runAfterFirst?.activeCompositionJobId).toBe(composition?._id);
 
-		await t.mutation(internal.studioInternal.commitCompositionPlan, {
+		await t.mutation(internal.studio.internal.commitCompositionPlan, {
 			runId,
 			plannerModel: "openai/gpt-5.6-terra",
 			plannerReasoning: "high",
@@ -249,7 +249,7 @@ describe("studio mutations", () => {
 			planningKey: "composition-plan-test-2",
 		});
 
-		const attempts = await t.query(api.studio.listCompositionJobsForRun, {
+		const attempts = await t.query(api.studio.queries.listCompositionJobsForRun, {
 			runId,
 		});
 		expect(attempts).toHaveLength(2);
@@ -257,15 +257,15 @@ describe("studio mutations", () => {
 			1, 2,
 		]);
 
-		const active = await t.query(api.studio.getCompositionForRun, { runId });
+		const active = await t.query(api.studio.queries.getCompositionForRun, { runId });
 		expect(active?.attemptNumber).toBe(2);
 		expect(active?.overallDescription).toContain("dusk");
 
-		await t.mutation(api.studio.selectCompositionJob, {
+		await t.mutation(api.studio.mutations.selectCompositionJob, {
 			runId,
 			jobId: composition!._id,
 		});
-		const selected = await t.query(api.studio.getCompositionForRun, { runId });
+		const selected = await t.query(api.studio.queries.getCompositionForRun, { runId });
 		expect(selected?._id).toBe(composition?._id);
 		expect(selected?.attemptNumber).toBe(1);
 	});
@@ -341,7 +341,7 @@ describe("video param validation", () => {
 
 describe("prompt limits", () => {
 	it("truncates Kling prompts over 2500 chars", async () => {
-		const { fitPromptToLimit } = await import("./lib/videoAdapters");
+		const { fitPromptToLimit } = await import("../lib/videoAdapters");
 		const long = "a".repeat(3000);
 		const fitted = fitPromptToLimit(long, 2500);
 		expect(fitted.truncated).toBe(true);
@@ -375,26 +375,26 @@ describe("studio authorization", () => {
 		const backend = convexTest(schema, modules);
 		const admin = backend.withIdentity(ADMIN_IDENTITY);
 		const member = backend.withIdentity(MEMBER_IDENTITY);
-		const runId = await admin.mutation(api.studio.createShlokaDraft, {
+		const runId = await admin.mutation(api.studio.mutations.createShlokaDraft, {
 			shlokaText: "Auth gate shloka",
 		});
 
-		await expect(backend.query(api.studio.getRun, { runId })).rejects.toThrow(
+		await expect(backend.query(api.studio.queries.getRun, { runId })).rejects.toThrow(
 			"Not authenticated.",
 		);
-		await expect(member.query(api.studio.getRun, { runId })).rejects.toThrow(
+		await expect(member.query(api.studio.queries.getRun, { runId })).rejects.toThrow(
 			"Admin access required.",
 		);
-		const run = await admin.query(api.studio.getRun, { runId });
+		const run = await admin.query(api.studio.queries.getRun, { runId });
 		expect(run?._id).toBe(runId);
 
 		await expect(
-			backend.mutation(api.studio.wipeAllStudioData, {}),
+			backend.mutation(api.studio.mutations.wipeAllStudioData, {}),
 		).rejects.toThrow("Not authenticated.");
 		await expect(
-			member.mutation(api.studio.wipeAllStudioData, {}),
+			member.mutation(api.studio.mutations.wipeAllStudioData, {}),
 		).rejects.toThrow("Admin access required.");
-		const wiped = await admin.mutation(api.studio.wipeAllStudioData, {});
+		const wiped = await admin.mutation(api.studio.mutations.wipeAllStudioData, {});
 		expect(wiped.runsDeleted).toBe(1);
 	});
 
@@ -402,11 +402,11 @@ describe("studio authorization", () => {
 		const backend = convexTest(schema, modules);
 		const admin = backend.withIdentity(ADMIN_IDENTITY);
 		const member = backend.withIdentity(MEMBER_IDENTITY);
-		const runId = await admin.mutation(api.studio.createShlokaDraft, {
+		const runId = await admin.mutation(api.studio.mutations.createShlokaDraft, {
 			shlokaText: "Action auth shloka",
 		});
 		const objectKey = `studio/runs/${runId}/refs/test.png`;
-		await admin.mutation(internal.studioInternal.appendReferenceImage, {
+		await admin.mutation(internal.studio.internal.appendReferenceImage, {
 			runId,
 			image: {
 				id: "img_auth",
@@ -423,26 +423,26 @@ describe("studio authorization", () => {
 		});
 
 		await expect(
-			backend.action(api.studioActions.planShlokaRun, { runId }),
+			backend.action(api.studio.actions.planShlokaRun, { runId }),
 		).rejects.toThrow("Not authenticated.");
 		await expect(
-			member.action(api.studioActions.planShlokaRun, { runId }),
+			member.action(api.studio.actions.planShlokaRun, { runId }),
 		).rejects.toThrow("Admin access required.");
 
 		await expect(
-			backend.action(api.studioR2.getReadUrls, {
+			backend.action(api.studio.r2.getReadUrls, {
 				runId,
 				objectKeys: [objectKey],
 			}),
 		).rejects.toThrow("Not authenticated.");
 		await expect(
-			member.action(api.studioR2.getReadUrls, {
+			member.action(api.studio.r2.getReadUrls, {
 				runId,
 				objectKeys: [objectKey],
 			}),
 		).rejects.toThrow("Admin access required.");
 
-		const urls = await admin.action(api.studioR2.getReadUrls, {
+		const urls = await admin.action(api.studio.r2.getReadUrls, {
 			runId,
 			objectKeys: [objectKey],
 		});
@@ -452,11 +452,11 @@ describe("studio authorization", () => {
 	it("keeps internal functions callable without a user identity", async () => {
 		const backend = convexTest(schema, modules);
 		const admin = backend.withIdentity(ADMIN_IDENTITY);
-		const runId = await admin.mutation(api.studio.createShlokaDraft, {
+		const runId = await admin.mutation(api.studio.mutations.createShlokaDraft, {
 			shlokaText: "Internal still works",
 		});
 		const objectKey = `studio/runs/${runId}/refs/test.png`;
-		await backend.mutation(internal.studioInternal.appendReferenceImage, {
+		await backend.mutation(internal.studio.internal.appendReferenceImage, {
 			runId,
 			image: {
 				id: "img_internal",
@@ -472,7 +472,7 @@ describe("studio authorization", () => {
 			},
 		});
 		const belongs = await backend.query(
-			internal.studioQueries.objectKeyBelongsToRun,
+			internal.studio.queries.objectKeyBelongsToRun,
 			{ runId, objectKey },
 		);
 		expect(belongs).toBe(true);
@@ -482,11 +482,11 @@ describe("studio authorization", () => {
 		const backend = convexTest(schema, modules);
 		const admin = backend.withIdentity(ADMIN_IDENTITY);
 		const member = backend.withIdentity(MEMBER_IDENTITY);
-		const runId = await admin.mutation(api.studio.createShlokaDraft, {
+		const runId = await admin.mutation(api.studio.mutations.createShlokaDraft, {
 			shlokaText: "Media proxy auth",
 		});
 		const objectKey = `studio/runs/${runId}/refs/test.png`;
-		await admin.mutation(internal.studioInternal.appendReferenceImage, {
+		await admin.mutation(internal.studio.internal.appendReferenceImage, {
 			runId,
 			image: {
 				id: "img_media",

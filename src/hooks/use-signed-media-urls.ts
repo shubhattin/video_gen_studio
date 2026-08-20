@@ -21,7 +21,7 @@ export function useSignedMediaUrls(
 	runId: Id<"generationRuns"> | null | undefined,
 	objectKeys: Array<string | undefined | null>,
 ) {
-	const getReadUrls = useAction(api.studioR2.getReadUrls);
+	const getReadUrls = useAction(api.studio.r2.getReadUrls);
 	const [urlsByKey, setUrlsByKey] = useState<Record<string, string | null>>({});
 	const keysSignature = uniqueObjectKeys(objectKeys).join("\0");
 	const keys = useMemo(

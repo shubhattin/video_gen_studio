@@ -18,11 +18,11 @@ import type * as lib_r2 from "../lib/r2.js";
 import type * as lib_schemas from "../lib/schemas.js";
 import type * as lib_videoAdapters from "../lib/videoAdapters.js";
 import type * as lib_videoPlanMarkdown from "../lib/videoPlanMarkdown.js";
-import type * as studio from "../studio.js";
-import type * as studioActions from "../studioActions.js";
-import type * as studioInternal from "../studioInternal.js";
-import type * as studioQueries from "../studioQueries.js";
-import type * as studioR2 from "../studioR2.js";
+import type * as studio_actions from "../studio/actions.js";
+import type * as studio_internal from "../studio/internal.js";
+import type * as studio_mutations from "../studio/mutations.js";
+import type * as studio_queries from "../studio/queries.js";
+import type * as studio_r2 from "../studio/r2.js";
 
 import type {
   ApiFromModules,
@@ -41,11 +41,11 @@ declare const fullApi: ApiFromModules<{
   "lib/schemas": typeof lib_schemas;
   "lib/videoAdapters": typeof lib_videoAdapters;
   "lib/videoPlanMarkdown": typeof lib_videoPlanMarkdown;
-  studio: typeof studio;
-  studioActions: typeof studioActions;
-  studioInternal: typeof studioInternal;
-  studioQueries: typeof studioQueries;
-  studioR2: typeof studioR2;
+  "studio/actions": typeof studio_actions;
+  "studio/internal": typeof studio_internal;
+  "studio/mutations": typeof studio_mutations;
+  "studio/queries": typeof studio_queries;
+  "studio/r2": typeof studio_r2;
 }>;
 
 /**

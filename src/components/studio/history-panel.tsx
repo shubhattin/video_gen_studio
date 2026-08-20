@@ -60,8 +60,8 @@ function isShlokaRun(provenance: string) {
 }
 
 export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
-	const runs = useQuery(api.studio.listRecentRuns, { limit: 24 });
-	const deleteRun = useMutation(api.studio.deleteRun);
+	const runs = useQuery(api.studio.queries.listRecentRuns, { limit: 24 });
+	const deleteRun = useMutation(api.studio.mutations.deleteRun);
 	const [pendingDeleteId, setPendingDeleteId] =
 		useState<Id<"generationRuns"> | null>(null);
 	const [deleting, setDeleting] = useState(false);

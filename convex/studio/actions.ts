@@ -2,48 +2,48 @@
 
 import { generateImage, generateText, Output } from "ai";
 import { v } from "convex/values";
-import { internal } from "./_generated/api";
-import { action, internalAction } from "./_generated/server";
-import type { Id } from "./_generated/dataModel";
-import { requireAdmin } from "./lib/auth";
+import { internal } from "../_generated/api";
+import { action, internalAction } from "../_generated/server";
+import type { Id } from "../_generated/dataModel";
+import { requireAdmin } from "../lib/auth";
 import {
 	MODEL_CAPABILITY_PROFILES,
 	PLANNER_MODEL_ID,
 	VIDEO_MODEL_IDS,
 	type VideoModelId,
 	isVideoModelId,
-} from "./lib/modelCatalog";
+} from "../lib/modelCatalog";
 import {
 	getOpenAIProvider,
 	getOpenRouterApiKey,
 	getOpenRouterProvider,
-} from "./lib/providers";
+} from "../lib/providers";
 import {
 	downloadOpenRouterVideo,
 	fetchOpenRouterVideoModels,
 	submitOpenRouterVideoJob,
 	waitForOpenRouterVideoJob,
-} from "./lib/openrouterVideo";
+} from "../lib/openrouterVideo";
 import {
 	imageConfigSchema,
 	compositionPlannerOutputSchema,
 	normalPlannerOutputSchema,
 	videoParamsSchema,
 	type ImageConfig,
-} from "./lib/schemas";
+} from "../lib/schemas";
 import {
 	MODEL_STUDIO_PLANNER_SYSTEM_PROMPT,
 	buildShlokaPlannerSystemPrompt,
 	multiClipPlannerInstructions,
-} from "./lib/plannerPrompt";
-import { buildVideoPromptFromScenes } from "./lib/videoPlanMarkdown";
-import { adaptOpenRouterVideoRequest } from "./lib/videoAdapters";
+} from "../lib/plannerPrompt";
+import { buildVideoPromptFromScenes } from "../lib/videoPlanMarkdown";
+import { adaptOpenRouterVideoRequest } from "../lib/videoAdapters";
 import {
 	buildStudioObjectKey,
 	createPresignedGetUrl,
 	deleteObjects as deleteR2Objects,
 	putObjectBytes,
-} from "./lib/r2";
+} from "../lib/r2";
 
 function buildPlannerPrompt(
 	shlokaText: string,
@@ -150,7 +150,7 @@ export const planShlokaRun = action({
 	returns: v.null(),
 	handler: async (ctx, args) => {
 		await requireAdmin(ctx);
-		const run = await ctx.runQuery(internal.studioQueries.getRunDoc, {
+		const run = await ctx.runQuery(internal.studio.queries.getRunDoc, {
 			runId: args.runId,
 		});
 		if (!run) {
@@ -171,7 +171,7 @@ export const planShlokaRun = action({
 			return null;
 		}
 
-		await ctx.runMutation(internal.studioInternal.setRunStatus, {
+		await ctx.runMutation(internal.studio.internal.setRunStatus, {
 			runId: args.runId,
 			status: "planning",
 		});
@@ -196,7 +196,7 @@ export const planShlokaRun = action({
 				});
 				const plan = result.output;
 				const warnings = warningMessages(result.warnings ?? []);
-				await ctx.runMutation(internal.studioInternal.commitCompositionPlan, {
+				await ctx.runMutation(internal.studio.internal.commitCompositionPlan, {
 					runId: args.runId,
 					plannerModel: PLANNER_MODEL_ID,
 					plannerReasoning: "medium",
@@ -223,7 +223,7 @@ export const planShlokaRun = action({
 				});
 				const plan = result.output;
 				const warnings = warningMessages(result.warnings ?? []);
-				await ctx.runMutation(internal.studioInternal.commitPlan, {
+				await ctx.runMutation(internal.studio.internal.commitPlan, {
 					runId: args.runId,
 					plannerModel: PLANNER_MODEL_ID,
 					plannerReasoning: "medium",
@@ -236,7 +236,7 @@ export const planShlokaRun = action({
 		} catch (error) {
 			const message =
 				error instanceof Error ? error.message : "Planning failed.";
-			await ctx.runMutation(internal.studioInternal.setRunStatus, {
+			await ctx.runMutation(internal.studio.internal.setRunStatus, {
 				runId: args.runId,
 				status: "failed",
 				lastError: message,
@@ -256,7 +256,7 @@ export const planModelStudioComposition = action({
 	returns: v.null(),
 	handler: async (ctx, args) => {
 		await requireAdmin(ctx);
-		const run = await ctx.runQuery(internal.studioQueries.getRunDoc, {
+		const run = await ctx.runQuery(internal.studio.queries.getRunDoc, {
 			runId: args.runId,
 		});
 		const prompt = run?.videoPrompt?.trim() ?? run?.videoParams?.prompt?.trim();
@@ -275,7 +275,7 @@ export const planModelStudioComposition = action({
 		) {
 			return null;
 		}
-		await ctx.runMutation(internal.studioInternal.setRunStatus, {
+		await ctx.runMutation(internal.studio.internal.setRunStatus, {
 			runId: args.runId,
 			status: "planning",
 		});
@@ -288,7 +288,7 @@ export const planModelStudioComposition = action({
 				output: Output.object({ schema: compositionPlannerOutputSchema }),
 			});
 			const plan = result.output;
-			await ctx.runMutation(internal.studioInternal.commitCompositionPlan, {
+			await ctx.runMutation(internal.studio.internal.commitCompositionPlan, {
 				runId: args.runId,
 				plannerModel: PLANNER_MODEL_ID,
 				plannerReasoning: "medium",
@@ -304,7 +304,7 @@ export const planModelStudioComposition = action({
 		} catch (error) {
 			const message =
 				error instanceof Error ? error.message : "Composition planning failed.";
-			await ctx.runMutation(internal.studioInternal.setRunStatus, {
+			await ctx.runMutation(internal.studio.internal.setRunStatus, {
 				runId: args.runId,
 				status: "failed",
 				lastError: message,
@@ -322,7 +322,7 @@ export const generateReferenceImage = action({
 	returns: v.null(),
 	handler: async (ctx, args) => {
 		await requireAdmin(ctx);
-		const run = await ctx.runQuery(internal.studioQueries.getRunDoc, {
+		const run = await ctx.runQuery(internal.studio.queries.getRunDoc, {
 			runId: args.runId,
 		});
 		if (!run?.imagePrompt && !run?.videoPrompt && !run?.videoParams?.prompt) {
@@ -342,7 +342,7 @@ export const generateReferenceImage = action({
 			quality: run.imageQuality ?? "medium",
 		});
 
-		await ctx.runMutation(internal.studioInternal.setRunStatus, {
+		await ctx.runMutation(internal.studio.internal.setRunStatus, {
 			runId: args.runId,
 			status: "image_generating",
 		});
@@ -373,7 +373,7 @@ export const generateReferenceImage = action({
 				| { revisedPrompt?: string }
 				| undefined;
 
-			await ctx.runMutation(internal.studioInternal.appendReferenceImage, {
+			await ctx.runMutation(internal.studio.internal.appendReferenceImage, {
 				runId: args.runId,
 				image: {
 					id: newMediaId("img"),
@@ -394,7 +394,7 @@ export const generateReferenceImage = action({
 		} catch (error) {
 			const message =
 				error instanceof Error ? error.message : "Image generation failed.";
-			await ctx.runMutation(internal.studioInternal.setRunStatus, {
+			await ctx.runMutation(internal.studio.internal.setRunStatus, {
 				runId: args.runId,
 				status: "failed",
 				lastError: message,
@@ -413,7 +413,7 @@ export const generateVideoForRun = action({
 	returns: v.null(),
 	handler: async (ctx, args) => {
 		await requireAdmin(ctx);
-		const run = await ctx.runQuery(internal.studioQueries.getRunDoc, {
+		const run = await ctx.runQuery(internal.studio.queries.getRunDoc, {
 			runId: args.runId,
 		});
 		if (!run) {
@@ -475,14 +475,14 @@ export const generateVideoForRun = action({
 			referenceUrls,
 		});
 
-		await ctx.runMutation(internal.studioInternal.updateVideoConfig, {
+		await ctx.runMutation(internal.studio.internal.updateVideoConfig, {
 			runId: args.runId,
 			selectedModelId: modelId,
 			videoParams: parsedParams,
 			videoPrompt: adapted.body.prompt,
 		});
 
-		await ctx.runMutation(internal.studioInternal.setRunStatus, {
+		await ctx.runMutation(internal.studio.internal.setRunStatus, {
 			runId: args.runId,
 			status: "video_generating",
 		});
@@ -502,7 +502,7 @@ export const generateVideoForRun = action({
 				mimeType: downloaded.mimeType,
 			});
 
-			await ctx.runMutation(internal.studioInternal.appendVideo, {
+			await ctx.runMutation(internal.studio.internal.appendVideo, {
 				runId: args.runId,
 				video: {
 					id: newMediaId("vid"),
@@ -529,7 +529,7 @@ export const generateVideoForRun = action({
 		} catch (error) {
 			const message =
 				error instanceof Error ? error.message : "Video generation failed.";
-			await ctx.runMutation(internal.studioInternal.setRunStatus, {
+			await ctx.runMutation(internal.studio.internal.setRunStatus, {
 				runId: args.runId,
 				status: "failed",
 				lastError: message,
@@ -548,7 +548,7 @@ export const generateNextCompositionClip = internalAction({
 	returns: v.null(),
 	handler: async (ctx, args) => {
 		const claimed = await ctx.runMutation(
-			internal.studioInternal.claimNextCompositionClip,
+			internal.studio.internal.claimNextCompositionClip,
 			{ jobId: args.jobId },
 		);
 		if (!claimed) {
@@ -582,7 +582,7 @@ export const generateNextCompositionClip = internalAction({
 			if (!isVideoModelId(job.videoParams.modelId)) {
 				throw new Error("Composition uses an unsupported video model.");
 			}
-			const run = await ctx.runQuery(internal.studioQueries.getRunDoc, {
+			const run = await ctx.runQuery(internal.studio.queries.getRunDoc, {
 				runId: job.runId,
 			});
 			if (!run) {
@@ -660,7 +660,7 @@ export const generateNextCompositionClip = internalAction({
 				...adapted.warnings,
 				...referenceWarnings,
 			];
-			await ctx.runMutation(internal.studioInternal.completeCompositionClip, {
+			await ctx.runMutation(internal.studio.internal.completeCompositionClip, {
 				jobId: args.jobId,
 				clipId: clip._id,
 				video: {
@@ -693,7 +693,7 @@ export const generateNextCompositionClip = internalAction({
 			if (generatedObjectKey) {
 				await deleteR2Objects([generatedObjectKey]);
 			}
-			await ctx.runMutation(internal.studioInternal.failCompositionClip, {
+			await ctx.runMutation(internal.studio.internal.failCompositionClip, {
 				jobId: args.jobId,
 				clipId: clip._id,
 				message:
@@ -720,7 +720,7 @@ export const refreshModelCatalog = action({
 
 		const payload = JSON.stringify(filtered);
 		const fetchedAt = Date.now();
-		await ctx.runMutation(internal.studioInternal.setCatalogCache, {
+		await ctx.runMutation(internal.studio.internal.setCatalogCache, {
 			payload,
 			fetchedAt,
 		});

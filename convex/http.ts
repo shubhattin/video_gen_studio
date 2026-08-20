@@ -65,7 +65,7 @@ http.route({
 		}
 
 		const allowed = await ctx.runQuery(
-			internal.studioQueries.objectKeyBelongsToRun,
+			internal.studio.queries.objectKeyBelongsToRun,
 			{
 				runId: runId as Id<"generationRuns">,
 				objectKey,
@@ -76,7 +76,7 @@ http.route({
 		}
 
 		const signedUrl = await ctx.runAction(
-			internal.studioR2.createInternalReadUrl,
+			internal.studio.r2.createInternalReadUrl,
 			{ objectKey },
 		);
 		const upstream = await fetch(signedUrl);

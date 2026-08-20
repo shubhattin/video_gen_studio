@@ -33,8 +33,8 @@ export function useCompositionTerminalFrameHandoff(args: {
 	compositionJob: CompositionHandoffJob;
 	onError?: (error: unknown) => void;
 }) {
-	const prepareUpload = useAction(api.studioR2.prepareTerminalFrameUpload);
-	const finalizeUpload = useAction(api.studioR2.finalizeTerminalFrameUpload);
+	const prepareUpload = useAction(api.studio.r2.prepareTerminalFrameUpload);
+	const finalizeUpload = useAction(api.studio.r2.finalizeTerminalFrameUpload);
 	const inFlightRef = useRef<string | null>(null);
 	const onError = useEffectEvent((error: unknown) => {
 		args.onError?.(error);

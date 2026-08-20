@@ -22,9 +22,9 @@ studio/runs/<runId>/frames/<id>.<ext>
 ## Client flow
 
 1. **Upload** — Convex action returns a presigned `PUT` URL → browser uploads directly to R2 → finalize action verifies the object.
-2. **Read / play** — `studioR2.getReadUrls` signs `GET` URLs; `useSignedMediaUrls` attaches them for `<video>` / `<img>`.
+2. **Read / play** — `studio.r2.getReadUrls` signs `GET` URLs; `useSignedMediaUrls` attaches them for `<video>` / `<img>`.
 3. **Merge / download** — browser fetches signed R2 URLs directly (needs [CORS](./r2-cors.md)). If that fails, client falls back to Convex HTTP `GET /studio/media` with a Better Auth bearer JWT ([auth](./auth-convex.md)). Prefer fixing CORS so Convex is not in the hot path. `VIDEO_APP_ORIGIN` must match the app origin.
-4. **Deletes** — mutations schedule `studioR2.deleteObjects`.
+4. **Deletes** — mutations schedule `studio.r2.deleteObjects`.
 
 ## Checksums
 

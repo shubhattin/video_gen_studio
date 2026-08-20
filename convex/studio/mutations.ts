@@ -1,103 +1,20 @@
 import { v } from "convex/values";
-import { mutation, query, type QueryCtx } from "./_generated/server";
-import { internal } from "./_generated/api";
-import type { Doc } from "./_generated/dataModel";
-import { requireAdmin } from "./lib/auth";
-import {
-	MODEL_CAPABILITY_PROFILES,
-	VIDEO_MODEL_IDS,
-	type VideoModelId,
-} from "./lib/modelCatalog";
-import { normalizePlannerSystemPromptForStorage } from "./lib/plannerPrompt";
-import { defaultImageConfig, defaultVideoParams } from "./lib/schemas";
-import { buildVideoPromptFromScenes } from "./lib/videoPlanMarkdown";
+import { mutation } from "../_generated/server";
+import { internal } from "../_generated/api";
+import { requireAdmin } from "../lib/auth";
+import { VIDEO_MODEL_IDS, type VideoModelId } from "../lib/modelCatalog";
+import { normalizePlannerSystemPromptForStorage } from "../lib/plannerPrompt";
+import { defaultImageConfig, defaultVideoParams } from "../lib/schemas";
+import { buildVideoPromptFromScenes } from "../lib/videoPlanMarkdown";
 import {
 	compositionModeValidator,
 	videoParamsValidator,
 	videoSceneValidator,
-} from "./schema";
+} from "../schema";
 import {
 	listCompositionJobsForRunCtx,
 	resolveActiveCompositionJob,
-} from "./studioQueries";
-
-async function compositionWithClips(
-	ctx: QueryCtx,
-	job: Doc<"compositionJobs">,
-) {
-	const clips = await ctx.db
-		.query("compositionClips")
-		.withIndex("by_jobId_and_clipIndex", (q) => q.eq("jobId", job._id))
-		.order("asc")
-		.take(6);
-	return {
-		...job,
-		clips,
-	};
-}
-
-export const getRun = query({
-	args: {
-		runId: v.id("generationRuns"),
-	},
-	returns: v.union(v.null(), v.any()),
-	handler: async (ctx, args) => {
-		await requireAdmin(ctx);
-		return await ctx.db.get(args.runId);
-	},
-});
-
-export const getCompositionForRun = query({
-	args: {
-		runId: v.id("generationRuns"),
-		jobId: v.optional(v.id("compositionJobs")),
-	},
-	returns: v.union(v.null(), v.any()),
-	handler: async (ctx, args) => {
-		await requireAdmin(ctx);
-		let job = null;
-		if (args.jobId) {
-			const selected = await ctx.db.get(args.jobId);
-			if (selected && selected.runId === args.runId) {
-				job = selected;
-			}
-		}
-		if (!job) {
-			job = await resolveActiveCompositionJob(ctx, args.runId);
-		}
-		if (!job) {
-			return null;
-		}
-		return await compositionWithClips(ctx, job);
-	},
-});
-
-export const listCompositionJobsForRun = query({
-	args: {
-		runId: v.id("generationRuns"),
-	},
-	returns: v.array(v.any()),
-	handler: async (ctx, args) => {
-		await requireAdmin(ctx);
-		const jobs = await listCompositionJobsForRunCtx(ctx, args.runId);
-		return jobs.map((job) => ({
-			_id: job._id,
-			attemptNumber: job.attemptNumber ?? 1,
-			status: job.status,
-			mode: job.mode,
-			clipCount: job.clipCount,
-			videoParams: job.videoParams,
-			overallDescription: job.overallDescription,
-			plannerModel: job.plannerModel,
-			plannerReasoning: job.plannerReasoning,
-			estimatedCostUsd: job.estimatedCostUsd,
-			actualCostUsd: job.actualCostUsd,
-			createdAt: job.createdAt,
-			updatedAt: job.updatedAt,
-			lastError: job.lastError,
-		}));
-	},
-});
+} from "./queries";
 
 export const selectCompositionJob = mutation({
 	args: {
@@ -120,54 +37,6 @@ export const selectCompositionJob = mutation({
 			updatedAt: Date.now(),
 		});
 		return null;
-	},
-});
-
-export const listRecentRuns = query({
-	args: {
-		limit: v.optional(v.number()),
-	},
-	returns: v.array(v.any()),
-	handler: async (ctx, args) => {
-		await requireAdmin(ctx);
-		const limit = Math.min(args.limit ?? 20, 50);
-		return await ctx.db
-			.query("generationRuns")
-			.withIndex("by_createdAt")
-			.order("desc")
-			.take(limit);
-	},
-});
-
-export const getStaticModelCatalog = query({
-	args: {},
-	returns: v.any(),
-	handler: async (ctx) => {
-		await requireAdmin(ctx);
-		return {
-			modelIds: VIDEO_MODEL_IDS,
-			profiles: MODEL_CAPABILITY_PROFILES,
-		};
-	},
-});
-
-export const getCachedOpenRouterCatalog = query({
-	args: {},
-	returns: v.union(v.null(), v.any()),
-	handler: async (ctx) => {
-		await requireAdmin(ctx);
-		const cached = await ctx.db.query("catalogCache").first();
-		if (!cached) {
-			return null;
-		}
-		try {
-			return {
-				fetchedAt: cached.fetchedAt,
-				models: JSON.parse(cached.payload),
-			};
-		} catch {
-			return null;
-		}
 	},
 });
 
@@ -412,7 +281,7 @@ export const startComposition = mutation({
 			throw new Error("This composition cannot be started.");
 		}
 		if (job.status === "failed") {
-			await ctx.runMutation(internal.studioInternal.resetFailedCompositionJob, {
+			await ctx.runMutation(internal.studio.internal.resetFailedCompositionJob, {
 				jobId: job._id,
 			});
 		}
@@ -422,7 +291,7 @@ export const startComposition = mutation({
 		});
 		await ctx.scheduler.runAfter(
 			0,
-			internal.studioActions.generateNextCompositionClip,
+			internal.studio.actions.generateNextCompositionClip,
 			{ jobId: job._id },
 		);
 		return null;
@@ -503,7 +372,7 @@ export const deleteRun = mutation({
 		}
 		await ctx.db.delete(args.runId);
 		if (keysToDelete.length > 0) {
-			await ctx.scheduler.runAfter(0, internal.studioR2.deleteObjects, {
+			await ctx.scheduler.runAfter(0, internal.studio.r2.deleteObjects, {
 				objectKeys: keysToDelete,
 			});
 		}
@@ -548,7 +417,7 @@ export const removeReferenceImage = mutation({
 			status: referenceImages.length > 0 ? run.status : "plan_ready",
 			updatedAt: Date.now(),
 		});
-		await ctx.scheduler.runAfter(0, internal.studioR2.deleteObjects, {
+		await ctx.scheduler.runAfter(0, internal.studio.r2.deleteObjects, {
 			objectKeys: [target.objectKey],
 		});
 		return null;
@@ -569,6 +438,6 @@ export const wipeAllStudioData = mutation({
 		cachesDeleted: number;
 	}> => {
 		await requireAdmin(ctx);
-		return await ctx.runMutation(internal.studioInternal.wipeAllStudioData, {});
+		return await ctx.runMutation(internal.studio.internal.wipeAllStudioData, {});
 	},
 });

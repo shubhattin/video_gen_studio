@@ -1,16 +1,16 @@
 "use node";
 
 import { v } from "convex/values";
-import { internal } from "./_generated/api";
-import { action, internalAction } from "./_generated/server";
-import { requireAdmin } from "./lib/auth";
+import { internal } from "../_generated/api";
+import { action, internalAction } from "../_generated/server";
+import { requireAdmin } from "../lib/auth";
 import {
 	buildStudioObjectKey,
 	createPresignedGetUrl,
 	createPresignedPutUrl,
 	deleteObjects as deleteR2Objects,
 	headObject,
-} from "./lib/r2";
+} from "../lib/r2";
 
 const ALLOWED_REFERENCE_UPLOAD_MIME_TYPES = new Set([
 	"image/png",
@@ -55,7 +55,7 @@ export const prepareReferenceImageUpload = action({
 	}),
 	handler: async (ctx, args) => {
 		await requireAdmin(ctx);
-		const run = await ctx.runQuery(internal.studioQueries.getRunDoc, {
+		const run = await ctx.runQuery(internal.studio.queries.getRunDoc, {
 			runId: args.runId,
 		});
 		if (!run) {
@@ -99,7 +99,7 @@ export const finalizeReferenceImageUpload = action({
 	}),
 	handler: async (ctx, args) => {
 		await requireAdmin(ctx);
-		const run = await ctx.runQuery(internal.studioQueries.getRunDoc, {
+		const run = await ctx.runQuery(internal.studio.queries.getRunDoc, {
 			runId: args.runId,
 		});
 		if (!run) {
@@ -140,7 +140,7 @@ export const finalizeReferenceImageUpload = action({
 		}
 
 		const imageId = newReferenceImageId();
-		await ctx.runMutation(internal.studioInternal.appendReferenceImage, {
+		await ctx.runMutation(internal.studio.internal.appendReferenceImage, {
 			runId: args.runId,
 			image: {
 				id: imageId,
@@ -174,7 +174,7 @@ export const prepareTerminalFrameUpload = action({
 	handler: async (ctx, args) => {
 		await requireAdmin(ctx);
 		const job = await ctx.runQuery(
-			internal.studioQueries.getCompositionJobByRun,
+			internal.studio.queries.getCompositionJobByRun,
 			{ runId: args.runId },
 		);
 		if (!job) {
@@ -183,7 +183,7 @@ export const prepareTerminalFrameUpload = action({
 		if (job.status !== "awaiting_terminal_frame") {
 			throw new Error("Composition is not waiting for a continuity frame.");
 		}
-		const clip = await ctx.runQuery(internal.studioQueries.getCompositionClip, {
+		const clip = await ctx.runQuery(internal.studio.queries.getCompositionClip, {
 			clipId: args.clipId,
 		});
 		if (!clip || clip.jobId !== job._id) {
@@ -216,7 +216,7 @@ export const finalizeTerminalFrameUpload = action({
 	handler: async (ctx, args) => {
 		await requireAdmin(ctx);
 		const job = await ctx.runQuery(
-			internal.studioQueries.getCompositionJobByRun,
+			internal.studio.queries.getCompositionJobByRun,
 			{ runId: args.runId },
 		);
 		if (!job) {
@@ -227,7 +227,7 @@ export const finalizeTerminalFrameUpload = action({
 			await deleteR2Objects([args.objectKey]);
 			throw new Error("Composition is not waiting for a continuity frame.");
 		}
-		const clip = await ctx.runQuery(internal.studioQueries.getCompositionClip, {
+		const clip = await ctx.runQuery(internal.studio.queries.getCompositionClip, {
 			clipId: args.clipId,
 		});
 		if (!clip || clip.jobId !== job._id) {
@@ -252,7 +252,7 @@ export const finalizeTerminalFrameUpload = action({
 			throw new Error("Continuity frame is too large.");
 		}
 		await ctx.runMutation(
-			internal.studioInternal.attachCompositionTerminalFrame,
+			internal.studio.internal.attachCompositionTerminalFrame,
 			{
 				jobId: job._id,
 				clipId: args.clipId,
@@ -276,7 +276,7 @@ export const getReadUrls = action({
 		await Promise.all(
 			uniqueKeys.map(async (objectKey) => {
 				const allowed = await ctx.runQuery(
-					internal.studioQueries.objectKeyBelongsToRun,
+					internal.studio.queries.objectKeyBelongsToRun,
 					{ runId: args.runId, objectKey },
 				);
 				if (!allowed) {
@@ -305,7 +305,7 @@ export const getDownloadUrl = action({
 	handler: async (ctx, args) => {
 		await requireAdmin(ctx);
 		const allowed = await ctx.runQuery(
-			internal.studioQueries.objectKeyBelongsToRun,
+			internal.studio.queries.objectKeyBelongsToRun,
 			{
 				runId: args.runId,
 				objectKey: args.objectKey,

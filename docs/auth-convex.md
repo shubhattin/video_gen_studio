@@ -69,6 +69,6 @@ Do **not** commit the data URI. It is dashboard env only.
 
 ## What is guarded
 
-Public Convex queries / mutations / actions (`studio.ts`, `studioActions.ts`, `studioR2.ts`) and `GET /studio/media` call `requireAdmin`. Internals and scheduled clip generation stay unguarded (no user JWT on that path). There is no per-run ownership: any admin can see any run.
+Public Convex queries / mutations / actions (`studio/queries.ts`, `studio/mutations.ts`, `studio/actions.ts`, `studio/r2.ts`) and `GET /studio/media` call `requireAdmin`. Internals and scheduled clip generation stay unguarded (no user JWT on that path). There is no per-run ownership: any admin can see any run.
 
 `/studio/media` is a CORS fallback for `fetch` / FFmpeg, not `<video src>`. It requires `Authorization: Bearer`. See [R2 media storage](./r2-media-storage.md).

@@ -88,33 +88,37 @@ function ShlokaStudioPage() {
 		multiplier: 2,
 	});
 
-	const run = useQuery(api.studio.getRun, runId ? { runId } : "skip");
+	const run = useQuery(api.studio.queries.getRun, runId ? { runId } : "skip");
 	const compositionJob = useQuery(
-		api.studio.getCompositionForRun,
+		api.studio.queries.getCompositionForRun,
 		runId ? { runId } : "skip",
 	);
 	const compositionAttempts = useQuery(
-		api.studio.listCompositionJobsForRun,
+		api.studio.queries.listCompositionJobsForRun,
 		runId ? { runId } : "skip",
 	);
-	const catalog = useQuery(api.studio.getCachedOpenRouterCatalog);
-	const refreshCatalog = useAction(api.studioActions.refreshModelCatalog);
+	const catalog = useQuery(api.studio.queries.getCachedOpenRouterCatalog);
+	const refreshCatalog = useAction(api.studio.actions.refreshModelCatalog);
 
-	const createDraft = useMutation(api.studio.createShlokaDraft);
-	const updateDraft = useMutation(api.studio.updateDraft);
-	const removeReferenceImage = useMutation(api.studio.removeReferenceImage);
+	const createDraft = useMutation(api.studio.mutations.createShlokaDraft);
+	const updateDraft = useMutation(api.studio.mutations.updateDraft);
+	const removeReferenceImage = useMutation(
+		api.studio.mutations.removeReferenceImage,
+	);
 	const prepareReferenceImageUpload = useAction(
-		api.studioR2.prepareReferenceImageUpload,
+		api.studio.r2.prepareReferenceImageUpload,
 	);
 	const finalizeReferenceImageUpload = useAction(
-		api.studioR2.finalizeReferenceImageUpload,
+		api.studio.r2.finalizeReferenceImageUpload,
 	);
-	const planRun = useAction(api.studioActions.planShlokaRun);
-	const generateImage = useAction(api.studioActions.generateReferenceImage);
-	const generateVideo = useAction(api.studioActions.generateVideoForRun);
-	const startComposition = useMutation(api.studio.startComposition);
-	const cancelComposition = useMutation(api.studio.cancelComposition);
-	const selectCompositionJob = useMutation(api.studio.selectCompositionJob);
+	const planRun = useAction(api.studio.actions.planShlokaRun);
+	const generateImage = useAction(api.studio.actions.generateReferenceImage);
+	const generateVideo = useAction(api.studio.actions.generateVideoForRun);
+	const startComposition = useMutation(api.studio.mutations.startComposition);
+	const cancelComposition = useMutation(api.studio.mutations.cancelComposition);
+	const selectCompositionJob = useMutation(
+		api.studio.mutations.selectCompositionJob,
+	);
 
 	const rawImages = run?.referenceImages ?? [];
 	const rawVideos = run?.videos ?? [];
