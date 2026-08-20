@@ -30,6 +30,17 @@ import { VideoGenerateConfirm } from "#/components/studio/video/video-generate-c
 import { VideoModelSelector } from "#/components/studio/video/video-model-selector";
 import { VideoResult } from "#/components/studio/video/video-result";
 import { Button } from "#/components/ui/button";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+	AlertDialogTrigger,
+} from "#/components/ui/alert-dialog";
 import { useCompositionTerminalFrameHandoff } from "#/hooks/use-composition-terminal-frame-handoff";
 import {
 	isTextOnlyConfigChange,
@@ -491,6 +502,13 @@ function ShlokaStudioPage() {
 		run?.status === "failed" ||
 		busyStage === "planning";
 
+	const activePlan = (shlokaPlans ?? []).find(
+		(plan: { _id?: string }) => plan._id === run?.activePlanId,
+	) as { title?: string; attemptNumber: number } | undefined;
+	const activePlanLabel = activePlan
+		? activePlan.title?.trim() || `Plan ${activePlan.attemptNumber}`
+		: undefined;
+
 	const isPlanningNextComposition =
 		composition.enabled &&
 		(busyStage === "planning" || run?.status === "planning") &&
@@ -609,21 +627,89 @@ function ShlokaStudioPage() {
 								) : null}
 
 								<div className="flex flex-wrap gap-3">
-									<Button
-										className="min-h-11"
-										disabled={!shlokaText.trim() || anyBusy}
-										onClick={onPlan}
-									>
-										{busyStage === "planning"
-											? "Planning…"
-											: composition.enabled
-												? (compositionAttempts?.length ?? 0) > 0
-													? "Plan another multi-clip attempt"
-													: "Generate multi-clip plan"
-												: (shlokaPlans?.length ?? 0) > 0
-													? "Plan another"
-													: "Generate creative plan"}
-									</Button>
+									{busyStage === "planning" ? (
+										<Button className="min-h-11" disabled>
+											Planning…
+										</Button>
+									) : composition.enabled ? (
+										(compositionAttempts?.length ?? 0) > 0 ? (
+											<AlertDialog>
+												<AlertDialogTrigger
+													render={
+														<Button
+															className="min-h-11"
+															disabled={!shlokaText.trim() || anyBusy}
+														/>
+													}
+												>
+													Plan another multi-clip attempt
+												</AlertDialogTrigger>
+												<AlertDialogContent>
+													<AlertDialogHeader>
+														<AlertDialogTitle>
+															Plan another attempt?
+														</AlertDialogTitle>
+														<AlertDialogDescription>
+															This creates a new multi-clip plan from your
+															shloka and instructions. Your current plan stays
+															available to switch back to.
+														</AlertDialogDescription>
+													</AlertDialogHeader>
+													<AlertDialogFooter>
+														<AlertDialogCancel>Cancel</AlertDialogCancel>
+														<AlertDialogAction onClick={() => void onPlan()}>
+															Plan another
+														</AlertDialogAction>
+													</AlertDialogFooter>
+												</AlertDialogContent>
+											</AlertDialog>
+										) : (
+											<Button
+												className="min-h-11"
+												disabled={!shlokaText.trim() || anyBusy}
+												onClick={onPlan}
+											>
+												Generate multi-clip plan
+											</Button>
+										)
+									) : (shlokaPlans?.length ?? 0) > 0 ? (
+										<AlertDialog>
+											<AlertDialogTrigger
+												render={
+													<Button
+														className="min-h-11"
+														disabled={!shlokaText.trim() || anyBusy}
+													/>
+												}
+											>
+												Plan another
+											</AlertDialogTrigger>
+											<AlertDialogContent>
+												<AlertDialogHeader>
+													<AlertDialogTitle>Plan another?</AlertDialogTitle>
+													<AlertDialogDescription>
+														This creates a new plan from your shloka and
+														instructions. Your current plan stays available to
+														switch back to.
+													</AlertDialogDescription>
+												</AlertDialogHeader>
+												<AlertDialogFooter>
+													<AlertDialogCancel>Cancel</AlertDialogCancel>
+													<AlertDialogAction onClick={() => void onPlan()}>
+														Plan another
+													</AlertDialogAction>
+												</AlertDialogFooter>
+											</AlertDialogContent>
+										</AlertDialog>
+									) : (
+										<Button
+											className="min-h-11"
+											disabled={!shlokaText.trim() || anyBusy}
+											onClick={onPlan}
+										>
+											Generate creative plan
+										</Button>
+									)}
 								</div>
 
 								{planReady ? (
@@ -746,14 +832,6 @@ function ShlokaStudioPage() {
 														}
 													: undefined
 											}
-											onRegenerate={
-												runId
-													? () => {
-															void planRun({ runId, force: true });
-														}
-													: undefined
-											}
-											regenerating={busyStage === "planning"}
 											activePlanId={run?.activePlanId ?? null}
 											attempts={
 												(shlokaPlans ?? []) as Array<{
@@ -924,6 +1002,7 @@ function ShlokaStudioPage() {
 											disabled={anyBusy}
 											generating={busyStage === "video"}
 											triggerLabel="Generate video clip"
+											planLabel={activePlanLabel}
 											onConfirm={onGenerateVideo}
 										/>
 									</div>

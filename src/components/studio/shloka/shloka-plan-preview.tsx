@@ -1,6 +1,16 @@
-import { Copy, GitFork, Pencil, RefreshCw, Trash2 } from "lucide-react";
+import { Copy, GitFork, Pencil, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { MessageResponse } from "#/components/ai-elements/message";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "#/components/ui/alert-dialog";
 import { Button } from "#/components/ui/button";
 import {
 	Dialog,
@@ -39,8 +49,6 @@ type ShlokaPlanPreviewProps = {
 	compositionClips?: CompositionClipPlan[];
 	activePlanId?: string | null;
 	attempts?: Array<{ attemptNumber: number }>;
-	onRegenerate?: () => void;
-	regenerating?: boolean;
 	disabled?: boolean;
 	onSaveImagePrompt?: (imagePrompt: string) => Promise<void> | void;
 	onSaveVideoScenes?: (videoScenes: VideoScene[]) => Promise<void> | void;
@@ -176,8 +184,6 @@ export function ShlokaPlanPreview({
 	compositionClips,
 	activePlanId,
 	attempts,
-	onRegenerate,
-	regenerating,
 	disabled,
 	onSaveImagePrompt,
 	onSaveVideoScenes,
@@ -194,6 +200,7 @@ export function ShlokaPlanPreview({
 	const [forkOpen, setForkOpen] = useState(false);
 	const [forkTitle, setForkTitle] = useState("");
 	const [forking, setForking] = useState(false);
+	const [deleteOpen, setDeleteOpen] = useState(false);
 	const hasCompositionClips = Boolean(compositionClips?.length);
 	const hasScenes = Boolean(videoScenes?.length) || hasCompositionClips;
 	const scenesMarkdown = videoScenes?.length
@@ -280,18 +287,6 @@ export function ShlokaPlanPreview({
 							{copied === activeCopy.key ? "Copied" : activeCopy.label}
 						</Button>
 					) : null}
-					{onRegenerate ? (
-						<Button
-							variant="outline"
-							size="sm"
-							className="min-h-11"
-							onClick={onRegenerate}
-							disabled={regenerating || disabled}
-						>
-							<RefreshCw className={regenerating ? "animate-spin" : ""} />
-							Regenerate plan
-						</Button>
-					) : null}
 				</div>
 				<div className="flex flex-wrap items-center gap-2">
 					{canEdit ? (
@@ -320,14 +315,15 @@ export function ShlokaPlanPreview({
 					) : null}
 					{onDelete && activePlanId ? (
 						<Button
+							type="button"
 							variant="ghost"
-							size="sm"
-							className="min-h-11"
+							size="icon"
+							className="min-h-11 min-w-11 text-destructive hover:bg-destructive/10 hover:text-destructive"
 							disabled={disabled}
-							onClick={() => onDelete(activePlanId)}
+							aria-label="Delete plan"
+							onClick={() => setDeleteOpen(true)}
 						>
 							<Trash2 className="size-4" />
-							Delete plan
 						</Button>
 					) : null}
 				</div>
@@ -543,6 +539,31 @@ export function ShlokaPlanPreview({
 					</DialogFooter>
 				</DialogContent>
 			</Dialog>
+
+			<AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>Delete this plan?</AlertDialogTitle>
+						<AlertDialogDescription>
+							This permanently deletes this plan attempt and its content. This
+							cannot be undone.
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel disabled={disabled}>Cancel</AlertDialogCancel>
+						<AlertDialogAction
+							variant="destructive"
+							disabled={disabled}
+							onClick={() => {
+								if (activePlanId) onDelete?.(activePlanId);
+								setDeleteOpen(false);
+							}}
+						>
+							Delete
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 		</section>
 	);
 }

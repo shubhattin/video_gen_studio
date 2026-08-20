@@ -18,6 +18,7 @@ import {
 	type VideoModelId,
 } from "#/lib/model-catalog";
 import type { VideoConfigState } from "#/components/studio/video/video-configuration";
+import { cn } from "#/lib/utils";
 
 type VideoGenerateConfirmProps = {
 	config: VideoConfigState;
@@ -25,6 +26,7 @@ type VideoGenerateConfirmProps = {
 	generating?: boolean;
 	triggerLabel: string;
 	generatingLabel?: string;
+	planLabel?: string;
 	className?: string;
 	onConfirm: () => void;
 };
@@ -49,6 +51,7 @@ export function VideoGenerateConfirm({
 	generating,
 	triggerLabel,
 	generatingLabel = "Generating video…",
+	planLabel,
 	className,
 	onConfirm,
 }: VideoGenerateConfirmProps) {
@@ -56,60 +59,69 @@ export function VideoGenerateConfirm({
 	const profile = MODEL_CAPABILITY_PROFILES[config.modelId as VideoModelId];
 
 	return (
-		<AlertDialog open={open} onOpenChange={setOpen}>
-			<AlertDialogTrigger
-				render={
-					<Button
-						type="button"
-						className={className}
-						disabled={disabled || generating}
-					/>
-				}
-			>
-				{generating ? generatingLabel : triggerLabel}
-			</AlertDialogTrigger>
-			<AlertDialogContent size="default">
-				<AlertDialogHeader>
-					<AlertDialogMedia>
-						<Clapperboard className="size-8" />
-					</AlertDialogMedia>
-					<AlertDialogTitle>Start video generation?</AlertDialogTitle>
-					<AlertDialogDescription>
-						This will generate a clip with the current model and settings.
-					</AlertDialogDescription>
-				</AlertDialogHeader>
-
-				<div className="grid gap-2">
-					<DetailRow
-						label="Model"
-						value={profile?.displayName ?? config.modelId}
-					/>
-					<DetailRow label="Aspect ratio" value={config.aspectRatio} />
-					<DetailRow label="Resolution" value={config.resolution} />
-					<DetailRow label="Duration" value={`${config.durationSeconds}s`} />
-					{profile?.supportsAudio ? (
-						<DetailRow
-							label="Audio"
-							value={config.generateAudio ? "On" : "Off"}
+		<div className="flex flex-col gap-1.5">
+			{planLabel ? (
+				<p className="text-xs text-muted-foreground">
+					Using plan:{" "}
+					<span className="font-medium text-foreground">{planLabel}</span>
+				</p>
+			) : null}
+			<AlertDialog open={open} onOpenChange={setOpen}>
+				<AlertDialogTrigger
+					render={
+						<Button
+							type="button"
+							className={cn("w-full", className)}
+							disabled={disabled || generating}
 						/>
-					) : null}
-					{profile?.supportsNegativePrompt && config.negativePrompt?.trim() ? (
-						<DetailRow label="Negative prompt" value="Set" />
-					) : null}
-				</div>
+					}
+				>
+					{generating ? generatingLabel : triggerLabel}
+				</AlertDialogTrigger>
+				<AlertDialogContent size="default">
+					<AlertDialogHeader>
+						<AlertDialogMedia>
+							<Clapperboard className="size-8" />
+						</AlertDialogMedia>
+						<AlertDialogTitle>Start video generation?</AlertDialogTitle>
+						<AlertDialogDescription>
+							This will generate a clip with the current model and settings.
+						</AlertDialogDescription>
+					</AlertDialogHeader>
 
-				<AlertDialogFooter>
-					<AlertDialogCancel>Cancel</AlertDialogCancel>
-					<AlertDialogAction
-						onClick={() => {
-							setOpen(false);
-							onConfirm();
-						}}
-					>
-						Generate
-					</AlertDialogAction>
-				</AlertDialogFooter>
-			</AlertDialogContent>
-		</AlertDialog>
+					<div className="grid gap-2">
+						{planLabel ? <DetailRow label="Plan" value={planLabel} /> : null}
+						<DetailRow
+							label="Model"
+							value={profile?.displayName ?? config.modelId}
+						/>
+						<DetailRow label="Aspect ratio" value={config.aspectRatio} />
+						<DetailRow label="Resolution" value={config.resolution} />
+						<DetailRow label="Duration" value={`${config.durationSeconds}s`} />
+						{profile?.supportsAudio ? (
+							<DetailRow
+								label="Audio"
+								value={config.generateAudio ? "On" : "Off"}
+							/>
+						) : null}
+						{profile?.supportsNegativePrompt && config.negativePrompt?.trim() ? (
+							<DetailRow label="Negative prompt" value="Set" />
+						) : null}
+					</div>
+
+					<AlertDialogFooter>
+						<AlertDialogCancel>Cancel</AlertDialogCancel>
+						<AlertDialogAction
+							onClick={() => {
+								setOpen(false);
+								onConfirm();
+							}}
+						>
+							Generate
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
+		</div>
 	);
 }
