@@ -344,14 +344,20 @@ export function ReferenceImagePanel({
 			<div className="rounded-2xl border border-border/70 bg-muted/15 p-3 sm:p-4">
 				<div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto_auto] sm:items-end">
 					<div className="flex flex-col gap-1.5">
-						<Label className="text-xs">Size</Label>
+						<Label className="text-xs">Aspect ratio</Label>
 						<Select
 							value={imageSize}
 							onValueChange={(value) => value && onSizeChange(value)}
 							disabled={configBusy}
 						>
 							<SelectTrigger className="h-9">
-								<SelectValue />
+								<SelectValue>
+									{imageSize === "1024x1024"
+										? "Square 1:1"
+										: imageSize === "1536x1024"
+											? "Landscape 3:2"
+											: "Portrait 2:3"}
+								</SelectValue>
 							</SelectTrigger>
 							<SelectContent>
 								<SelectItem value="1024x1536">Portrait 2:3</SelectItem>

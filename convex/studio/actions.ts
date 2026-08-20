@@ -3,12 +3,13 @@
 import { generateImage, generateText, Output } from "ai";
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
-import { action, internalAction } from "../_generated/server";
-import type { Id } from "../_generated/dataModel";
+import { action, internalAction, type ActionCtx } from "../_generated/server";
+import type { Doc, Id } from "../_generated/dataModel";
 import { requireAdmin } from "../lib/auth";
 import {
 	MODEL_CAPABILITY_PROFILES,
 	PLANNER_MODEL_ID,
+	TITLE_MODEL_ID,
 	VIDEO_MODEL_IDS,
 	type VideoModelId,
 	isVideoModelId,
@@ -730,5 +731,103 @@ export const refreshModelCatalog = action({
 			models: filtered,
 			profiles: MODEL_CAPABILITY_PROFILES,
 		};
+	},
+});
+
+/** Shared title-generation logic used by both the public and internal actions. */
+async function runTitleGeneration(
+	ctx: ActionCtx,
+	args: { runId: Id<"generationRuns">; force?: boolean },
+): Promise<string> {
+	const run: Doc<"generationRuns"> | null = await ctx.runQuery(
+		internal.studio.queries.getRunDoc,
+		{ runId: args.runId },
+	);
+	if (!run) {
+		throw new Error("Run not found.");
+	}
+	// Only fill an empty title; never overwrite an existing one unless forced
+	// (manual "regenerate title"). This keeps plan regeneration from churning titles.
+	if (!args.force && run.title?.trim()) {
+		return run.title;
+	}
+
+	const shloka = (run.shlokaText as string | undefined)?.trim();
+	const videoBrief =
+		(run.videoPrompt as string | undefined)?.trim() ||
+		(run.videoParams?.prompt as string | undefined)?.trim();
+	const modelLabel = isVideoModelId(run.selectedModelId ?? "")
+		? MODEL_CAPABILITY_PROFILES[run.selectedModelId as VideoModelId].displayName
+		: null;
+	const provenanceLabel =
+		run.provenance === "model-studio" ? "Model Run" : "Shloka Run";
+	const fallback = modelLabel ?? provenanceLabel;
+
+	const sceneIntents = (run.videoScenes ?? [])
+		.map((scene) => scene.intent)
+		.filter(Boolean)
+		.slice(0, 4)
+		.join(", ");
+	const context = shloka
+		? `Shloka: ${shloka.slice(0, 600)}`
+		: videoBrief
+			? `Video brief: ${videoBrief.slice(0, 600)}`
+			: sceneIntents;
+	if (!context.trim()) {
+		// Nothing to summarize yet — leave the title null (UI shows a neutral
+		// fallback) so the real generation can happen once content exists.
+		return fallback;
+	}
+
+	try {
+		const result = await generateText({
+			model: getOpenRouterProvider()(TITLE_MODEL_ID),
+			reasoning: "none",
+			system:
+				"You write short, clear titles for video-generation runs (under 60 characters). No quotes, emoji, hashtags, or trailing punctuation.",
+			prompt: `Write a short title for this run.\n\n${context}`,
+		});
+		const title =
+			result.text.replace(/^["'`\s]+|["'`\s]+$/g, "").trim().slice(0, 90) ||
+			fallback;
+		await ctx.runMutation(internal.studio.internal.setRunTitle, {
+			runId: args.runId,
+			title,
+		});
+		return title;
+	} catch {
+		// Generation failed — leave the title null rather than dumping raw
+		// content; the user can retry via "Regenerate title".
+		return fallback;
+	}
+}
+
+/** Public: called from the client ("Regenerate title" in the sidebar). */
+export const generateRunTitle = action({
+	args: {
+		runId: v.id("generationRuns"),
+		force: v.optional(v.boolean()),
+	},
+	returns: v.string(),
+	handler: async (ctx, args): Promise<string> => {
+		await requireAdmin(ctx);
+		return await runTitleGeneration(ctx, args);
+	},
+});
+
+/**
+ * Internal: scheduled from mutations (run creation, draft updates, plan
+ * commits). Scheduler-invoked functions carry no user auth, so this variant
+ * skips requireAdmin — internal functions are only callable by other Convex
+ * functions, which is safe.
+ */
+export const generateRunTitleScheduled = internalAction({
+	args: {
+		runId: v.id("generationRuns"),
+		force: v.optional(v.boolean()),
+	},
+	returns: v.string(),
+	handler: async (ctx, args): Promise<string> => {
+		return await runTitleGeneration(ctx, args);
 	},
 });

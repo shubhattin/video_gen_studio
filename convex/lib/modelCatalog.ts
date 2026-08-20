@@ -40,6 +40,8 @@ export const VIDEO_MODEL_FAMILY_META: Record<
 };
 
 export const PLANNER_MODEL_ID = "openai/gpt-5.6-terra";
+/** Fast, no-reasoning model used to summarize a run into a short title. */
+export const TITLE_MODEL_ID = "openai/gpt-5.6-luna";
 export const REFERENCE_IMAGE_MODEL_ID = "gpt-image-2";
 
 export type AspectRatio =
