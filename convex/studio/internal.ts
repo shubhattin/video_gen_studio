@@ -3,13 +3,15 @@ import { internal } from "../_generated/api";
 import { internalMutation, type MutationCtx } from "../_generated/server";
 import {
 	compositionClipPlanValidator,
-	generatedVideoValidator,
-	referenceImageValidator,
+	galleryImageSourceValidator,
+	mediaMetaValidator,
 	runStatusValidator,
 	videoParamsValidator,
 	videoSceneValidator,
 } from "../schema";
 import { estimateVideoCostUsd } from "../lib/videoAdapters";
+import { leftoverObjectKeys } from "./migrateLegacy";
+import { uniqueIds } from "./media";
 
 async function scheduleObjectDeletes(
 	ctx: MutationCtx,
@@ -25,6 +27,18 @@ async function scheduleObjectDeletes(
 		objectKeys: keys,
 	});
 }
+
+const galleryVideoInsertValidator = v.object({
+	objectKey: v.string(),
+	meta: mediaMetaValidator,
+	openRouterJobId: v.string(),
+	openRouterGenerationId: v.optional(v.string()),
+	actualCostUsd: v.optional(v.number()),
+	videoParams: videoParamsValidator,
+	videoPrompt: v.optional(v.string()),
+	warnings: v.optional(v.array(v.string())),
+	createdAt: v.number(),
+});
 
 export const setRunStatus = internalMutation({
 	args: {
@@ -80,27 +94,52 @@ export const commitPlan = internalMutation({
 		warnings: v.optional(v.array(v.string())),
 		planningKey: v.string(),
 	},
-	returns: v.null(),
+	returns: v.id("shlokaPlans"),
 	handler: async (ctx, args) => {
+		const run = await ctx.db.get(args.runId);
+		if (!run) {
+			throw new Error("Run not found.");
+		}
+		const existing = await ctx.db
+			.query("shlokaPlans")
+			.withIndex("by_runId", (q) => q.eq("runId", args.runId))
+			.take(50);
+		const attemptNumber =
+			existing.reduce((acc, plan) => Math.max(acc, plan.attemptNumber), 0) + 1;
+		const now = Date.now();
+		const planId = await ctx.db.insert("shlokaPlans", {
+			runId: args.runId,
+			attemptNumber,
+			status: "ready",
+			plannerSystemPrompt: run.plannerSystemPrompt,
+			plannerModel: args.plannerModel,
+			plannerReasoning: args.plannerReasoning,
+			imagePrompt: args.imagePrompt,
+			videoScenes: args.videoScenes,
+			planningKey: args.planningKey,
+			warnings: args.warnings,
+			createdAt: now,
+			updatedAt: now,
+		});
 		await ctx.db.patch(args.runId, {
 			status: "plan_ready",
+			activePlanId: planId,
 			plannerModel: args.plannerModel,
 			plannerReasoning: args.plannerReasoning,
 			imagePrompt: args.imagePrompt,
 			videoScenes: args.videoScenes,
 			warnings: args.warnings,
 			planningKey: args.planningKey,
-			planningCompletedAt: Date.now(),
+			planningCompletedAt: now,
 			lastError: undefined,
-			updatedAt: Date.now(),
+			updatedAt: now,
 		});
-		// Summarize the run into a short title once real content exists.
 		await ctx.scheduler.runAfter(
 			4000,
 			internal.studio.actions.generateRunTitleScheduled,
 			{ runId: args.runId },
 		);
-		return null;
+		return planId;
 	},
 });
 
@@ -194,57 +233,85 @@ export const commitCompositionPlan = internalMutation({
 	},
 });
 
-export const appendReferenceImage = internalMutation({
+export const insertGalleryImage = internalMutation({
 	args: {
-		runId: v.id("generationRuns"),
-		image: referenceImageValidator,
+		runId: v.optional(v.id("generationRuns")),
+		objectKey: v.string(),
+		meta: mediaMetaValidator,
+		source: galleryImageSourceValidator,
+		revisedImagePrompt: v.optional(v.string()),
 		setAsFirstFrame: v.optional(v.boolean()),
+		attachToRun: v.optional(v.boolean()),
 		warnings: v.optional(v.array(v.string())),
 	},
-	returns: v.null(),
+	returns: v.id("galleryImages"),
 	handler: async (ctx, args) => {
-		const run = await ctx.db.get(args.runId);
-		if (!run) {
-			throw new Error("Run not found.");
-		}
-		const referenceImages = [...(run.referenceImages ?? []), args.image];
-		await ctx.db.patch(args.runId, {
-			status: "image_ready",
-			referenceImages,
-			firstFrameImageId: args.setAsFirstFrame
-				? args.image.id
-				: run.firstFrameImageId,
-			imageCompletedAt: Date.now(),
-			warnings: args.warnings,
-			lastError: undefined,
-			updatedAt: Date.now(),
+		const imageId = await ctx.db.insert("galleryImages", {
+			objectKey: args.objectKey,
+			meta: args.meta,
+			source: args.source,
+			revisedImagePrompt: args.revisedImagePrompt,
+			createdAt: Date.now(),
 		});
-		return null;
+		if (args.runId && args.attachToRun !== false) {
+			const run = await ctx.db.get(args.runId);
+			if (!run) {
+				throw new Error("Run not found.");
+			}
+			const attached = uniqueIds([...(run.attachedImageIds ?? []), imageId]);
+			await ctx.db.patch(args.runId, {
+				status: "image_ready",
+				attachedImageIds: attached,
+				firstFrameImageId: args.setAsFirstFrame
+					? imageId
+					: run.firstFrameImageId,
+				imageCompletedAt: Date.now(),
+				warnings: args.warnings,
+				lastError: undefined,
+				updatedAt: Date.now(),
+			});
+		}
+		return imageId;
 	},
 });
 
-export const appendVideo = internalMutation({
+export const insertGalleryVideo = internalMutation({
 	args: {
-		runId: v.id("generationRuns"),
-		video: generatedVideoValidator,
+		runId: v.optional(v.id("generationRuns")),
+		video: galleryVideoInsertValidator,
+		attachToRun: v.optional(v.boolean()),
 		warnings: v.optional(v.array(v.string())),
 	},
-	returns: v.null(),
+	returns: v.id("galleryVideos"),
 	handler: async (ctx, args) => {
-		const run = await ctx.db.get(args.runId);
-		if (!run) {
-			throw new Error("Run not found.");
-		}
-		const videos = [...(run.videos ?? []), args.video];
-		await ctx.db.patch(args.runId, {
-			status: "completed",
-			videos,
-			videoCompletedAt: Date.now(),
-			warnings: args.warnings,
-			lastError: undefined,
-			updatedAt: Date.now(),
+		const videoId = await ctx.db.insert("galleryVideos", {
+			objectKey: args.video.objectKey,
+			meta: args.video.meta,
+			openRouterJobId: args.video.openRouterJobId,
+			openRouterGenerationId: args.video.openRouterGenerationId,
+			actualCostUsd: args.video.actualCostUsd,
+			videoParams: args.video.videoParams,
+			videoPrompt: args.video.videoPrompt,
+			warnings: args.video.warnings,
+			sourceRunId: args.runId,
+			createdAt: args.video.createdAt,
 		});
-		return null;
+		if (args.runId && args.attachToRun !== false) {
+			const run = await ctx.db.get(args.runId);
+			if (!run) {
+				throw new Error("Run not found.");
+			}
+			const attached = uniqueIds([...(run.attachedVideoIds ?? []), videoId]);
+			await ctx.db.patch(args.runId, {
+				status: "completed",
+				attachedVideoIds: attached,
+				videoCompletedAt: Date.now(),
+				warnings: args.warnings,
+				lastError: undefined,
+				updatedAt: Date.now(),
+			});
+		}
+		return videoId;
 	},
 });
 
@@ -314,6 +381,11 @@ export const claimNextCompositionClip = internalMutation({
 		const previous = next.clipIndex
 			? clips.find((clip) => clip.clipIndex === next.clipIndex - 1)
 			: undefined;
+		let previousTerminalFrameObjectKey: string | undefined;
+		if (previous?.terminalFrameImageId) {
+			const frame = await ctx.db.get(previous.terminalFrameImageId);
+			previousTerminalFrameObjectKey = frame?.objectKey;
+		}
 		const now = Date.now();
 		await ctx.db.patch(next._id, {
 			status: "generating",
@@ -335,7 +407,7 @@ export const claimNextCompositionClip = internalMutation({
 		return {
 			job: { ...job, status: "generating", currentClipIndex: next.clipIndex },
 			clip: { ...next, status: "generating", attempts: next.attempts + 1 },
-			previousTerminalFrameObjectKey: previous?.terminalFrameObjectKey,
+			previousTerminalFrameObjectKey,
 		};
 	},
 });
@@ -344,10 +416,9 @@ export const completeCompositionClip = internalMutation({
 	args: {
 		jobId: v.id("compositionJobs"),
 		clipId: v.id("compositionClips"),
-		video: generatedVideoValidator,
-		terminalFrameObjectKey: v.optional(v.string()),
+		video: galleryVideoInsertValidator,
+		terminalFrameImageId: v.optional(v.id("galleryImages")),
 		warnings: v.optional(v.array(v.string())),
-		/** When true, pause for browser terminal-frame extraction. */
 		scheduleNext: v.optional(v.boolean()),
 		awaitTerminalFrame: v.optional(v.boolean()),
 	},
@@ -360,26 +431,44 @@ export const completeCompositionClip = internalMutation({
 		if (!job || !clip || clip.jobId !== job._id) {
 			throw new Error("Composition clip was not found.");
 		}
+		const videoId = await ctx.db.insert("galleryVideos", {
+			objectKey: args.video.objectKey,
+			meta: args.video.meta,
+			openRouterJobId: args.video.openRouterJobId,
+			openRouterGenerationId: args.video.openRouterGenerationId,
+			actualCostUsd: args.video.actualCostUsd,
+			videoParams: args.video.videoParams,
+			videoPrompt: args.video.videoPrompt,
+			warnings: args.video.warnings,
+			sourceRunId: job.runId,
+			createdAt: args.video.createdAt,
+		});
 		if (job.status === "cancelled") {
-			await scheduleObjectDeletes(ctx, [
-				args.video.objectKey,
-				args.terminalFrameObjectKey,
-			]);
 			return null;
 		}
 		if (clip.status !== "generating") {
 			throw new Error("Composition clip is not generating.");
 		}
 		const now = Date.now();
+		const run = await ctx.db.get(job.runId);
+		if (run) {
+			await ctx.db.patch(job.runId, {
+				attachedVideoIds: uniqueIds([
+					...(run.attachedVideoIds ?? []),
+					videoId,
+				]),
+				updatedAt: now,
+			});
+		}
 		await ctx.db.patch(clip._id, {
 			status: "completed",
-			video: args.video,
-			terminalFrameObjectKey: args.terminalFrameObjectKey,
+			galleryVideoId: videoId,
+			terminalFrameImageId: args.terminalFrameImageId,
 			warnings: args.warnings,
 			updatedAt: now,
 		});
 		const awaitTerminalFrame =
-			args.awaitTerminalFrame === true && !args.terminalFrameObjectKey;
+			args.awaitTerminalFrame === true && !args.terminalFrameImageId;
 		await ctx.db.patch(job._id, {
 			status: awaitTerminalFrame ? "awaiting_terminal_frame" : job.status,
 			actualCostUsd: (job.actualCostUsd ?? 0) + (args.video.actualCostUsd ?? 0),
@@ -411,7 +500,7 @@ export const attachCompositionTerminalFrame = internalMutation({
 	args: {
 		jobId: v.id("compositionJobs"),
 		clipId: v.id("compositionClips"),
-		terminalFrameObjectKey: v.string(),
+		terminalFrameImageId: v.id("galleryImages"),
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
@@ -423,7 +512,6 @@ export const attachCompositionTerminalFrame = internalMutation({
 			throw new Error("Composition clip was not found.");
 		}
 		if (job.status === "cancelled") {
-			await scheduleObjectDeletes(ctx, [args.terminalFrameObjectKey]);
 			return null;
 		}
 		if (job.status !== "awaiting_terminal_frame") {
@@ -434,13 +522,12 @@ export const attachCompositionTerminalFrame = internalMutation({
 				"Clip must be completed before attaching a terminal frame.",
 			);
 		}
-		if (clip.terminalFrameObjectKey) {
-			await scheduleObjectDeletes(ctx, [args.terminalFrameObjectKey]);
+		if (clip.terminalFrameImageId) {
 			return null;
 		}
 		const now = Date.now();
 		await ctx.db.patch(clip._id, {
-			terminalFrameObjectKey: args.terminalFrameObjectKey,
+			terminalFrameImageId: args.terminalFrameImageId,
 			updatedAt: now,
 		});
 		await ctx.db.patch(job._id, {
@@ -568,31 +655,38 @@ export const wipeAllStudioData = internalMutation({
 		cachesDeleted: v.number(),
 	}),
 	handler: async (ctx) => {
-		const runs = await ctx.db.query("generationRuns").collect();
 		const keysToDelete: string[] = [];
-		for (const run of runs) {
-			for (const image of run.referenceImages ?? []) {
-				keysToDelete.push(image.objectKey);
-			}
-			for (const video of run.videos ?? []) {
-				keysToDelete.push(video.objectKey);
-			}
-			await ctx.db.delete(run._id);
+
+		const images = await ctx.db.query("galleryImages").collect();
+		for (const image of images) {
+			keysToDelete.push(image.objectKey);
+			await ctx.db.delete(image._id);
+		}
+		const videos = await ctx.db.query("galleryVideos").collect();
+		for (const video of videos) {
+			keysToDelete.push(video.objectKey);
+			await ctx.db.delete(video._id);
+		}
+
+		const plans = await ctx.db.query("shlokaPlans").collect();
+		for (const plan of plans) {
+			await ctx.db.delete(plan._id);
 		}
 
 		const compositionClips = await ctx.db.query("compositionClips").collect();
 		for (const clip of compositionClips) {
-			if (clip.video) {
-				keysToDelete.push(clip.video.objectKey);
-			}
-			if (clip.terminalFrameObjectKey) {
-				keysToDelete.push(clip.terminalFrameObjectKey);
-			}
+			keysToDelete.push(...leftoverObjectKeys(clip));
 			await ctx.db.delete(clip._id);
 		}
 		const compositionJobs = await ctx.db.query("compositionJobs").collect();
 		for (const job of compositionJobs) {
 			await ctx.db.delete(job._id);
+		}
+
+		const runs = await ctx.db.query("generationRuns").collect();
+		for (const run of runs) {
+			keysToDelete.push(...leftoverObjectKeys(run));
+			await ctx.db.delete(run._id);
 		}
 
 		await scheduleObjectDeletes(ctx, keysToDelete);
@@ -607,5 +701,35 @@ export const wipeAllStudioData = internalMutation({
 			filesDeleted: keysToDelete.length,
 			cachesDeleted: caches.length,
 		};
+	},
+});
+
+export const applyActiveShlokaPlan = internalMutation({
+	args: {
+		runId: v.id("generationRuns"),
+		planId: v.id("shlokaPlans"),
+	},
+	returns: v.null(),
+	handler: async (ctx, args) => {
+		const [run, plan] = await Promise.all([
+			ctx.db.get(args.runId),
+			ctx.db.get(args.planId),
+		]);
+		if (!run || !plan || plan.runId !== args.runId) {
+			throw new Error("Plan not found for this run.");
+		}
+		await ctx.db.patch(args.runId, {
+			activePlanId: plan._id,
+			plannerSystemPrompt: plan.plannerSystemPrompt,
+			plannerModel: plan.plannerModel,
+			plannerReasoning: plan.plannerReasoning,
+			imagePrompt: plan.imagePrompt,
+			videoScenes: plan.videoScenes,
+			planningKey: plan.planningKey,
+			warnings: plan.warnings,
+			status: plan.status === "ready" ? "plan_ready" : run.status,
+			updatedAt: Date.now(),
+		});
+		return null;
 	},
 });

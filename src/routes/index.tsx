@@ -18,6 +18,7 @@ import { NewRunSetup } from "#/components/studio/shell/new-run-setup";
 import { StudioRunSkeleton } from "#/components/studio/shell/studio-run-skeleton";
 import { StudioShell } from "#/components/studio/shell/studio-shell";
 import { ShlokaComposer } from "#/components/studio/shloka/shloka-composer";
+import { ShlokaPlanAttemptControls } from "#/components/studio/shloka/shloka-plan-attempt-controls";
 import { ShlokaPlanPreview } from "#/components/studio/shloka/shloka-plan-preview";
 import { GenerationProgressDock } from "#/components/studio/video/generation-progress-dock";
 import { ReferenceImagePanel } from "#/components/studio/video/reference-image-panel";
@@ -104,6 +105,10 @@ function ShlokaStudioPage() {
 		api.studio.queries.listCompositionJobsForRun,
 		runId ? { runId } : "skip",
 	);
+	const shlokaPlans = useQuery(
+		api.studio.queries.listShlokaPlansForRun,
+		runId ? { runId } : "skip",
+	);
 	const catalog = useQuery(api.studio.queries.getCachedOpenRouterCatalog);
 	const refreshCatalog = useAction(api.studio.actions.refreshModelCatalog);
 
@@ -112,6 +117,11 @@ function ShlokaStudioPage() {
 	const removeReferenceImage = useMutation(
 		api.studio.mutations.removeReferenceImage,
 	);
+	const attachGalleryImageToRun = useMutation(
+		api.studio.mutations.attachGalleryImageToRun,
+	);
+	const selectShlokaPlan = useMutation(api.studio.mutations.selectShlokaPlan);
+	const deleteShlokaPlan = useMutation(api.studio.mutations.deleteShlokaPlan);
 	const prepareReferenceImageUpload = useAction(
 		api.studio.r2.prepareReferenceImageUpload,
 	);
@@ -133,15 +143,27 @@ function ShlokaStudioPage() {
 		onError: (error) => notifyStudioError("Could not save draft", error),
 	});
 
-	const rawImages = run?.referenceImages ?? [];
-	const rawVideos = run?.videos ?? [];
+	const rawImages = (run?.referenceImages ?? []) as Array<{
+		id: string;
+		objectKey?: string;
+		source?: "generated" | "uploaded" | "terminal_frame";
+		revisedImagePrompt?: string;
+		createdAt: number;
+	}>;
+	const rawVideos = (run?.videos ?? []) as Array<{
+		id: string;
+		objectKey?: string;
+		createdAt: number;
+	}>;
 	const mediaObjectKeys = [
 		...rawImages.map((image) => image.objectKey),
 		...rawVideos.map((video) => video.objectKey),
-		...(compositionJob?.clips ?? []).flatMap((clip) => [
-			clip.video?.objectKey,
-			clip.terminalFrameObjectKey,
-		]),
+		...(compositionJob?.clips ?? []).flatMap(
+			(clip: {
+				video?: { objectKey?: string };
+				terminalFrameObjectKey?: string;
+			}) => [clip.video?.objectKey, clip.terminalFrameObjectKey],
+		),
 	];
 	const urlsByKey = useSignedMediaUrls(runId, mediaObjectKeys);
 	const images = rawImages.map((image) => withSignedUrl(image, urlsByKey));
@@ -149,10 +171,16 @@ function ShlokaStudioPage() {
 	const compositionJobWithUrls = compositionJob
 		? {
 				...compositionJob,
-				clips: (compositionJob.clips ?? []).map((clip) => ({
-					...clip,
-					video: clip.video ? withSignedUrl(clip.video, urlsByKey) : undefined,
-				})),
+				clips: (compositionJob.clips ?? []).map(
+					(
+						clip: CompositionClipResult & { terminalFrameObjectKey?: string },
+					) => ({
+						...clip,
+						video: clip.video
+							? withSignedUrl(clip.video, urlsByKey)
+							: undefined,
+					}),
+				),
 			}
 		: compositionJob;
 
@@ -372,7 +400,13 @@ function ShlokaStudioPage() {
 		setBusyStage("planning");
 		try {
 			const id = await ensureRun();
-			await planRun({ runId: id });
+			await planRun({
+				runId: id,
+				force:
+					(composition.enabled
+						? (compositionAttempts?.length ?? 0)
+						: (shlokaPlans?.length ?? 0)) > 0,
+			});
 			notifyStudioSuccess("Plan ready", "Image and video prompts updated.");
 		} catch (error) {
 			notifyStudioError("Planning failed", error);
@@ -460,7 +494,11 @@ function ShlokaStudioPage() {
 		(busyStage === "planning" || run?.status === "planning") &&
 		(compositionAttempts?.length ?? 0) > 0;
 
-	const extraIds = run?.extraReferenceImageIds ?? [];
+	const extraIds = (run?.extraReferenceImageIds ?? []) as Id<"galleryImages">[];
+	const isPlanningNextShloka =
+		!composition.enabled &&
+		(busyStage === "planning" || run?.status === "planning") &&
+		(shlokaPlans?.length ?? 0) > 0;
 	const isRunLoading = Boolean(runId) && run === undefined;
 	// Targeted busy flags so unrelated controls stay usable while one stage runs.
 	const planningBusy = busyStage === "planning";
@@ -580,7 +618,9 @@ function ShlokaStudioPage() {
 												? (compositionAttempts?.length ?? 0) > 0
 													? "Plan another multi-clip attempt"
 													: "Generate multi-clip plan"
-												: "Generate creative plan"}
+												: (shlokaPlans?.length ?? 0) > 0
+													? "Plan another"
+													: "Generate creative plan"}
 									</Button>
 								</div>
 
@@ -630,6 +670,31 @@ function ShlokaStudioPage() {
 													}),
 												)}
 											/>
+										) : !composition.enabled ? (
+											<ShlokaPlanAttemptControls
+												attempts={shlokaPlans ?? []}
+												activePlanId={run?.activePlanId}
+												disabled={planningBusy}
+												isPlanningNext={isPlanningNextShloka}
+												onSelectAttempt={(planId) => {
+													if (!runId) return;
+													void selectShlokaPlan({
+														runId,
+														planId: planId as Id<"shlokaPlans">,
+													}).catch((error) =>
+														notifyStudioError("Could not switch plan", error),
+													);
+												}}
+												onDeleteAttempt={(planId) => {
+													if (!runId) return;
+													void deleteShlokaPlan({
+														runId,
+														planId: planId as Id<"shlokaPlans">,
+													}).catch((error) =>
+														notifyStudioError("Could not delete plan", error),
+													);
+												}}
+											/>
 										) : null}
 										<ShlokaPlanPreview
 											imagePrompt={run?.imagePrompt}
@@ -637,18 +702,26 @@ function ShlokaStudioPage() {
 											compositionOverallDescription={
 												compositionJob?.overallDescription
 											}
-											compositionClips={compositionJob?.clips.map((clip) => ({
-												clipIndex: clip.clipIndex,
-												durationSeconds:
-													compositionJob.videoParams?.durationSeconds ?? 0,
-												scenePrompt: clip.scenePrompt,
-												globalDescription: clip.globalDescription,
-												continuityInstructions: clip.continuityInstructions,
-												transition: clip.transition,
-												usesPreviousTerminalFrame:
-													compositionJob.mode === "continuation" &&
-													clip.clipIndex > 0,
-											}))}
+											compositionClips={compositionJob?.clips.map(
+												(clip: {
+													clipIndex: number;
+													scenePrompt: string;
+													globalDescription?: string;
+													continuityInstructions?: string;
+													transition?: string;
+												}) => ({
+													clipIndex: clip.clipIndex,
+													durationSeconds:
+														compositionJob.videoParams?.durationSeconds ?? 0,
+													scenePrompt: clip.scenePrompt,
+													globalDescription: clip.globalDescription,
+													continuityInstructions: clip.continuityInstructions,
+													transition: clip.transition,
+													usesPreviousTerminalFrame:
+														compositionJob.mode === "continuation" &&
+														clip.clipIndex > 0,
+												}),
+											)}
 											plannerModel={
 												compositionJob?.plannerModel ?? run?.plannerModel
 											}
@@ -689,78 +762,97 @@ function ShlokaStudioPage() {
 											regenerating={busyStage === "planning"}
 										/>
 										<ReferenceImagePanel
+											runId={runId}
 											imageSize={imageSize}
 											imageQuality={imageQuality}
 											onSizeChange={onImageSizeChange}
 											onQualityChange={onImageQualityChange}
 											onGenerate={onGenerateImage}
 											onUpload={onUploadImage}
+											onReuseImage={
+												runId
+													? async (imageId) => {
+															await attachGalleryImageToRun({
+																runId,
+																imageId: imageId as Id<"galleryImages">,
+															});
+															notifyStudioSuccess(
+																"Image attached",
+																"Reused from the shared gallery.",
+															);
+														}
+													: undefined
+											}
 											generating={busyStage === "image"}
 											uploading={busyStage === "upload"}
 											images={images}
 											firstFrameImageId={run?.firstFrameImageId}
 											lastFrameImageId={run?.lastFrameImageId}
 											extraReferenceImageIds={extraIds}
+											supportsFirstFrame={profile?.supportsFirstFrame}
 											supportsLastFrame={profile?.supportsLastFrame}
 											supportsInputReferences={profile?.supportsInputReferences}
 											maxInputReferences={profile?.maxInputReferences}
 											disabled={!runId}
 											globalBusy={anyBusy}
-onSelectFirstFrame={(id) => {
-											if (!runId) return;
-											autosave.save(
-												{
-													firstFrameImageId: id,
-													lastFrameImageId:
-														id && run?.lastFrameImageId === id
-															? null
-															: (run?.lastFrameImageId ?? null),
-													extraReferenceImageIds:
-														id && extraIds.includes(id)
-															? extraIds.filter((item) => item !== id)
-															: extraIds,
-												},
-												"immediate",
-											);
-										}}
-										onSelectLastFrame={(id) => {
-											if (!runId) return;
-											autosave.save(
-												{
-													lastFrameImageId: id,
-													firstFrameImageId:
-														id && run?.firstFrameImageId === id
-															? null
-															: (run?.firstFrameImageId ?? null),
-													extraReferenceImageIds:
-														id && extraIds.includes(id)
-															? extraIds.filter((item) => item !== id)
-															: extraIds,
-												},
-												"immediate",
-											);
-										}}
-										onToggleExtraReference={(id) => {
-											if (!runId) return;
-											const adding = !extraIds.includes(id);
-											const next = adding
-												? [...extraIds, id]
-												: extraIds.filter((item) => item !== id);
-											autosave.save(
-												{
-													extraReferenceImageIds: next,
-													firstFrameImageId:
-														adding && run?.firstFrameImageId === id
-															? null
-															: (run?.firstFrameImageId ?? null),
-													lastFrameImageId:
-														adding && run?.lastFrameImageId === id
-															? null
-															: (run?.lastFrameImageId ?? null),
-												},
-												"immediate",
-											);
-										}}
+											onSelectFirstFrame={(id) => {
+												if (!runId) return;
+												const imageId = id as Id<"galleryImages"> | null;
+												autosave.save(
+													{
+														firstFrameImageId: imageId,
+														lastFrameImageId:
+															imageId && run?.lastFrameImageId === imageId
+																? null
+																: (run?.lastFrameImageId ?? null),
+														extraReferenceImageIds:
+															imageId && extraIds.includes(imageId)
+																? extraIds.filter((item) => item !== imageId)
+																: extraIds,
+													},
+													"immediate",
+												);
+											}}
+											onSelectLastFrame={(id) => {
+												if (!runId) return;
+												const imageId = id as Id<"galleryImages"> | null;
+												autosave.save(
+													{
+														lastFrameImageId: imageId,
+														firstFrameImageId:
+															imageId && run?.firstFrameImageId === imageId
+																? null
+																: (run?.firstFrameImageId ?? null),
+														extraReferenceImageIds:
+															imageId && extraIds.includes(imageId)
+																? extraIds.filter((item) => item !== imageId)
+																: extraIds,
+													},
+													"immediate",
+												);
+											}}
+											onToggleExtraReference={(id) => {
+												if (!runId) return;
+												const imageId = id as Id<"galleryImages">;
+												const adding = !extraIds.includes(imageId);
+												const next = adding
+													? [...extraIds, imageId]
+													: extraIds.filter((item) => item !== imageId);
+												autosave.save(
+													{
+														extraReferenceImageIds: next,
+														firstFrameImageId:
+															adding && run?.firstFrameImageId === imageId
+																? null
+																: (run?.firstFrameImageId ?? null),
+														lastFrameImageId:
+															adding && run?.lastFrameImageId === imageId
+																? null
+																: (run?.lastFrameImageId ?? null),
+													},
+													"immediate",
+												);
+											}}
 											onRemoveImage={async (id) => {
 												if (!runId) return;
 												await removeReferenceImage({ runId, imageId: id });

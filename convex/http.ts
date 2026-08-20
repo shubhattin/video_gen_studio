@@ -1,5 +1,4 @@
 import { httpRouter } from "convex/server";
-import type { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { env, httpAction } from "./_generated/server";
 import { requireAdmin } from "./lib/auth";
@@ -55,21 +54,17 @@ http.route({
 		}
 
 		const url = new URL(request.url);
-		const runId = url.searchParams.get("runId");
 		const objectKey = url.searchParams.get("objectKey");
-		if (!runId || !objectKey) {
-			return corsResponse("Missing runId or objectKey", { status: 400 });
+		if (!objectKey) {
+			return corsResponse("Missing objectKey", { status: 400 });
 		}
-		if (!objectKey.startsWith(`studio/runs/${runId}/`)) {
+		if (!objectKey.startsWith("studio/") || objectKey.includes("..")) {
 			return corsResponse("Invalid object key", { status: 400 });
 		}
 
 		const allowed = await ctx.runQuery(
-			internal.studio.queries.objectKeyBelongsToRun,
-			{
-				runId: runId as Id<"generationRuns">,
-				objectKey,
-			},
+			internal.studio.queries.objectKeyInGallery,
+			{ objectKey },
 		);
 		if (!allowed) {
 			return corsResponse("Not found", { status: 404 });

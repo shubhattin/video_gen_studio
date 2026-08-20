@@ -1,7 +1,17 @@
-import { Download, Info, Loader2, Trash2, Upload } from "lucide-react";
-import { useRef, useState } from "react";
+import { api } from "@convex/_generated/api";
+import type { Id } from "@convex/_generated/dataModel";
+import { useQuery } from "convex/react";
+import { Download, Images, Info, Loader2, Trash2, Upload } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogHeader,
+	DialogTitle,
+} from "#/components/ui/dialog";
 import { Label } from "#/components/ui/label";
 import {
 	Popover,
@@ -18,6 +28,10 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "#/components/ui/select";
+import {
+	useSignedMediaUrls,
+	withSignedUrl,
+} from "#/hooks/use-signed-media-urls";
 import { GPT_IMAGE_ESTIMATES_USD } from "#/lib/model-catalog";
 import { notifyStudioError } from "#/lib/studio-toast";
 import { cn } from "#/lib/utils";
@@ -25,18 +39,20 @@ import { cn } from "#/lib/utils";
 export type ReferenceImageItem = {
 	id: string;
 	url?: string | null;
-	source?: "generated" | "uploaded";
+	source?: "generated" | "uploaded" | "terminal_frame";
 	revisedImagePrompt?: string;
 	createdAt: number;
 };
 
 type ReferenceImagePanelProps = {
+	runId?: Id<"generationRuns"> | null;
 	imageSize: string;
 	imageQuality: string;
 	onSizeChange: (value: string) => void;
 	onQualityChange: (value: string) => void;
 	onGenerate: () => void;
 	onUpload: (file: File) => Promise<void> | void;
+	onReuseImage?: (imageId: string) => Promise<void> | void;
 	generating?: boolean;
 	uploading?: boolean;
 	images: ReferenceImageItem[];
@@ -47,14 +63,59 @@ type ReferenceImagePanelProps = {
 	onSelectLastFrame: (id: string | null) => void;
 	onToggleExtraReference: (id: string) => void;
 	onRemoveImage: (id: string) => void;
+	supportsFirstFrame?: boolean;
 	supportsLastFrame?: boolean;
 	supportsInputReferences?: boolean;
 	maxInputReferences?: number;
 	disabled?: boolean;
-	/** True while any background stage is running — blocks starting new image
-	 * generation, but leaves upload usable. */
 	globalBusy?: boolean;
 };
+
+function referenceCapabilityWarnings(args: {
+	supportsFirstFrame?: boolean;
+	supportsLastFrame?: boolean;
+	supportsInputReferences?: boolean;
+	maxInputReferences: number;
+	firstFrameImageId?: string;
+	lastFrameImageId?: string;
+	extraReferenceImageIds: string[];
+}) {
+	const warnings: string[] = [];
+	if (args.firstFrameImageId && args.supportsFirstFrame === false) {
+		warnings.push(
+			"First-frame tag will be ignored — this model does not support first frames.",
+		);
+	}
+	if (args.lastFrameImageId && args.supportsLastFrame === false) {
+		warnings.push(
+			"Last-frame tag will be ignored — this model does not support last frames.",
+		);
+	}
+	if (
+		args.extraReferenceImageIds.length > 0 &&
+		args.supportsInputReferences === false
+	) {
+		warnings.push(
+			"Style refs will be ignored — this model does not support input_references.",
+		);
+	} else if (
+		args.extraReferenceImageIds.length > args.maxInputReferences &&
+		args.maxInputReferences >= 0
+	) {
+		warnings.push(
+			`Only the first ${args.maxInputReferences} style refs will be sent.`,
+		);
+	}
+	if (
+		(args.firstFrameImageId || args.lastFrameImageId) &&
+		args.extraReferenceImageIds.length > 0
+	) {
+		warnings.push(
+			"Style refs will be skipped because first/last frames take precedence on OpenRouter.",
+		);
+	}
+	return warnings;
+}
 
 function RoleChip({
 	active,
@@ -83,7 +144,10 @@ function RoleChip({
 	);
 }
 
-async function downloadImageFile(sourceUrl: string, filename: string): Promise<void> {
+async function downloadImageFile(
+	sourceUrl: string,
+	filename: string,
+): Promise<void> {
 	const response = await fetch(sourceUrl, { cache: "no-store" });
 	if (!response.ok) {
 		throw new Error(`Download failed (${response.status})`);
@@ -104,15 +168,19 @@ async function downloadImageFile(sourceUrl: string, filename: string): Promise<v
 	}
 }
 
+function sourceLabelFor(source?: ReferenceImageItem["source"]): string | null {
+	if (source === "uploaded") return "Uploaded";
+	if (source === "generated") return "Generated";
+	if (source === "terminal_frame") return "Continuity frame";
+	return null;
+}
+
 function ReferenceImageCard({
 	image,
 	isFirst,
 	isLast,
 	isExtra,
 	busy,
-	supportsLastFrame,
-	supportsInputReferences,
-	styleRefFull,
 	onSelectFirstFrame,
 	onSelectLastFrame,
 	onToggleExtraReference,
@@ -123,9 +191,6 @@ function ReferenceImageCard({
 	isLast: boolean;
 	isExtra: boolean;
 	busy: boolean;
-	supportsLastFrame?: boolean;
-	supportsInputReferences?: boolean;
-	styleRefFull: boolean;
 	onSelectFirstFrame: (id: string | null) => void;
 	onSelectLastFrame: (id: string | null) => void;
 	onToggleExtraReference: (id: string) => void;
@@ -133,12 +198,7 @@ function ReferenceImageCard({
 }) {
 	const [downloading, setDownloading] = useState(false);
 	const isUnassigned = !isFirst && !isLast && !isExtra;
-	const sourceLabel =
-		image.source === "uploaded"
-			? "Uploaded"
-			: image.source === "generated"
-				? "Generated"
-				: null;
+	const sourceLabel = sourceLabelFor(image.source);
 	const assigned =
 		[
 			isFirst ? "First frame" : null,
@@ -146,7 +206,7 @@ function ReferenceImageCard({
 			isExtra ? "Style ref" : null,
 		]
 			.filter(Boolean)
-			.join(" · ") || "In gallery";
+			.join(" · ") || "On this run";
 
 	const onDownload = async () => {
 		if (!image.url || downloading) {
@@ -194,7 +254,7 @@ function ReferenceImageCard({
 						) : null}
 						{isUnassigned ? (
 							<Badge variant="secondary" className="font-normal">
-								In gallery
+								On this run
 							</Badge>
 						) : null}
 						{isFirst ? <Badge className="font-normal">First</Badge> : null}
@@ -240,12 +300,6 @@ function ReferenceImageCard({
 										<span className="text-muted-foreground">Source</span>
 										<span>{sourceLabel ?? "Unknown"}</span>
 									</div>
-									{!supportsInputReferences ? (
-										<p className="text-muted-foreground">
-											Current video model has no style-ref slots — use
-											first/last if needed, or keep this in the gallery.
-										</p>
-									) : null}
 								</div>
 								{image.revisedImagePrompt ? (
 									<div className="flex flex-col gap-1.5 border-t border-border/70 pt-3">
@@ -269,11 +323,7 @@ function ReferenceImageCard({
 						aria-label="Download image"
 						onClick={() => void onDownload()}
 					>
-						{downloading ? (
-							<Loader2 className="animate-spin" />
-						) : (
-							<Download />
-						)}
+						{downloading ? <Loader2 className="animate-spin" /> : <Download />}
 					</Button>
 
 					<Button
@@ -281,7 +331,7 @@ function ReferenceImageCard({
 						variant="ghost"
 						size="icon-sm"
 						disabled={busy}
-						aria-label="Delete image"
+						aria-label="Remove from this run"
 						onClick={() => onRemoveImage(image.id)}
 					>
 						<Trash2 />
@@ -296,24 +346,20 @@ function ReferenceImageCard({
 						disabled={busy}
 						onClick={() => onSelectFirstFrame(isFirst ? null : image.id)}
 					/>
-					{supportsLastFrame ? (
-						<RoleChip
-							active={isLast}
-							label={isLast ? "Last ✓" : "Last"}
-							variant="secondary"
-							disabled={busy}
-							onClick={() => onSelectLastFrame(isLast ? null : image.id)}
-						/>
-					) : null}
-					{supportsInputReferences ? (
-						<RoleChip
-							active={isExtra}
-							label={isExtra ? "Style ✓" : "Style"}
-							variant="secondary"
-							disabled={busy || (!isExtra && styleRefFull)}
-							onClick={() => onToggleExtraReference(image.id)}
-						/>
-					) : null}
+					<RoleChip
+						active={isLast}
+						label={isLast ? "Last ✓" : "Last"}
+						variant="secondary"
+						disabled={busy}
+						onClick={() => onSelectLastFrame(isLast ? null : image.id)}
+					/>
+					<RoleChip
+						active={isExtra}
+						label={isExtra ? "Style ✓" : "Style"}
+						variant="secondary"
+						disabled={busy}
+						onClick={() => onToggleExtraReference(image.id)}
+					/>
 				</div>
 			</div>
 		</article>
@@ -321,12 +367,14 @@ function ReferenceImageCard({
 }
 
 export function ReferenceImagePanel({
+	runId,
 	imageSize,
 	imageQuality,
 	onSizeChange,
 	onQualityChange,
 	onGenerate,
 	onUpload,
+	onReuseImage,
 	generating,
 	uploading,
 	images,
@@ -337,6 +385,7 @@ export function ReferenceImagePanel({
 	onSelectLastFrame,
 	onToggleExtraReference,
 	onRemoveImage,
+	supportsFirstFrame,
 	supportsLastFrame,
 	supportsInputReferences,
 	maxInputReferences = 0,
@@ -345,19 +394,37 @@ export function ReferenceImagePanel({
 }: ReferenceImagePanelProps) {
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const [dragActive, setDragActive] = useState(false);
+	const [reuseOpen, setReuseOpen] = useState(false);
+	const [reusingId, setReusingId] = useState<string | null>(null);
+	const gallery = useQuery(
+		api.studio.queries.listGalleryImages,
+		reuseOpen ? { limit: 80 } : "skip",
+	);
+	const galleryKeys = useMemo(
+		() => (gallery ?? []).map((item: { objectKey?: string }) => item.objectKey),
+		[gallery],
+	);
+	const galleryUrls = useSignedMediaUrls(runId, galleryKeys);
 	const estimate =
 		GPT_IMAGE_ESTIMATES_USD[
 			(imageSize as keyof typeof GPT_IMAGE_ESTIMATES_USD) ?? "1024x1536"
 		]?.[imageQuality as "low" | "medium" | "high"] ??
 		GPT_IMAGE_ESTIMATES_USD["1024x1536"].medium;
-	// Upload is independent of image generation — only the upload action itself
-	// (and a missing run) blocks it. Generate also respects globalBusy.
 	const uploadBusy = Boolean(disabled || uploading);
 	const generateBusy = Boolean(
 		disabled || generating || uploading || globalBusy,
 	);
 	const configBusy = Boolean(disabled || generating);
-	const styleRefFull = extraReferenceImageIds.length >= maxInputReferences;
+	const attachedIds = new Set(images.map((image) => image.id));
+	const warnings = referenceCapabilityWarnings({
+		supportsFirstFrame,
+		supportsLastFrame,
+		supportsInputReferences,
+		maxInputReferences,
+		firstFrameImageId,
+		lastFrameImageId,
+		extraReferenceImageIds,
+	});
 
 	const handleFiles = async (files: FileList | null) => {
 		const file = files?.[0];
@@ -378,13 +445,13 @@ export function ReferenceImagePanel({
 						Reference images
 					</h2>
 					<p className="text-sm text-muted-foreground">
-						Generate or upload stills, then optionally assign first / last /
-						style roles.
+						Generate, upload, or reuse stills, then optionally assign first /
+						last / style roles.
 					</p>
 				</div>
 				{images.length > 0 ? (
 					<p className="text-xs text-muted-foreground">
-						{images.length} in gallery
+						{images.length} on this run
 						{firstFrameImageId ||
 						lastFrameImageId ||
 						extraReferenceImageIds.length
@@ -394,8 +461,18 @@ export function ReferenceImagePanel({
 				) : null}
 			</div>
 
+			{warnings.length > 0 ? (
+				<div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
+					<ul className="list-disc space-y-1 pl-4">
+						{warnings.map((warning) => (
+							<li key={warning}>{warning}</li>
+						))}
+					</ul>
+				</div>
+			) : null}
+
 			<div className="rounded-2xl border border-border/70 bg-muted/15 p-3 sm:p-4">
-				<div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto_auto] sm:items-end">
+				<div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto_auto_auto] sm:items-end">
 					<div className="flex flex-col gap-1.5">
 						<Label className="text-xs">Aspect ratio</Label>
 						<Select
@@ -448,6 +525,15 @@ export function ReferenceImagePanel({
 					>
 						<Upload data-icon="inline-start" />
 						{uploading ? "Uploading…" : "Upload"}
+					</Button>
+					<Button
+						className="h-9"
+						variant="outline"
+						disabled={Boolean(disabled) || !onReuseImage}
+						onClick={() => setReuseOpen(true)}
+					>
+						<Images data-icon="inline-start" />
+						Reuse Image
 					</Button>
 				</div>
 				<div className="mt-2 flex items-center">
@@ -543,9 +629,6 @@ export function ReferenceImagePanel({
 							isLast={lastFrameImageId === image.id}
 							isExtra={extraReferenceImageIds.includes(image.id)}
 							busy={Boolean(disabled)}
-							supportsLastFrame={supportsLastFrame}
-							supportsInputReferences={supportsInputReferences}
-							styleRefFull={styleRefFull}
 							onSelectFirstFrame={onSelectFirstFrame}
 							onSelectLastFrame={onSelectLastFrame}
 							onToggleExtraReference={onToggleExtraReference}
@@ -554,6 +637,84 @@ export function ReferenceImagePanel({
 					))}
 				</div>
 			) : null}
+
+			<Dialog open={reuseOpen} onOpenChange={setReuseOpen}>
+				<DialogContent className="max-h-[min(40rem,90vh)] overflow-y-auto sm:max-w-2xl">
+					<DialogHeader>
+						<DialogTitle>Reuse an image</DialogTitle>
+						<DialogDescription>
+							Attach a still from the shared gallery to this run. Removing it
+							later only unlinks it.
+						</DialogDescription>
+					</DialogHeader>
+					{gallery === undefined ? (
+						<p className="text-sm text-muted-foreground">Loading gallery…</p>
+					) : gallery.length === 0 ? (
+						<p className="text-sm text-muted-foreground">
+							The gallery is empty. Generate or upload an image first.
+						</p>
+					) : (
+						<div className="grid gap-3 sm:grid-cols-2">
+							{gallery.map(
+								(item: {
+									id: string;
+									objectKey: string;
+									source?: ReferenceImageItem["source"];
+									createdAt: number;
+								}) => {
+									const withUrl = withSignedUrl(item, galleryUrls);
+									const attached = attachedIds.has(item.id);
+									return (
+										<button
+											key={item.id}
+											type="button"
+											disabled={attached || reusingId !== null}
+											className={cn(
+												"overflow-hidden rounded-xl border text-left",
+												attached
+													? "border-border/50 opacity-60"
+													: "border-border/80 hover:border-primary/50",
+											)}
+											onClick={() => {
+												if (!onReuseImage || attached) return;
+												setReusingId(item.id);
+												void Promise.resolve(onReuseImage(item.id))
+													.then(() => setReuseOpen(false))
+													.catch((error) =>
+														notifyStudioError("Could not reuse image", error),
+													)
+													.finally(() => setReusingId(null));
+											}}
+										>
+											{withUrl.url ? (
+												<img
+													src={withUrl.url}
+													alt=""
+													className="h-36 w-full object-cover"
+												/>
+											) : (
+												<div className="flex h-36 items-center justify-center text-xs text-muted-foreground">
+													Preview unavailable
+												</div>
+											)}
+											<div className="flex items-center justify-between gap-2 px-2 py-1.5 text-xs">
+												<span>{sourceLabelFor(item.source) ?? "Gallery"}</span>
+												<span className="text-muted-foreground">
+													{attached
+														? "On this run"
+														: reusingId === item.id
+															? "Attaching…"
+															: "Attach"}
+												</span>
+											</div>
+										</button>
+									);
+								},
+							)}
+						</div>
+					)}
+				</DialogContent>
+			</Dialog>
 		</section>
 	);
 }

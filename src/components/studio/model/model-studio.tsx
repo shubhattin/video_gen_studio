@@ -57,6 +57,9 @@ export function ModelStudio({
 	const removeReferenceImage = useMutation(
 		api.studio.mutations.removeReferenceImage,
 	);
+	const attachGalleryImageToRun = useMutation(
+		api.studio.mutations.attachGalleryImageToRun,
+	);
 	const prepareReferenceImageUpload = useAction(
 		api.studio.r2.prepareReferenceImageUpload,
 	);
@@ -111,15 +114,27 @@ export function ModelStudio({
 	);
 	const profile = MODEL_CAPABILITY_PROFILES[selectedModel];
 
-	const rawImages = run?.referenceImages ?? [];
-	const rawVideos = run?.videos ?? [];
+	const rawImages = (run?.referenceImages ?? []) as Array<{
+		id: string;
+		objectKey?: string;
+		source?: "generated" | "uploaded" | "terminal_frame";
+		revisedImagePrompt?: string;
+		createdAt: number;
+	}>;
+	const rawVideos = (run?.videos ?? []) as Array<{
+		id: string;
+		objectKey?: string;
+		createdAt: number;
+	}>;
 	const mediaObjectKeys = [
 		...rawImages.map((image) => image.objectKey),
 		...rawVideos.map((video) => video.objectKey),
-		...(compositionJob?.clips ?? []).flatMap((clip) => [
-			clip.video?.objectKey,
-			clip.terminalFrameObjectKey,
-		]),
+		...(compositionJob?.clips ?? []).flatMap(
+			(clip: {
+				video?: { objectKey?: string };
+				terminalFrameObjectKey?: string;
+			}) => [clip.video?.objectKey, clip.terminalFrameObjectKey],
+		),
 	];
 	const urlsByKey = useSignedMediaUrls(activeRunId, mediaObjectKeys);
 	const images = rawImages.map((image) => withSignedUrl(image, urlsByKey));
@@ -127,10 +142,16 @@ export function ModelStudio({
 	const compositionJobWithUrls = compositionJob
 		? {
 				...compositionJob,
-				clips: (compositionJob.clips ?? []).map((clip) => ({
-					...clip,
-					video: clip.video ? withSignedUrl(clip.video, urlsByKey) : undefined,
-				})),
+				clips: (compositionJob.clips ?? []).map(
+					(
+						clip: CompositionClipResult & { terminalFrameObjectKey?: string },
+					) => ({
+						...clip,
+						video: clip.video
+							? withSignedUrl(clip.video, urlsByKey)
+							: undefined,
+					}),
+				),
 			}
 		: compositionJob;
 
@@ -317,7 +338,7 @@ export function ModelStudio({
 		}
 	};
 
-	const extraIds = run?.extraReferenceImageIds ?? [];
+	const extraIds = (run?.extraReferenceImageIds ?? []) as Id<"galleryImages">[];
 	const isBusy = busyStage !== null;
 	const isModelLocked =
 		Boolean(run?.videos?.length) ||
@@ -500,18 +521,34 @@ export function ModelStudio({
 			/>
 
 			<ReferenceImagePanel
+				runId={activeRunId}
 				imageSize={imageSize}
 				imageQuality={imageQuality}
 				onSizeChange={onImageSizeChange}
 				onQualityChange={onImageQualityChange}
 				onGenerate={onGenerateImage}
 				onUpload={onUploadImage}
+				onReuseImage={
+					activeRunId
+						? async (imageId) => {
+								await attachGalleryImageToRun({
+									runId: activeRunId,
+									imageId: imageId as Id<"galleryImages">,
+								});
+								notifyStudioSuccess(
+									"Image attached",
+									"Reused from the shared gallery.",
+								);
+							}
+						: undefined
+				}
 				generating={busyStage === "image"}
 				uploading={busyStage === "upload"}
 				images={images}
 				firstFrameImageId={run?.firstFrameImageId}
 				lastFrameImageId={run?.lastFrameImageId}
 				extraReferenceImageIds={extraIds}
+				supportsFirstFrame={profile.supportsFirstFrame}
 				supportsLastFrame={profile.supportsLastFrame}
 				supportsInputReferences={profile.supportsInputReferences}
 				maxInputReferences={profile.maxInputReferences}
@@ -519,16 +556,17 @@ export function ModelStudio({
 				globalBusy={isBusy}
 				onSelectFirstFrame={(id) => {
 					if (!activeRunId) return;
+					const imageId = id as Id<"galleryImages"> | null;
 					autosave.save(
 						{
-							firstFrameImageId: id,
+							firstFrameImageId: imageId,
 							lastFrameImageId:
-								id && run?.lastFrameImageId === id
+								imageId && run?.lastFrameImageId === imageId
 									? null
 									: (run?.lastFrameImageId ?? null),
 							extraReferenceImageIds:
-								id && extraIds.includes(id)
-									? extraIds.filter((item) => item !== id)
+								imageId && extraIds.includes(imageId)
+									? extraIds.filter((item) => item !== imageId)
 									: extraIds,
 						},
 						"immediate",
@@ -536,16 +574,17 @@ export function ModelStudio({
 				}}
 				onSelectLastFrame={(id) => {
 					if (!activeRunId) return;
+					const imageId = id as Id<"galleryImages"> | null;
 					autosave.save(
 						{
-							lastFrameImageId: id,
+							lastFrameImageId: imageId,
 							firstFrameImageId:
-								id && run?.firstFrameImageId === id
+								imageId && run?.firstFrameImageId === imageId
 									? null
 									: (run?.firstFrameImageId ?? null),
 							extraReferenceImageIds:
-								id && extraIds.includes(id)
-									? extraIds.filter((item) => item !== id)
+								imageId && extraIds.includes(imageId)
+									? extraIds.filter((item) => item !== imageId)
 									: extraIds,
 						},
 						"immediate",
@@ -553,19 +592,20 @@ export function ModelStudio({
 				}}
 				onToggleExtraReference={(id) => {
 					if (!activeRunId) return;
-					const adding = !extraIds.includes(id);
+					const imageId = id as Id<"galleryImages">;
+					const adding = !extraIds.includes(imageId);
 					const next = adding
-						? [...extraIds, id]
-						: extraIds.filter((item) => item !== id);
+						? [...extraIds, imageId]
+						: extraIds.filter((item) => item !== imageId);
 					autosave.save(
 						{
 							extraReferenceImageIds: next,
 							firstFrameImageId:
-								adding && run?.firstFrameImageId === id
+								adding && run?.firstFrameImageId === imageId
 									? null
 									: (run?.firstFrameImageId ?? null),
 							lastFrameImageId:
-								adding && run?.lastFrameImageId === id
+								adding && run?.lastFrameImageId === imageId
 									? null
 									: (run?.lastFrameImageId ?? null),
 						},
