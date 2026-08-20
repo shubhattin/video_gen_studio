@@ -10,6 +10,10 @@ import {
 	PopoverTrigger,
 } from "#/components/ui/popover";
 import { Tabs, TabsList, TabsTrigger } from "#/components/ui/tabs";
+import {
+	MODEL_CAPABILITY_PROFILES,
+	type VideoModelId,
+} from "#/lib/model-catalog";
 import { cn } from "#/lib/utils";
 
 export type CompositionAttemptSummary = {
@@ -58,7 +62,7 @@ const PLANNING_TAB_ID = "__planning_next__";
 function statusLabel(status: string) {
 	switch (status) {
 		case "awaiting_terminal_frame":
-			return "handoff";
+			return "capturing frame";
 		case "planning":
 			return "planning";
 		default:
@@ -68,8 +72,11 @@ function statusLabel(status: string) {
 
 function shortModelId(modelId?: string) {
 	if (!modelId) return null;
-	const parts = modelId.split("/");
-	return parts[parts.length - 1] ?? modelId;
+	return (
+		MODEL_CAPABILITY_PROFILES[modelId as VideoModelId]?.displayName ??
+		modelId.split("/").pop() ??
+		modelId
+	);
 }
 
 function InfoRow({

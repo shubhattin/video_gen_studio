@@ -132,9 +132,8 @@ export function MultiClipCompositionControls({
 							<span className="space-y-1">
 								<span className="block text-sm font-medium">Continuation</span>
 								<span className="block text-xs font-normal text-muted-foreground">
-									Uses the previous clip’s terminal frame (extracted in this
-									browser between clips) and a connected story beat. Keep the
-									tab open during generation.
+									Each clip picks up from the last frame of the previous one for
+									a seamless flow. Keep this tab open while generating.
 								</span>
 							</span>
 						</Label>

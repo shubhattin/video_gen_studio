@@ -17,6 +17,23 @@ import {
 } from "./composition-clip-player";
 import type { VideoResultItem } from "../video/video-result";
 
+function compositionStatusLabel(status: string): string {
+	switch (status) {
+		case "planned":
+			return "Planned";
+		case "generating":
+			return "Generating";
+		case "awaiting_terminal_frame":
+			return "Capturing frame";
+		case "completed":
+			return "Ready";
+		case "failed":
+			return "Failed";
+		default:
+			return status.replaceAll("_", " ");
+	}
+}
+
 export type CompositionClipResult = {
 	_id: string;
 	clipIndex: number;
@@ -189,16 +206,16 @@ export function CompositionResult({
 			<div className="flex flex-wrap items-end justify-between gap-3">
 				<div className="flex min-w-0 flex-col gap-2">
 					<div className="flex flex-wrap items-center gap-2">
-						<h2 className="font-heading text-xl font-semibold">
+						<h2 className="font-heading text-lg font-semibold">
 							Composed video
 						</h2>
 						<Badge variant={status === "failed" ? "destructive" : "secondary"}>
-							{status}
+							{compositionStatusLabel(status)}
 						</Badge>
 					</div>
 					<p className="text-sm text-muted-foreground">
 						{status === "awaiting_terminal_frame"
-							? "Waiting for this browser to capture the continuity frame… Keep the tab open."
+							? "Capturing the continuation frame… Keep this tab open."
 							: `${completed.length}/${clips.length} clips ready · ${totalDurationSeconds}s planned`}
 					</p>
 				</div>

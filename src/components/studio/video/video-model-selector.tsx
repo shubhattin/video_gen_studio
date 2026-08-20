@@ -188,7 +188,7 @@ function ModelRow({
 				</span>
 				<span className="text-xs text-muted-foreground">
 					{pricing?.output
-						? `OpenRouter SKU: ${pricing.output}`
+						? `Pricing ref: ${pricing.output}`
 						: profile.pricingNotes}
 				</span>
 			</span>
@@ -352,10 +352,14 @@ export function VideoModelSelector({
 				</Command>
 				{selectedPricing?.output || selected.pricingNotes ? (
 					<div className="border-t border-border/80 px-3 py-2 text-xs text-muted-foreground">
-						Current:{" "}
-						{selectedPricing?.output
-							? `OpenRouter SKU ${selectedPricing.output}`
-							: selected.pricingNotes}
+						{selectedPricing?.output || selected.pricingNotes ? (
+							<>
+								Current:{" "}
+								{selectedPricing?.output
+									? `pricing ref ${selectedPricing.output}`
+									: selected.pricingNotes}
+							</>
+						) : null}
 					</div>
 				) : null}
 			</PopoverContent>

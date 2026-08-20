@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { MessageResponse } from "#/components/ai-elements/message";
 import { Button } from "#/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs";
-import { Textarea } from "#/components/ui/textarea";
+import { MarkdownTextarea } from "#/components/ui/markdown-textarea";
 import {
 	markdownToVideoScenes,
 	videoScenesToMarkdown,
@@ -54,16 +54,22 @@ function PlanEditor({
 	disabled?: boolean;
 	saving?: boolean;
 	ariaLabel: string;
-	onSave: (next: string) => Promise<void> | void;
+	/** Returns an optional non-blocking warning string. Throw to hard-block. */
+	onSave: (next: string) => Promise<string | void> | void;
 }) {
 	const [tab, setTab] = useState<"view" | "edit">("view");
 	const [draft, setDraft] = useState(value);
 	const [error, setError] = useState<string | null>(null);
+	const [warning, setWarning] = useState<string | null>(null);
 
 	useEffect(() => {
 		if (tab === "view") {
 			setDraft(value);
 			setError(null);
+		} else {
+			// Entering edit mode: clear stale notices from a previous save.
+			setError(null);
+			setWarning(null);
 		}
 	}, [tab, value]);
 
@@ -94,6 +100,10 @@ function PlanEditor({
 				</Tabs>
 			</div>
 
+			{warning ? (
+				<p className="text-sm text-amber-600 dark:text-amber-400">{warning}</p>
+			) : null}
+
 			{tab === "view" ? (
 				<div className="max-h-[min(28rem,55vh)] overflow-y-auto overscroll-contain rounded-lg border border-border/80 bg-muted/20 p-4">
 					<MessageResponse className={markdownViewClassName}>
@@ -102,13 +112,14 @@ function PlanEditor({
 				</div>
 			) : (
 				<div className="space-y-3">
-					<Textarea
+					<MarkdownTextarea
 						value={draft}
 						onChange={(event) => {
 							setDraft(event.target.value);
 							setError(null);
+							setWarning(null);
 						}}
-						className="min-h-64 max-h-[50vh] resize-y font-mono text-xs leading-relaxed"
+						className="min-h-64 max-h-[50vh] resize-y"
 						disabled={disabled || saving}
 						aria-label={ariaLabel}
 					/>
@@ -123,6 +134,7 @@ function PlanEditor({
 							onClick={() => {
 								setDraft(value);
 								setError(null);
+								setWarning(null);
 							}}
 						>
 							Discard
@@ -135,9 +147,12 @@ function PlanEditor({
 							onClick={() => {
 								void (async () => {
 									try {
-										await onSave(draft);
-										setTab("view");
+										const result = await onSave(draft);
+										setWarning(
+											typeof result === "string" && result ? result : null,
+										);
 										setError(null);
+										setTab("view");
 									} catch (saveError) {
 										setError(
 											saveError instanceof Error
@@ -190,10 +205,10 @@ export function ShlokaPlanPreview({
 	};
 
 	return (
-		<section className="space-y-4 border-t border-border/80 pt-6">
+		<section className="space-y-4 border-t border-border/80 pt-5">
 			<div className="flex flex-wrap items-start justify-between gap-3">
 				<div>
-					<h2 className="font-heading text-xl font-semibold">Creative plan</h2>
+					<h2 className="font-heading text-lg font-semibold">Creative plan</h2>
 					<p className="text-sm text-muted-foreground">
 						{plannerModel ?? "Planner"} · reasoning{" "}
 						{plannerReasoning ?? "medium"}
@@ -269,7 +284,7 @@ export function ShlokaPlanPreview({
 									<p className="text-sm font-medium">
 										Clip {clip.clipIndex + 1} · {clip.durationSeconds}s
 										{clip.usesPreviousTerminalFrame
-											? " · continues from previous terminal frame"
+											? " · continues from previous clip"
 											: ""}
 									</p>
 									{clip.globalDescription ? (
@@ -324,13 +339,20 @@ export function ShlokaPlanPreview({
 								saving={savingScenes}
 								ariaLabel="Edit video plan markdown"
 								onSave={async (next) => {
-									const parsed = markdownToVideoScenes(next);
+									const { scenes, warning } = markdownToVideoScenes(next);
+									if (scenes.length === 0) {
+										throw new Error(
+											warning ??
+												'Could not parse scenes. Keep headings like "### Scene 1: …".',
+										);
+									}
 									setSavingScenes(true);
 									try {
-										await onSaveVideoScenes(parsed);
+										await onSaveVideoScenes(scenes);
 									} finally {
 										setSavingScenes(false);
 									}
+									return warning ?? undefined;
 								}}
 							/>
 							<div className="max-h-[min(20rem,40vh)] space-y-3 overflow-y-auto overscroll-contain pr-1">

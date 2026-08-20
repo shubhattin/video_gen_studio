@@ -126,7 +126,7 @@ export function busyStageCopy(busyStage: Exclude<StudioBusyStage, null>) {
 		case "video":
 			return {
 				title: "Generating video",
-				detail: "Submitting and polling OpenRouter…",
+				detail: "Rendering your clip…",
 			};
 	}
 }
@@ -146,7 +146,7 @@ export function runStatusCopy(status: string) {
 		case "video_generating":
 			return {
 				title: "Generating video",
-				detail: "OpenRouter job running…",
+				detail: "Rendering your clip…",
 			};
 		default:
 			return {

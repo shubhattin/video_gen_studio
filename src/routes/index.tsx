@@ -296,7 +296,7 @@ function ShlokaStudioPage() {
 	};
 
 	const persistComposerFields = async () => {
-		if (busyStage !== null) return;
+		if (planningBusy) return;
 		const trimmedShloka = shlokaText.trim();
 		if (!trimmedShloka) return;
 		try {
@@ -374,7 +374,7 @@ function ShlokaStudioPage() {
 		try {
 			const id = await ensureRun();
 			await generateVideo({ runId: id });
-			notifyStudioSuccess("Video appended", "Clip saved to this run.");
+			notifyStudioSuccess("Video clip saved", "Added to this run.");
 		} catch (error) {
 			notifyStudioError("Video generation failed", error);
 		} finally {
@@ -418,6 +418,10 @@ function ShlokaStudioPage() {
 
 	const extraIds = run?.extraReferenceImageIds ?? [];
 	const isRunLoading = Boolean(runId) && run === undefined;
+	// Targeted busy flags so unrelated controls stay usable while one stage runs.
+	const planningBusy = busyStage === "planning";
+	const videoBusy = busyStage === "video";
+	const anyBusy = busyStage !== null;
 
 	return (
 		<StudioShell
@@ -437,14 +441,15 @@ function ShlokaStudioPage() {
 				<StudioRunSkeleton />
 			) : (
 				<>
-					<div className="space-y-8 rounded-2xl border border-border/80 bg-card p-5 sm:p-8">
-						<section className="space-y-2">
-							<h1 className="font-heading text-2xl font-semibold">
+					<div className="space-y-6 rounded-2xl border border-border/80 bg-gradient-to-b from-card to-card/40 p-4 shadow-sm sm:p-6">
+						<section className="space-y-1.5">
+							<h1 className="font-heading text-xl font-semibold tracking-tight sm:text-2xl">
 								Shloka Video Generator
 							</h1>
 							<p className="text-sm text-muted-foreground">
-								Plan → reference stills → OpenRouter video. Default path is 9:16
-								portrait for shorts.
+								Turn a verse into a short video: plan the scenes, generate
+								reference stills, then render the clips. Defaults to 9:16
+								portrait.
 							</p>
 						</section>
 
@@ -456,7 +461,7 @@ function ShlokaStudioPage() {
 							onInstructionsChange={setCustomInstructions}
 							onPlannerSystemPromptChange={setPlannerSystemPrompt}
 							onPersist={persistComposerFields}
-							disabled={busyStage !== null}
+							disabled={planningBusy}
 						/>
 
 						<MultiClipCompositionControls
@@ -465,27 +470,27 @@ function ShlokaStudioPage() {
 							durationSeconds={videoConfig.durationSeconds}
 							onChange={setComposition}
 							disabled={
-								busyStage !== null ||
+								planningBusy ||
+								videoBusy ||
 								compositionJob?.status === "generating" ||
 								compositionJob?.status === "awaiting_terminal_frame"
 							}
 						/>
 
 						{composition.enabled ? (
-							<div className="flex flex-col gap-4 border-t border-border/80 pt-6">
-								<div className="flex flex-col gap-2">
-									<h2 className="font-heading text-xl font-semibold">
+							<div className="flex flex-col gap-3 border-t border-border/80 pt-5">
+								<div className="flex flex-col gap-1.5">
+									<h2 className="font-heading text-lg font-semibold">
 										Video model
 									</h2>
 									<p className="text-sm text-muted-foreground">
-										Choose the model and native clip duration before generating
-										the multi-clip plan.
+										Choose the model and clip duration before planning.
 									</p>
 									<VideoModelSelector
 										value={videoConfig.modelId as VideoModelId}
 										gatewayPricingById={gatewayById}
 										pricingSkusById={pricingSkusById}
-										disabled={busyStage !== null}
+										disabled={planningBusy || videoBusy}
 										onValueChange={(modelId) => {
 											setVideoConfig(defaultVideoParams(modelId));
 										}}
@@ -494,7 +499,7 @@ function ShlokaStudioPage() {
 								<VideoConfiguration
 									value={videoConfig}
 									onChange={setVideoConfig}
-									disabled={busyStage !== null}
+									disabled={planningBusy || videoBusy}
 								/>
 							</div>
 						) : null}
@@ -502,7 +507,7 @@ function ShlokaStudioPage() {
 						<div className="flex flex-wrap gap-3">
 							<Button
 								className="min-h-11"
-								disabled={!shlokaText.trim() || busyStage !== null}
+								disabled={!shlokaText.trim() || anyBusy}
 								onClick={onPlan}
 							>
 								{busyStage === "planning"
@@ -516,7 +521,7 @@ function ShlokaStudioPage() {
 						</div>
 
 						{planReady ? (
-							<div className="flex flex-col gap-4">
+							<div className="flex flex-col gap-3">
 								{composition.enabled &&
 								(compositionJob || isPlanningNextComposition) ? (
 									<CompositionAttemptControls
@@ -583,7 +588,7 @@ function ShlokaStudioPage() {
 									plannerReasoning={
 										compositionJob?.plannerReasoning ?? run?.plannerReasoning
 									}
-									disabled={busyStage !== null || !runId}
+									disabled={planningBusy || !runId}
 									onSaveImagePrompt={
 										runId
 											? async (imagePrompt) => {
@@ -631,7 +636,8 @@ function ShlokaStudioPage() {
 									supportsLastFrame={profile?.supportsLastFrame}
 									supportsInputReferences={profile?.supportsInputReferences}
 									maxInputReferences={profile?.maxInputReferences}
-									disabled={busyStage !== null || !runId}
+									disabled={!runId}
+									globalBusy={anyBusy}
 									onSelectFirstFrame={async (id) => {
 										if (!runId) return;
 										await updateDraft({ runId, firstFrameImageId: id });
@@ -656,19 +662,20 @@ function ShlokaStudioPage() {
 						) : null}
 
 						{planReady && !composition.enabled ? (
-							<div className="flex flex-col gap-4 border-t border-border/80 pt-6">
-								<div className="flex flex-col gap-2">
-									<h2 className="font-heading text-xl font-semibold">
+							<div className="flex flex-col gap-3 border-t border-border/80 pt-5">
+								<div className="flex flex-col gap-1.5">
+									<h2 className="font-heading text-lg font-semibold">
 										Video model
 									</h2>
 									<p className="text-sm text-muted-foreground">
-										Compact picker with capabilities, limits, and pricing notes.
+										Pick a model — capabilities, limits, and pricing shown
+										below.
 									</p>
 									<VideoModelSelector
 										value={videoConfig.modelId as VideoModelId}
 										gatewayPricingById={gatewayById}
 										pricingSkusById={pricingSkusById}
-										disabled={busyStage !== null}
+										disabled={planningBusy || videoBusy}
 										onValueChange={(modelId) => {
 											setVideoConfig({
 												...defaultVideoParams(modelId),
@@ -679,27 +686,27 @@ function ShlokaStudioPage() {
 								<VideoConfiguration
 									value={videoConfig}
 									onChange={setVideoConfig}
-									disabled={busyStage !== null}
+									disabled={planningBusy || videoBusy}
 								/>
 								<Button
 									className="min-h-11"
-									disabled={busyStage !== null}
+									disabled={anyBusy}
 									onClick={onGenerateVideo}
 								>
 									{busyStage === "video"
 										? "Generating video…"
-										: "Generate video (append)"}
+										: "Generate video clip"}
 								</Button>
 							</div>
 						) : null}
 
 						{planReady && composition.enabled && compositionJob ? (
-							<div className="flex flex-wrap gap-3 border-t border-border/80 pt-6">
+							<div className="flex flex-wrap gap-3 border-t border-border/80 pt-5">
 								{compositionJob.status === "planned" ||
 								compositionJob.status === "failed" ? (
 									<Button
 										className="min-h-11"
-										disabled={busyStage !== null}
+										disabled={anyBusy}
 										onClick={onStartComposition}
 									>
 										{busyStage === "video"
@@ -712,7 +719,7 @@ function ShlokaStudioPage() {
 									<Button
 										className="min-h-11"
 										variant="outline"
-										disabled={busyStage !== null}
+										disabled={anyBusy}
 										onClick={() => runId && cancelComposition({ runId })}
 									>
 										Cancel composition
@@ -768,7 +775,7 @@ function ShlokaStudioPage() {
 						warnings={run?.warnings}
 						contextLabel={
 							busyStage === "video" || run?.status === "video_generating"
-								? videoConfig.modelId
+								? (profile?.displayName ?? null)
 								: shlokaText.slice(0, 40) || null
 						}
 					/>
