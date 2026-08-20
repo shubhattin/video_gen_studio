@@ -275,7 +275,7 @@ describe("video param validation", () => {
 	it("rejects unsupported Veo duration", () => {
 		expect(() =>
 			validateVideoParams({
-				modelId: "google/veo-3.1",
+				modelId: "google/veo-3.1-lite",
 				aspectRatio: "9:16",
 				resolution: "720p",
 				durationSeconds: 10,
@@ -294,10 +294,10 @@ describe("video param validation", () => {
 		expect(params.durationSeconds).toBe(5);
 	});
 
-	it("rejects audio on Grok", () => {
+	it("rejects audio on Runway (video-only model)", () => {
 		expect(() =>
 			validateVideoParams({
-				modelId: "x-ai/grok-imagine-video-1.5",
+				modelId: "runway/gen-4.5",
 				aspectRatio: "9:16",
 				resolution: "720p",
 				durationSeconds: 5,
@@ -306,7 +306,7 @@ describe("video param validation", () => {
 		).toThrow();
 	});
 
-	it("accepts Wan 2.7 and Sora 2 Pro configs", () => {
+	it("accepts Wan 2.7 and Seedance 2.5 configs", () => {
 		expect(
 			validateVideoParams({
 				modelId: "alibaba/wan-2.7",
@@ -319,7 +319,7 @@ describe("video param validation", () => {
 
 		expect(
 			validateVideoParams({
-				modelId: "openai/sora-2-pro",
+				modelId: "bytedance/seedance-2.5",
 				aspectRatio: "16:9",
 				resolution: "720p",
 				durationSeconds: 8,
@@ -328,14 +328,14 @@ describe("video param validation", () => {
 		).toBe(8);
 	});
 
-	it("accepts Grok Imagine Video base model", () => {
+	it("accepts Runway base model", () => {
 		const params = validateVideoParams({
-			modelId: "x-ai/grok-imagine-video",
+			modelId: "runway/gen-4.5",
 			aspectRatio: "9:16",
 			resolution: "720p",
 			durationSeconds: 6,
 		});
-		expect(params.modelId).toBe("x-ai/grok-imagine-video");
+		expect(params.modelId).toBe("runway/gen-4.5");
 	});
 });
 
