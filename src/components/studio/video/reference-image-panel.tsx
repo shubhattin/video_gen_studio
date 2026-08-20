@@ -354,9 +354,9 @@ export function ReferenceImagePanel({
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
-								<SelectItem value="1024x1536">Portrait 1024×1536</SelectItem>
-								<SelectItem value="1024x1024">Square 1024×1024</SelectItem>
-								<SelectItem value="1536x1024">Landscape 1536×1024</SelectItem>
+								<SelectItem value="1024x1536">Portrait 2:3</SelectItem>
+								<SelectItem value="1024x1024">Square 1:1</SelectItem>
+								<SelectItem value="1536x1024">Landscape 3:2</SelectItem>
 							</SelectContent>
 						</Select>
 					</div>
@@ -391,9 +391,31 @@ export function ReferenceImagePanel({
 						{uploading ? "Uploading…" : "Upload"}
 					</Button>
 				</div>
-				<p className="mt-2 text-xs text-muted-foreground">
-					~${estimate.toFixed(3)} per {imageQuality} image
-				</p>
+				<div className="mt-2 flex items-center">
+					<Popover>
+						<PopoverTrigger
+							render={
+								<button
+									type="button"
+									className="inline-flex h-6 items-center gap-1 rounded px-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+								>
+									<Info data-icon="inline-start" className="size-3.5" />
+									Pricing
+								</button>
+							}
+						/>
+						<PopoverContent align="end" className="w-72 gap-3 p-4">
+							<PopoverHeader>
+								<PopoverTitle>Image pricing</PopoverTitle>
+								<PopoverDescription>
+									Rough estimate for a {imageQuality} image: ~$
+									{estimate.toFixed(3)}. Actual cost depends on the provider and
+									appears in each image’s details.
+								</PopoverDescription>
+							</PopoverHeader>
+						</PopoverContent>
+					</Popover>
+				</div>
 				<input
 					ref={fileInputRef}
 					type="file"

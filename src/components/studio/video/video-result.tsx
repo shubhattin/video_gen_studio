@@ -167,11 +167,6 @@ function VideoClipCard({
 					{duration != null ? (
 						<span className="text-xs text-muted-foreground">{duration}s</span>
 					) : null}
-					{video.actualCostUsd != null ? (
-						<span className="text-xs text-muted-foreground">
-							${video.actualCostUsd.toFixed(4)}
-						</span>
-					) : null}
 					{modelLabel ? (
 						<span className="truncate text-xs text-muted-foreground">
 							{modelLabel}

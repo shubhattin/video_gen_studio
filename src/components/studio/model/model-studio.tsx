@@ -18,6 +18,7 @@ import {
 	VideoConfiguration,
 } from "#/components/studio/video/video-configuration";
 import { VideoModelSelector } from "#/components/studio/video/video-model-selector";
+import { VideoGenerateConfirm } from "#/components/studio/video/video-generate-confirm";
 import { VideoResult } from "#/components/studio/video/video-result";
 import { Button } from "#/components/ui/button";
 import { useCompositionTerminalFrameHandoff } from "#/hooks/use-composition-terminal-frame-handoff";
@@ -319,6 +320,13 @@ export function ModelStudio({
 		compositionJob?.status === "generating" ||
 		compositionJob?.status === "awaiting_terminal_frame";
 
+	const hasPlan = Boolean(
+		run?.imagePrompt ||
+			run?.videoScenes?.length ||
+			compositionJob ||
+			(compositionAttempts?.length ?? 0) > 0,
+	);
+
 	const isPlanningNextComposition =
 		composition.enabled &&
 		(busyStage === "planning" || run?.status === "planning") &&
@@ -417,6 +425,7 @@ export function ModelStudio({
 				modelId={selectedModel}
 				durationSeconds={videoConfig.durationSeconds}
 				onChange={setComposition}
+				hasPlan={hasPlan}
 				disabled={
 					busyStage === "planning" ||
 					busyStage === "video" ||
@@ -505,11 +514,14 @@ export function ModelStudio({
 						) : null}
 					</>
 				) : (
-					<Button className="min-h-11" disabled={isBusy} onClick={startVideo}>
-						{busyStage === "video"
-							? "Generating video…"
-							: "Generate video clip"}
-					</Button>
+					<VideoGenerateConfirm
+						config={{ ...videoConfig, modelId: selectedModel }}
+						className="min-h-11"
+						disabled={isBusy}
+						generating={busyStage === "video"}
+						triggerLabel="Generate video clip"
+						onConfirm={startVideo}
+					/>
 				)}
 			</div>
 

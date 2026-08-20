@@ -238,11 +238,6 @@ export function VideoModelSelector({
 
 	const selected = MODEL_CAPABILITY_PROFILES[value];
 	const selectedPricing = gatewayPricingById?.get(value);
-	const selectedSortPrice = resolveVideoModelSortPrice(
-		value,
-		pricingSkusById?.get(value),
-	);
-	const selectedPriceLabel = formatUsdPerSecond(selectedSortPrice);
 
 	return (
 		<Popover open={open} onOpenChange={setOpen}>
@@ -268,11 +263,6 @@ export function VideoModelSelector({
 					<span className="flex min-w-0 flex-col gap-0.5">
 						<span className="truncate text-sm font-medium">
 							{selected.displayName}
-							{selectedPriceLabel ? (
-								<span className="ml-2 font-normal text-muted-foreground">
-									{selectedPriceLabel}
-								</span>
-							) : null}
 						</span>
 						<span className="truncate text-xs text-muted-foreground">
 							{VIDEO_MODEL_FAMILY_META[selected.family].label} ·{" "}

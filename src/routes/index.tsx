@@ -23,6 +23,7 @@ import {
 	VideoConfiguration,
 } from "#/components/studio/video/video-configuration";
 import { VideoModelSelector } from "#/components/studio/video/video-model-selector";
+import { VideoGenerateConfirm } from "#/components/studio/video/video-generate-confirm";
 import { VideoResult } from "#/components/studio/video/video-result";
 import { Button } from "#/components/ui/button";
 import { useCompositionTerminalFrameHandoff } from "#/hooks/use-composition-terminal-frame-handoff";
@@ -469,6 +470,7 @@ function ShlokaStudioPage() {
 							modelId={videoConfig.modelId as VideoModelId}
 							durationSeconds={videoConfig.durationSeconds}
 							onChange={setComposition}
+							hasPlan={planReady}
 							disabled={
 								planningBusy ||
 								videoBusy ||
@@ -688,15 +690,14 @@ function ShlokaStudioPage() {
 									onChange={setVideoConfig}
 									disabled={planningBusy || videoBusy}
 								/>
-								<Button
+								<VideoGenerateConfirm
+									config={videoConfig}
 									className="min-h-11"
 									disabled={anyBusy}
-									onClick={onGenerateVideo}
-								>
-									{busyStage === "video"
-										? "Generating video…"
-										: "Generate video clip"}
-								</Button>
+									generating={busyStage === "video"}
+									triggerLabel="Generate video clip"
+									onConfirm={onGenerateVideo}
+								/>
 							</div>
 						) : null}
 
