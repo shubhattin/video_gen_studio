@@ -661,9 +661,17 @@ export function ReferenceImagePanel({
 									objectKey: string;
 									source?: ReferenceImageItem["source"];
 									createdAt: number;
+									meta?: {
+										width?: number;
+										height?: number;
+									};
 								}) => {
 									const withUrl = withSignedUrl(item, galleryUrls);
 									const attached = attachedIds.has(item.id);
+									const width = item.meta?.width;
+									const height = item.meta?.height;
+									const ratio =
+										width && height ? `${width} / ${height}` : undefined;
 									return (
 										<button
 											key={item.id}
@@ -687,13 +695,26 @@ export function ReferenceImagePanel({
 											}}
 										>
 											{withUrl.url ? (
-												<img
-													src={withUrl.url}
-													alt=""
-													className="h-36 w-full object-cover"
-												/>
+												<div
+													className="flex w-full items-center justify-center overflow-hidden bg-muted/40"
+													style={
+														ratio
+															? {
+																	aspectRatio: ratio,
+																	maxHeight: "12rem",
+																	height: "auto",
+																}
+															: { height: "10rem" }
+													}
+												>
+													<img
+														src={withUrl.url}
+														alt=""
+														className="h-full w-full object-contain"
+													/>
+												</div>
 											) : (
-												<div className="flex h-36 items-center justify-center text-xs text-muted-foreground">
+												<div className="flex h-40 items-center justify-center text-xs text-muted-foreground">
 													Preview unavailable
 												</div>
 											)}

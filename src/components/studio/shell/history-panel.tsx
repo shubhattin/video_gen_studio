@@ -1,3 +1,5 @@
+import { api } from "@convex/_generated/api";
+import type { Id } from "@convex/_generated/dataModel";
 import { Link } from "@tanstack/react-router";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { formatDistanceToNow } from "date-fns";
@@ -10,8 +12,7 @@ import {
 	Trash2,
 } from "lucide-react";
 import { useState } from "react";
-import { api } from "@convex/_generated/api";
-import type { Id } from "@convex/_generated/dataModel";
+import { HistoryPanelSkeleton } from "#/components/studio/shell/studio-run-skeleton";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -23,6 +24,8 @@ import {
 	AlertDialogTitle,
 } from "#/components/ui/alert-dialog";
 import { Badge } from "#/components/ui/badge";
+import { Button } from "#/components/ui/button";
+import { Checkbox } from "#/components/ui/checkbox";
 import {
 	Dialog,
 	DialogContent,
@@ -39,7 +42,6 @@ import {
 	DropdownMenuTrigger,
 } from "#/components/ui/dropdown-menu";
 import { Input } from "#/components/ui/input";
-import { Button } from "#/components/ui/button";
 import { Label } from "#/components/ui/label";
 import {
 	SidebarMenu,
@@ -53,7 +55,6 @@ import {
 	runStatusPillLabel,
 } from "#/lib/studio-run-status";
 import { cn } from "#/lib/utils";
-import { HistoryPanelSkeleton } from "#/components/studio/shell/studio-run-skeleton";
 
 type HistoryRun = {
 	_id: Id<"generationRuns">;
@@ -87,6 +88,11 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 	const [pendingDeleteId, setPendingDeleteId] =
 		useState<Id<"generationRuns"> | null>(null);
 	const [deleting, setDeleting] = useState(false);
+	const [deleteMedia, setDeleteMedia] = useState(false);
+	const deleteMediaCounts = useQuery(
+		api.studio.queries.getRunMediaCounts,
+		pendingDeleteId ? { runId: pendingDeleteId } : "skip",
+	);
 	const [renameTarget, setRenameTarget] = useState<HistoryRun | null>(null);
 	const [renameValue, setRenameValue] = useState("");
 	const [renaming, setRenaming] = useState(false);
@@ -101,7 +107,10 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 		}
 		setDeleting(true);
 		try {
-			await deleteRun({ runId: pendingDeleteId });
+			await deleteRun({
+				runId: pendingDeleteId,
+				deleteMedia,
+			});
 			onDeleted?.(pendingDeleteId);
 			setPendingDeleteId(null);
 		} finally {
@@ -246,7 +255,10 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 										<DropdownMenuItem
 											variant="destructive"
 											className="gap-2"
-											onClick={() => setPendingDeleteId(run._id)}
+											onClick={() => {
+												setDeleteMedia(false);
+												setPendingDeleteId(run._id);
+											}}
 										>
 											<Trash2 />
 											Delete run
@@ -271,10 +283,60 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 					<AlertDialogHeader>
 						<AlertDialogTitle>Delete this run?</AlertDialogTitle>
 						<AlertDialogDescription>
-							This deletes the run’s plans and text. Images and videos stay in
-							the shared gallery.
+							This deletes the run, its plans, and text. By default its images
+							and videos stay in the shared gallery.
 						</AlertDialogDescription>
 					</AlertDialogHeader>
+
+					<div className="flex flex-col gap-2.5">
+						<label
+							htmlFor="delete-run-media"
+							className="flex cursor-pointer items-start gap-3 rounded-lg border border-border/70 bg-muted/40 p-3 transition-colors hover:bg-muted/60"
+						>
+							<Checkbox
+								id="delete-run-media"
+								checked={deleteMedia}
+								disabled={deleting}
+								onCheckedChange={(checked) => setDeleteMedia(Boolean(checked))}
+								className="mt-0.5"
+							/>
+							<span className="flex min-w-0 flex-1 flex-col gap-1">
+								<span className="text-sm font-medium leading-tight">
+									Also delete this run’s images and videos
+								</span>
+								<span className="text-xs text-muted-foreground">
+									Removes generated media from the shared gallery.
+								</span>
+							</span>
+						</label>
+
+						{deleteMedia ? (
+							<div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-xs leading-relaxed text-amber-900 dark:text-amber-200">
+								{deleteMediaCounts === undefined ? (
+									"Checking which files are safe to delete…"
+								) : deleteMediaCounts.images === 0 &&
+									deleteMediaCounts.videos === 0 ? (
+									"No media linked to this run is used only by this run — everything it references is reused elsewhere, so the gallery files will be kept."
+								) : (
+									<>
+										This permanently deletes{" "}
+										<strong>
+											{deleteMediaCounts.images} image
+											{deleteMediaCounts.images === 1 ? "" : "s"}
+										</strong>{" "}
+										and{" "}
+										<strong>
+											{deleteMediaCounts.videos} video
+											{deleteMediaCounts.videos === 1 ? "" : "s"}
+										</strong>{" "}
+										from the shared gallery (only files not used by other runs).
+										This cannot be undone.
+									</>
+								)}
+							</div>
+						) : null}
+					</div>
+
 					<AlertDialogFooter>
 						<AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
 						<AlertDialogAction
@@ -282,7 +344,11 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 							disabled={deleting}
 							onClick={confirmDelete}
 						>
-							{deleting ? "Deleting…" : "Delete"}
+							{deleting
+								? "Deleting…"
+								: deleteMedia
+									? "Delete run & media"
+									: "Delete run"}
 						</AlertDialogAction>
 					</AlertDialogFooter>
 				</AlertDialogContent>

@@ -12,13 +12,17 @@ import {
 	VIDEO_MODEL_IDS,
 } from "../lib/modelCatalog";
 import {
+	collectRunMediaIds,
 	findGalleryByObjectKey,
 	galleryVideoToResult,
+	imageReferencedOutsideRun,
+	listCompositionClipsForRunCtx,
 	listShlokaPlansForRunCtx,
 	loadImagesByIds,
 	loadVideosByIds,
 	asGalleryImageId,
 	asGalleryVideoId,
+	videoReferencedOutsideRun,
 } from "./media";
 
 type DbCtx = QueryCtx | MutationCtx;
@@ -260,6 +264,48 @@ export const listGalleryVideos = query({
 			.order("desc")
 			.take(limit);
 		return docs.map((doc) => galleryVideoToResult(doc));
+	},
+});
+
+export const getRunMediaCounts = query({
+	args: {
+		runId: v.id("generationRuns"),
+	},
+	returns: v.object({
+		images: v.number(),
+		videos: v.number(),
+	}),
+	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
+		const run = await ctx.db.get(args.runId);
+		if (!run) {
+			return { images: 0, videos: 0 };
+		}
+		const clips = await listCompositionClipsForRunCtx(ctx, args.runId);
+		const { images, videos } = await collectRunMediaIds(ctx, run, clips);
+
+		const allVideos = await ctx.db.query("galleryVideos").collect();
+		for (const video of allVideos) {
+			if (video.sourceRunId === args.runId) {
+				videos.add(video._id);
+			}
+		}
+
+		let imageCount = 0;
+		for (const imageId of images) {
+			if (await imageReferencedOutsideRun(ctx, imageId, args.runId)) {
+				continue;
+			}
+			imageCount += 1;
+		}
+		let videoCount = 0;
+		for (const videoId of videos) {
+			if (await videoReferencedOutsideRun(ctx, videoId, args.runId)) {
+				continue;
+			}
+			videoCount += 1;
+		}
+		return { images: imageCount, videos: videoCount };
 	},
 });
 

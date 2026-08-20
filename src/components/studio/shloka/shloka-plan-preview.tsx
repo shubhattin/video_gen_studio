@@ -188,11 +188,31 @@ export function ShlokaPlanPreview({
 	const [copied, setCopied] = useState<string | null>(null);
 	const [savingImage, setSavingImage] = useState(false);
 	const [savingScenes, setSavingScenes] = useState(false);
+	const [activeTab, setActiveTab] = useState<"image-prompt" | "video-scenes">(
+		"image-prompt",
+	);
 	const hasCompositionClips = Boolean(compositionClips?.length);
 	const hasScenes = Boolean(videoScenes?.length) || hasCompositionClips;
 	const scenesMarkdown = videoScenes?.length
 		? videoScenesToMarkdown(videoScenes)
 		: "";
+	const videoPlanMarkdown = videoScenes?.length
+		? scenesMarkdown
+		: hasCompositionClips
+			? (compositionClips ?? [])
+					.map((clip, index) => {
+						const parts = [
+							`## Clip ${index + 1} (${clip.durationSeconds}s)`,
+						];
+						if (clip.globalDescription) parts.push(clip.globalDescription);
+						parts.push(clip.scenePrompt);
+						if (clip.continuityInstructions)
+							parts.push(`Continuity: ${clip.continuityInstructions}`);
+						if (clip.transition) parts.push(`Transition: ${clip.transition}`);
+						return parts.join("\n\n");
+					})
+					.join("\n\n---\n\n")
+			: "";
 
 	if (!imagePrompt && !hasScenes) {
 		return null;
@@ -204,6 +224,15 @@ export function ShlokaPlanPreview({
 		setTimeout(() => setCopied(null), 1500);
 	};
 
+	const activeCopy = {
+		"image-prompt": imagePrompt
+			? { key: "image", text: imagePrompt, label: "Copy prompt" }
+			: null,
+		"video-scenes": videoPlanMarkdown
+			? { key: "scenes", text: videoPlanMarkdown, label: "Copy plan" }
+			: null,
+	}[activeTab];
+
 	return (
 		<section className="space-y-4 border-t border-border/80 pt-5">
 			<div className="flex flex-wrap items-start justify-between gap-3">
@@ -214,21 +243,41 @@ export function ShlokaPlanPreview({
 						{plannerReasoning ?? "medium"}
 					</p>
 				</div>
-				{onRegenerate ? (
-					<Button
-						variant="outline"
-						size="sm"
-						className="min-h-11"
-						onClick={onRegenerate}
-						disabled={regenerating || disabled}
-					>
-						<RefreshCw className={regenerating ? "animate-spin" : ""} />
-						Regenerate plan
-					</Button>
-				) : null}
+				<div className="flex flex-wrap items-center gap-2">
+					{activeCopy ? (
+						<Button
+							variant="outline"
+							size="sm"
+							className="min-h-11"
+							onClick={() => copyText(activeCopy.key, activeCopy.text)}
+						>
+							<Copy className="size-4" />
+							{copied === activeCopy.key ? "Copied" : activeCopy.label}
+						</Button>
+					) : null}
+					{onRegenerate ? (
+						<Button
+							variant="outline"
+							size="sm"
+							className="min-h-11"
+							onClick={onRegenerate}
+							disabled={regenerating || disabled}
+						>
+							<RefreshCw className={regenerating ? "animate-spin" : ""} />
+							Regenerate plan
+						</Button>
+					) : null}
+				</div>
 			</div>
 
-			<Tabs defaultValue="image-prompt">
+			<Tabs
+				value={activeTab}
+				onValueChange={(value) => {
+					if (value === "image-prompt" || value === "video-scenes") {
+						setActiveTab(value);
+					}
+				}}
+			>
 				<TabsList>
 					<TabsTrigger value="image-prompt">Reference image prompt</TabsTrigger>
 					<TabsTrigger value="video-scenes">
@@ -253,20 +302,11 @@ export function ShlokaPlanPreview({
 								}
 							}}
 						/>
-					) : (
+					) : imagePrompt ? (
 						<p className="rounded-lg border border-border/80 bg-muted/30 p-4 text-sm leading-relaxed">
 							{imagePrompt}
 						</p>
-					)}
-					<Button
-						variant="ghost"
-						size="sm"
-						className="min-h-11"
-						onClick={() => copyText("image", imagePrompt ?? "")}
-					>
-						<Copy className="size-4" />
-						{copied === "image" ? "Copied" : "Copy prompt"}
-					</Button>
+					) : null}
 				</TabsContent>
 				<TabsContent value="video-scenes" className="space-y-3">
 					{hasCompositionClips ? (

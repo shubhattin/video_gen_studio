@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
-import type { Id } from "../_generated/dataModel";
+import type { Doc, Id } from "../_generated/dataModel";
 import { mutation } from "../_generated/server";
 import { requireAdmin } from "../lib/auth";
 import { VIDEO_MODEL_IDS, type VideoModelId } from "../lib/modelCatalog";
@@ -15,11 +15,16 @@ import {
 } from "../schema";
 import {
 	asGalleryImageId,
+	collectRunMediaIds,
+	findGalleryByObjectKey,
+	imageReferencedOutsideRun,
 	listShlokaPlansForRunCtx,
 	uniqueIds,
 	unlinkGalleryImageFromRuns,
 	unlinkGalleryVideoFromRuns,
+	videoReferencedOutsideRun,
 } from "./media";
+import { leftoverObjectKeys } from "./migrateLegacy";
 import {
 	listCompositionJobsForRunCtx,
 	resolveActiveCompositionJob,
@@ -532,6 +537,7 @@ export const createStudioRun = mutation({
 export const deleteRun = mutation({
 	args: {
 		runId: v.id("generationRuns"),
+		deleteMedia: v.optional(v.boolean()),
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
@@ -540,17 +546,77 @@ export const deleteRun = mutation({
 		if (!run) {
 			return null;
 		}
+		const deleteMedia = args.deleteMedia === true;
+
 		const compositionJobs = await listCompositionJobsForRunCtx(ctx, args.runId);
+		const compositionClips: Doc<"compositionClips">[] = [];
 		for (const compositionJob of compositionJobs) {
-			const compositionClips = await ctx.db
+			const clips = await ctx.db
 				.query("compositionClips")
 				.withIndex("by_jobId_and_clipIndex", (q) =>
 					q.eq("jobId", compositionJob._id),
 				)
 				.take(6);
-			for (const clip of compositionClips) {
-				await ctx.db.delete(clip._id);
+			compositionClips.push(...clips);
+		}
+
+		const r2KeysToDelete = new Set<string>();
+
+		if (deleteMedia) {
+			const { images: runImageIds, videos: runVideoIds } =
+				await collectRunMediaIds(ctx, run, compositionClips);
+
+			for (const imageId of runImageIds) {
+				if (await imageReferencedOutsideRun(ctx, imageId, args.runId)) {
+					continue;
+				}
+				const image = await ctx.db.get(imageId);
+				if (!image) continue;
+				await unlinkGalleryImageFromRuns(ctx, imageId);
+				await ctx.db.delete(imageId);
+				r2KeysToDelete.add(image.objectKey);
 			}
+
+			for (const videoId of runVideoIds) {
+				if (await videoReferencedOutsideRun(ctx, videoId, args.runId)) {
+					continue;
+				}
+				const video = await ctx.db.get(videoId);
+				if (!video) continue;
+				await unlinkGalleryVideoFromRuns(ctx, videoId);
+				await ctx.db.delete(videoId);
+				r2KeysToDelete.add(video.objectKey);
+			}
+
+			// Videos produced by this run that were never attached to it.
+			const allVideos = await ctx.db.query("galleryVideos").collect();
+			for (const video of allVideos) {
+				if (video.sourceRunId !== args.runId) continue;
+				if (await videoReferencedOutsideRun(ctx, video._id, args.runId)) {
+					continue;
+				}
+				await unlinkGalleryVideoFromRuns(ctx, video._id);
+				await ctx.db.delete(video._id);
+				r2KeysToDelete.add(video.objectKey);
+			}
+
+			// Orphaned legacy embedded files that are not tracked in the gallery.
+			const orphanKeys = [
+				leftoverObjectKeys(run),
+				...compositionClips.map((clip) => leftoverObjectKeys(clip)),
+			].flat();
+			for (const key of orphanKeys) {
+				if (r2KeysToDelete.has(key)) continue;
+				if ((await findGalleryByObjectKey(ctx, key)) === null) {
+					r2KeysToDelete.add(key);
+				}
+			}
+		}
+
+		for (const clip of compositionClips) {
+			await ctx.db.delete(clip._id);
+		}
+		for (const compositionJob of compositionJobs) {
 			await ctx.db.delete(compositionJob._id);
 		}
 		const plans = await listShlokaPlansForRunCtx(ctx, args.runId);
@@ -558,6 +624,12 @@ export const deleteRun = mutation({
 			await ctx.db.delete(plan._id);
 		}
 		await ctx.db.delete(args.runId);
+
+		if (r2KeysToDelete.size > 0) {
+			await ctx.scheduler.runAfter(0, internal.studio.r2.deleteObjects, {
+				objectKeys: [...r2KeysToDelete],
+			});
+		}
 		return null;
 	},
 });

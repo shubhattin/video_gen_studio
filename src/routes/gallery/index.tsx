@@ -3,7 +3,7 @@ import { HistoryPanel } from "#/components/studio/shell/history-panel";
 import { StudioShell } from "#/components/studio/shell/studio-shell";
 import { VideoGallery } from "#/components/studio/video/video-gallery";
 
-export const Route = createFileRoute("/gallery")({
+export const Route = createFileRoute("/gallery/")({
 	component: GalleryPage,
 });
 

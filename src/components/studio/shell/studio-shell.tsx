@@ -1,7 +1,12 @@
-import { Link } from "@tanstack/react-router";
 import { api } from "@convex/_generated/api";
+import { Link } from "@tanstack/react-router";
 import { useConvexAuth, useQuery } from "convex/react";
-import { Clapperboard, Images, Sparkles } from "lucide-react";
+import {
+	Clapperboard,
+	Image as ImageIcon,
+	Images,
+	Sparkles,
+} from "lucide-react";
 import { Activity, type CSSProperties, type ReactNode } from "react";
 import { AccountPopover } from "#/components/studio/shell/account-popover";
 import {
@@ -33,7 +38,7 @@ const emptyStudioSearch = {} as const;
 type StudioShellProps = {
 	children: ReactNode;
 	history: ReactNode;
-	activePath?: "/" | "/studio" | "/gallery";
+	activePath?: "/" | "/studio" | "/gallery" | "/gallery/images";
 };
 
 export function StudioShell({
@@ -109,6 +114,16 @@ export function StudioShell({
 											<span>Video gallery</span>
 										</SidebarMenuButton>
 									</SidebarMenuItem>
+									<SidebarMenuItem>
+										<SidebarMenuButton
+											isActive={activePath === "/gallery/images"}
+											tooltip="Image gallery"
+											render={<Link to="/gallery/images" />}
+										>
+											<ImageIcon />
+											<span>Image gallery</span>
+										</SidebarMenuButton>
+									</SidebarMenuItem>
 								</SidebarMenu>
 							</SidebarGroupContent>
 						</SidebarGroup>
@@ -147,7 +162,9 @@ export function StudioShell({
 									? "Model Studio"
 									: activePath === "/gallery"
 										? "Video gallery"
-										: "Shloka Studio"}
+										: activePath === "/gallery/images"
+											? "Image gallery"
+											: "Shloka Studio"}
 							</p>
 							<p className="truncate text-xs text-muted-foreground sm:text-sm">
 								{waitingForStudioData
@@ -156,7 +173,9 @@ export function StudioShell({
 										? "Browse video models and generate reference stills"
 										: activePath === "/gallery"
 											? "Browse and download generated clips"
-											: "Plan scenes → reference stills → render video"}
+											: activePath === "/gallery/images"
+												? "Browse and download reference stills"
+												: "Plan scenes → reference stills → render video"}
 							</p>
 						</div>
 					</header>

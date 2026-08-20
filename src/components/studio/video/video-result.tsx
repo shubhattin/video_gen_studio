@@ -50,20 +50,20 @@ type VideoResultProps = {
 	videos: VideoResultItem[];
 };
 
-function extensionForMime(mimeType?: string) {
+export function extensionForMime(mimeType?: string) {
 	if (mimeType?.includes("webm")) return "webm";
 	if (mimeType?.includes("quicktime")) return "mov";
 	return "mp4";
 }
 
-function formatBytes(bytes?: number) {
+export function formatBytes(bytes?: number) {
 	if (bytes == null || !Number.isFinite(bytes) || bytes <= 0) return null;
 	if (bytes < 1024) return `${bytes} B`;
 	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
 	return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-async function saveDownloadResponse(
+export async function saveDownloadResponse(
 	response: Response,
 	filename: string,
 ): Promise<void> {
@@ -86,7 +86,7 @@ async function saveDownloadResponse(
 	}
 }
 
-async function downloadVideoFile(
+export async function downloadVideoFile(
 	sourceUrl: string,
 	filename: string,
 ): Promise<void> {
@@ -330,7 +330,7 @@ export function VideoResult({ runId, videos }: VideoResultProps) {
 				<div>
 					<h2 className="font-heading text-xl font-semibold">Videos</h2>
 					<p className="text-sm text-muted-foreground">
-						{videos.length} take{videos.length === 1 ? "" : "s"} · newest first
+						{videos.length} clip{videos.length === 1 ? "" : "s"} · newest first
 					</p>
 				</div>
 			</div>
@@ -341,7 +341,7 @@ export function VideoResult({ runId, videos }: VideoResultProps) {
 						key={video.id}
 						runId={runId}
 						video={video}
-						versionLabel={`Take ${videos.length - index}`}
+						versionLabel={`Clip ${videos.length - index}`}
 						isLatest={index === 0}
 					/>
 				))}
