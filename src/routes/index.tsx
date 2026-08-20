@@ -687,25 +687,6 @@ function ShlokaStudioPage() {
 														notifyStudioError("Could not switch plan", error),
 													);
 												}}
-												onDeleteAttempt={(planId) => {
-													if (!runId) return;
-													void deleteShlokaPlan({
-														runId,
-														planId: planId as Id<"shlokaPlans">,
-													}).catch((error) =>
-														notifyStudioError("Could not delete plan", error),
-													);
-												}}
-												onForkAttempt={(planId, title) => {
-													if (!runId) return;
-													void forkShlokaPlan({
-														runId,
-														planId: planId as Id<"shlokaPlans">,
-														title,
-													}).catch((error) =>
-														notifyStudioError("Could not fork plan", error),
-													);
-												}}
 												onRenameAttempt={(planId, title) => {
 													void renameShlokaPlan({
 														planId: planId as Id<"shlokaPlans">,
@@ -742,13 +723,6 @@ function ShlokaStudioPage() {
 														clip.clipIndex > 0,
 												}),
 											)}
-											plannerModel={
-												compositionJob?.plannerModel ?? run?.plannerModel
-											}
-											plannerReasoning={
-												compositionJob?.plannerReasoning ??
-												run?.plannerReasoning
-											}
 											disabled={planningBusy || !runId}
 											onSaveImagePrompt={
 												runId
@@ -780,6 +754,40 @@ function ShlokaStudioPage() {
 													: undefined
 											}
 											regenerating={busyStage === "planning"}
+											activePlanId={run?.activePlanId ?? null}
+											attempts={
+												(shlokaPlans ?? []) as Array<{
+													attemptNumber: number;
+												}>
+											}
+											onFork={
+												runId && run?.activePlanId
+													? (planId, title) => {
+															void forkShlokaPlan({
+																runId,
+																planId: planId as Id<"shlokaPlans">,
+																title,
+															}).catch((error) =>
+																notifyStudioError("Could not fork plan", error),
+															);
+														}
+													: undefined
+											}
+											onDelete={
+												runId && run?.activePlanId
+													? (planId) => {
+															void deleteShlokaPlan({
+																runId,
+																planId: planId as Id<"shlokaPlans">,
+															}).catch((error) =>
+																notifyStudioError(
+																	"Could not delete plan",
+																	error,
+																),
+															);
+														}
+													: undefined
+											}
 										/>
 										<ReferenceImagePanel
 											runId={runId}

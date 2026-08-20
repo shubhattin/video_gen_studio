@@ -203,7 +203,7 @@ function MarkdownTextarea({
 				onScroll={handleScroll}
 				spellCheck={false}
 				className={cn(
-					"relative w-full rounded-md border border-input bg-transparent px-2.5 py-2 font-mono text-sm leading-relaxed text-transparent caret-current shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground/70 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30",
+					"relative w-full rounded-md border border-input bg-transparent px-2.5 py-2 font-mono text-sm leading-relaxed text-transparent caret-foreground shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground/70 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30",
 					className,
 				)}
 				{...props}

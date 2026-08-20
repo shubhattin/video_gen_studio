@@ -1,5 +1,5 @@
 import { formatDistanceToNow } from "date-fns";
-import { GitFork, Pencil, Trash2 } from "lucide-react";
+import { Pencil } from "lucide-react";
 import { useState } from "react";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
@@ -14,6 +14,11 @@ import {
 import { Input } from "#/components/ui/input";
 import { Label } from "#/components/ui/label";
 import { Tabs, TabsList, TabsTrigger } from "#/components/ui/tabs";
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
+} from "#/components/ui/tooltip";
 import { cn } from "#/lib/utils";
 
 export type ShlokaPlanAttemptSummary = {
@@ -30,8 +35,6 @@ type ShlokaPlanAttemptControlsProps = {
 	attempts: ShlokaPlanAttemptSummary[];
 	activePlanId?: string | null;
 	onSelectAttempt?: (planId: string) => void;
-	onDeleteAttempt?: (planId: string) => void;
-	onForkAttempt?: (planId: string, title: string) => Promise<void> | void;
 	onRenameAttempt?: (planId: string, title: string) => Promise<void> | void;
 	disabled?: boolean;
 	isPlanningNext?: boolean;
@@ -54,17 +57,13 @@ export function ShlokaPlanAttemptControls({
 	attempts,
 	activePlanId,
 	onSelectAttempt,
-	onDeleteAttempt,
-	onForkAttempt,
 	onRenameAttempt,
 	disabled,
 	isPlanningNext = false,
 	className,
 }: ShlokaPlanAttemptControlsProps) {
-	const [forkOpen, setForkOpen] = useState(false);
 	const [renameOpen, setRenameOpen] = useState(false);
 	const [titleValue, setTitleValue] = useState("");
-	const [forking, setForking] = useState(false);
 	const [renaming, setRenaming] = useState(false);
 
 	if (attempts.length === 0 && !isPlanningNext) {
@@ -86,27 +85,11 @@ export function ShlokaPlanAttemptControls({
 		? PLANNING_TAB_ID
 		: (active?._id ?? ordered[0]?._id);
 	const switchLocked = disabled || isPlanningNext;
-	const canManage = Boolean(active && ordered.length > 0 && !isPlanningNext);
-
-	const openFork = () => {
-		setTitleValue("");
-		setForkOpen(true);
-	};
+	const canRename = Boolean(active && ordered.length > 0 && !isPlanningNext);
 
 	const openRename = () => {
 		setTitleValue(active?.title ?? "");
 		setRenameOpen(true);
-	};
-
-	const confirmFork = async () => {
-		if (!active || !onForkAttempt) return;
-		setForking(true);
-		try {
-			await onForkAttempt(active._id, titleValue);
-			setForkOpen(false);
-		} finally {
-			setForking(false);
-		}
 	};
 
 	const confirmRename = async () => {
@@ -138,64 +121,25 @@ export function ShlokaPlanAttemptControls({
 								: "Each regenerate keeps a separate attempt you can revisit."}
 					</p>
 				</div>
-				{canManage ? (
-					<div className="flex flex-wrap items-center gap-2">
-						{onForkAttempt ? (
-							<Button
-								type="button"
-								variant="outline"
-								size="sm"
-								disabled={switchLocked}
-								onClick={openFork}
-							>
-								<GitFork />
-								Fork plan
-							</Button>
-						) : null}
-						{onRenameAttempt ? (
-							<Button
-								type="button"
-								variant="ghost"
-								size="icon-sm"
-								disabled={switchLocked}
-								aria-label="Name this plan"
-								onClick={openRename}
-							>
-								<Pencil />
-							</Button>
-						) : null}
-						{onDeleteAttempt ? (
-							<Button
-								type="button"
-								variant="ghost"
-								size="sm"
-								disabled={switchLocked}
-								onClick={() => onDeleteAttempt(active._id)}
-							>
-								<Trash2 />
-								Delete plan
-							</Button>
-						) : null}
-					</div>
-				) : null}
 			</div>
 
 			{showTabStrip && activeValue ? (
-				<Tabs
-					value={activeValue}
-					onValueChange={(value) => {
-						if (
-							switchLocked ||
-							!value ||
-							value === PLANNING_TAB_ID ||
-							value === active?._id
-						) {
-							return;
-						}
-						onSelectAttempt?.(value);
-					}}
-					className="gap-3"
-				>
+				<div className="flex items-center gap-2">
+					<Tabs
+						value={activeValue}
+						onValueChange={(value) => {
+							if (
+								switchLocked ||
+								!value ||
+								value === PLANNING_TAB_ID ||
+								value === active?._id
+							) {
+								return;
+							}
+							onSelectAttempt?.(value);
+						}}
+						className="min-w-0 flex-1 gap-3"
+					>
 					<TabsList
 						variant="line"
 						className={cn(
@@ -213,8 +157,23 @@ export function ShlokaPlanAttemptControls({
 									isPlanningNext && "opacity-60",
 								)}
 							>
-								<span className="flex items-center gap-1.5">
-									<span className="font-medium">{planName(attempt)}</span>
+								<span className="flex min-w-0 items-center gap-1.5">
+									{attempt.title ? (
+										<Tooltip>
+											<TooltipTrigger
+												render={<span className="min-w-0 font-medium" />}
+											>
+												<span className="block max-w-48 truncate">
+													{planName(attempt)}
+												</span>
+											</TooltipTrigger>
+											<TooltipContent side="bottom">
+												{attempt.title}
+											</TooltipContent>
+										</Tooltip>
+									) : (
+										<span className="font-medium">{planName(attempt)}</span>
+									)}
 									<Badge
 										variant={
 											attempt.status === "failed" ? "destructive" : "outline"
@@ -257,10 +216,38 @@ export function ShlokaPlanAttemptControls({
 						) : null}
 					</TabsList>
 				</Tabs>
+				{canRename && onRenameAttempt ? (
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon-sm"
+						disabled={switchLocked}
+						aria-label="Name this plan"
+						onClick={openRename}
+						className="shrink-0"
+					>
+						<Pencil />
+					</Button>
+				) : null}
+				</div>
 			) : active?.attemptNumber ? (
 				<div className="flex flex-wrap items-center gap-2">
-					<Badge variant="secondary" className="font-mono tabular-nums">
-						{planName(active)}
+					<Badge
+						variant="secondary"
+						className="max-w-52 font-mono tabular-nums"
+					>
+						{active.title ? (
+							<Tooltip>
+								<TooltipTrigger
+									render={<span className="min-w-0 truncate" />}
+								>
+									{planName(active)}
+								</TooltipTrigger>
+								<TooltipContent>{active.title}</TooltipContent>
+							</Tooltip>
+						) : (
+							planName(active)
+						)}
 					</Badge>
 					<Badge
 						variant={active.status === "failed" ? "destructive" : "outline"}
@@ -273,54 +260,20 @@ export function ShlokaPlanAttemptControls({
 							{formatDistanceToNow(active.createdAt, { addSuffix: true })}
 						</span>
 					) : null}
+					{canRename && onRenameAttempt ? (
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon-sm"
+							disabled={switchLocked}
+							aria-label="Name this plan"
+							onClick={openRename}
+						>
+							<Pencil />
+						</Button>
+					) : null}
 				</div>
 			) : null}
-
-			<Dialog open={forkOpen} onOpenChange={setForkOpen}>
-				<DialogContent>
-					<DialogHeader>
-						<DialogTitle>Fork plan</DialogTitle>
-						<DialogDescription>
-							Create a copy of this plan as a new attempt. You can edit the copy
-							without affecting the original.
-						</DialogDescription>
-					</DialogHeader>
-					<div className="flex flex-col gap-2">
-						<Label htmlFor="fork-plan-title" className="text-xs">
-							Name (optional)
-						</Label>
-						<Input
-							id="fork-plan-title"
-							value={titleValue}
-							onChange={(event) => setTitleValue(event.target.value)}
-							placeholder={`Plan ${nextAttemptNumber}`}
-							maxLength={90}
-							autoFocus
-							onKeyDown={(event) => {
-								if (event.key === "Enter") {
-									event.preventDefault();
-									void confirmFork();
-								}
-							}}
-						/>
-						<p className="text-xs text-muted-foreground">
-							Leave blank to use “Plan {nextAttemptNumber}”.
-						</p>
-					</div>
-					<DialogFooter>
-						<Button
-							variant="outline"
-							disabled={forking}
-							onClick={() => setForkOpen(false)}
-						>
-							Cancel
-						</Button>
-						<Button disabled={forking} onClick={() => void confirmFork()}>
-							{forking ? "Forking…" : "Fork plan"}
-						</Button>
-					</DialogFooter>
-				</DialogContent>
-			</Dialog>
 
 			<Dialog open={renameOpen} onOpenChange={setRenameOpen}>
 				<DialogContent>
