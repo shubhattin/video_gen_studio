@@ -122,6 +122,8 @@ function ShlokaStudioPage() {
 	);
 	const selectShlokaPlan = useMutation(api.studio.mutations.selectShlokaPlan);
 	const deleteShlokaPlan = useMutation(api.studio.mutations.deleteShlokaPlan);
+	const forkShlokaPlan = useMutation(api.studio.mutations.forkShlokaPlan);
+	const renameShlokaPlan = useMutation(api.studio.mutations.renameShlokaPlan);
 	const prepareReferenceImageUpload = useAction(
 		api.studio.r2.prepareReferenceImageUpload,
 	);
@@ -692,6 +694,24 @@ function ShlokaStudioPage() {
 														planId: planId as Id<"shlokaPlans">,
 													}).catch((error) =>
 														notifyStudioError("Could not delete plan", error),
+													);
+												}}
+												onForkAttempt={(planId, title) => {
+													if (!runId) return;
+													void forkShlokaPlan({
+														runId,
+														planId: planId as Id<"shlokaPlans">,
+														title,
+													}).catch((error) =>
+														notifyStudioError("Could not fork plan", error),
+													);
+												}}
+												onRenameAttempt={(planId, title) => {
+													void renameShlokaPlan({
+														planId: planId as Id<"shlokaPlans">,
+														title,
+													}).catch((error) =>
+														notifyStudioError("Could not name plan", error),
 													);
 												}}
 											/>

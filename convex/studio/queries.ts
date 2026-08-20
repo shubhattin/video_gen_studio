@@ -192,6 +192,7 @@ export const listShlokaPlansForRun = query({
 			_id: plan._id,
 			attemptNumber: plan.attemptNumber,
 			status: plan.status,
+			title: plan.title,
 			plannerSystemPrompt: plan.plannerSystemPrompt,
 			plannerModel: plan.plannerModel,
 			plannerReasoning: plan.plannerReasoning,

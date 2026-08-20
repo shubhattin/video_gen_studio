@@ -119,9 +119,7 @@ function GalleryVideoCard({ video }: { video: GalleryVideo }) {
 						style={ratio ? { aspectRatio: ratio } : undefined}
 						className={cn(
 							"block w-full object-contain",
-							ratio
-								? "max-h-[min(75vh,42rem)]"
-								: "max-h-[min(70vh,560px)]",
+							ratio ? "max-h-[min(75vh,42rem)]" : "max-h-[min(70vh,560px)]",
 						)}
 					>
 						<track kind="captions" />

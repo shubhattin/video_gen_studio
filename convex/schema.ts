@@ -196,6 +196,7 @@ export default defineSchema({
 		runId: v.id("generationRuns"),
 		attemptNumber: v.number(),
 		status: shlokaPlanStatusValidator,
+		title: v.optional(v.string()),
 		plannerSystemPrompt: v.optional(v.string()),
 		plannerModel: v.optional(v.string()),
 		plannerReasoning: v.optional(v.string()),

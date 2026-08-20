@@ -260,6 +260,70 @@ describe("studio mutations", () => {
 		expect(selected?.imagePrompt).toContain("Portrait");
 	});
 
+	it("forks a plan into a new attempt and renames plans", async () => {
+		const t = adminConvex();
+		const runId = await t.mutation(api.studio.mutations.createShlokaDraft, {
+			shlokaText: "Fork plan shloka",
+		});
+		const scene = {
+			sceneNumber: 1,
+			intent: "Opening",
+			subjects: "Temple path",
+			locationTime: "Twilight",
+			composition: "Centered portrait",
+			lensCamera: "Slow push-in",
+			lighting: "Soft gold",
+			paletteAesthetics: "Warm marigold and sandalwood",
+			actionMotion: "Gentle drift",
+			soundDirection: "Quiet ambience",
+			transition: "Fade",
+			negativeConstraints: "No text overlays",
+		};
+		const planId = await t.mutation(internal.studio.internal.commitPlan, {
+			runId,
+			plannerModel: "openai/gpt-5.6-terra",
+			plannerReasoning: "medium",
+			imagePrompt: "Warm temple courtyard at dawn",
+			videoScenes: [scene],
+			planningKey: "plan-1",
+		});
+
+		await t.mutation(api.studio.mutations.renameShlokaPlan, {
+			planId,
+			title: "Dawn cut",
+		});
+		let plans = await t.query(api.studio.queries.listShlokaPlansForRun, {
+			runId,
+		});
+		expect(plans[0].title).toBe("Dawn cut");
+
+		const forkedId = await t.mutation(api.studio.mutations.forkShlokaPlan, {
+			runId,
+			planId,
+			title: "Forked variant",
+		});
+		plans = await t.query(api.studio.queries.listShlokaPlansForRun, { runId });
+		expect(plans).toHaveLength(2);
+		const forked = plans.find((plan) => plan._id === forkedId);
+		expect(forked?.attemptNumber).toBe(2);
+		expect(forked?.title).toBe("Forked variant");
+		expect(forked?.imagePrompt).toContain("Warm temple courtyard");
+
+		const run = await t.query(api.studio.queries.getRun, { runId });
+		expect(run?.activePlanId).toBe(forkedId);
+
+		const blankForkId = await t.mutation(api.studio.mutations.forkShlokaPlan, {
+			runId,
+			planId: forkedId,
+			title: "",
+		});
+		plans = await t.query(api.studio.queries.listShlokaPlansForRun, { runId });
+		expect(plans).toHaveLength(3);
+		const blankFork = plans.find((plan) => plan._id === blankForkId);
+		expect(blankFork?.attemptNumber).toBe(3);
+		expect(blankFork?.title).toBeUndefined();
+	});
+
 	it("persists a bounded composition plan as ordered clip rows", async () => {
 		const t = adminConvex();
 		const runId = await t.mutation(api.studio.mutations.createShlokaDraft, {

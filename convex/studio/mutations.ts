@@ -114,6 +114,77 @@ export const deleteShlokaPlan = mutation({
 	},
 });
 
+export const forkShlokaPlan = mutation({
+	args: {
+		runId: v.id("generationRuns"),
+		planId: v.id("shlokaPlans"),
+		title: v.optional(v.string()),
+	},
+	returns: v.id("shlokaPlans"),
+	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
+		const [run, plan] = await Promise.all([
+			ctx.db.get(args.runId),
+			ctx.db.get(args.planId),
+		]);
+		if (!run) {
+			throw new Error("Run not found.");
+		}
+		if (!plan || plan.runId !== args.runId) {
+			throw new Error("Plan not found for this run.");
+		}
+		const existing = await ctx.db
+			.query("shlokaPlans")
+			.withIndex("by_runId", (q) => q.eq("runId", args.runId))
+			.take(50);
+		const attemptNumber =
+			existing.reduce((acc, item) => Math.max(acc, item.attemptNumber), 0) + 1;
+		const now = Date.now();
+		const title = args.title?.trim() || undefined;
+		const forkedId = await ctx.db.insert("shlokaPlans", {
+			runId: args.runId,
+			attemptNumber,
+			status: "ready",
+			title,
+			plannerSystemPrompt: plan.plannerSystemPrompt,
+			plannerModel: plan.plannerModel,
+			plannerReasoning: plan.plannerReasoning,
+			imagePrompt: plan.imagePrompt,
+			videoScenes: plan.videoScenes,
+			planningKey: plan.planningKey,
+			warnings: plan.warnings,
+			createdAt: now,
+			updatedAt: now,
+		});
+		await ctx.runMutation(internal.studio.internal.applyActiveShlokaPlan, {
+			runId: args.runId,
+			planId: forkedId,
+		});
+		return forkedId;
+	},
+});
+
+export const renameShlokaPlan = mutation({
+	args: {
+		planId: v.id("shlokaPlans"),
+		title: v.optional(v.string()),
+	},
+	returns: v.null(),
+	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
+		const plan = await ctx.db.get(args.planId);
+		if (!plan) {
+			throw new Error("Plan not found.");
+		}
+		const title = args.title?.trim();
+		await ctx.db.patch(args.planId, {
+			title: title ? title.slice(0, 90) : undefined,
+			updatedAt: Date.now(),
+		});
+		return null;
+	},
+});
+
 function emptyRunMedia() {
 	return {
 		attachedImageIds: [] as Id<"galleryImages">[],

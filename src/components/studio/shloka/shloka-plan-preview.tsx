@@ -201,9 +201,7 @@ export function ShlokaPlanPreview({
 		: hasCompositionClips
 			? (compositionClips ?? [])
 					.map((clip, index) => {
-						const parts = [
-							`## Clip ${index + 1} (${clip.durationSeconds}s)`,
-						];
+						const parts = [`## Clip ${index + 1} (${clip.durationSeconds}s)`];
 						if (clip.globalDescription) parts.push(clip.globalDescription);
 						parts.push(clip.scenePrompt);
 						if (clip.continuityInstructions)
