@@ -1,9 +1,12 @@
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { useMutation, useQuery } from "convex/react";
-import { Download, Loader2, Trash2 } from "lucide-react";
+import { Download, Info, Loader2, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { saveDownloadResponse } from "#/components/studio/video/video-result";
+import {
+	saveDownloadResponse,
+	formatBytes,
+} from "#/components/studio/video/video-result";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -16,6 +19,14 @@ import {
 } from "#/components/ui/alert-dialog";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
+import {
+	Popover,
+	PopoverContent,
+	PopoverDescription,
+	PopoverHeader,
+	PopoverTitle,
+	PopoverTrigger,
+} from "#/components/ui/popover";
 import {
 	Select,
 	SelectContent,
@@ -40,6 +51,20 @@ type GalleryImage = {
 	meta?: { mimeType?: string; width?: number; height?: number; bytes?: number };
 	createdAt: number;
 };
+
+type RunReference = {
+	runId: string;
+	title?: string;
+	provenance: "shloka" | "model-studio";
+	status: string;
+};
+
+function runLabel(run: RunReference): string {
+	const typeLabel = run.provenance === "shloka" ? "Shloka run" : "Model run";
+	return run.title?.trim()
+		? `${run.title} · ${typeLabel}`
+		: `${typeLabel} (${run.runId.slice(0, 8)}…)`;
+}
 
 function sourceLabelFor(source?: GalleryImage["source"]): string | null {
 	if (source === "uploaded") return "Uploaded";
@@ -76,8 +101,14 @@ function GalleryImageCard({
 	busy: boolean;
 }) {
 	const [downloading, setDownloading] = useState(false);
+	const [detailsOpen, setDetailsOpen] = useState(false);
+	const references = useQuery(
+		api.studio.queries.listRunsReferencingImage,
+		detailsOpen ? { imageId: image.id as Id<"galleryImages"> } : "skip",
+	);
 	const ratio = aspectRatioValue(image);
 	const sourceLabel = sourceLabelFor(image.source);
+	const sizeLabel = formatBytes(image.meta?.bytes);
 
 	const onDownload = async () => {
 		if (downloading || !image.url) return;
@@ -128,6 +159,81 @@ function GalleryImageCard({
 					</span>
 				</div>
 
+				<Popover open={detailsOpen} onOpenChange={setDetailsOpen}>
+					<PopoverTrigger
+						render={
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon-sm"
+								aria-label="Image details"
+							/>
+						}
+					>
+						<Info />
+					</PopoverTrigger>
+					<PopoverContent align="end" className="w-80 gap-3 p-4">
+						<PopoverHeader>
+							<PopoverTitle>Image details</PopoverTitle>
+							<PopoverDescription>
+								Metadata and runs referencing this image.
+							</PopoverDescription>
+						</PopoverHeader>
+						<div className="flex flex-col gap-2 text-xs">
+							<div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-2">
+								<span className="text-muted-foreground">Source</span>
+								<span>{sourceLabel ?? "Gallery image"}</span>
+							</div>
+							<div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-2">
+								<span className="text-muted-foreground">Created</span>
+								<span>{new Date(image.createdAt).toLocaleString()}</span>
+							</div>
+							{ratio ? (
+								<div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-2">
+									<span className="text-muted-foreground">Aspect</span>
+									<span>{ratio}</span>
+								</div>
+							) : null}
+							{sizeLabel ? (
+								<div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-2">
+									<span className="text-muted-foreground">Size</span>
+									<span>{sizeLabel}</span>
+								</div>
+							) : null}
+							{image.revisedImagePrompt?.trim() ? (
+								<div className="flex flex-col gap-1.5">
+									<span className="text-muted-foreground">Revised prompt</span>
+									<p className="max-h-24 overflow-y-auto leading-relaxed text-foreground">
+										{image.revisedImagePrompt.trim()}
+									</p>
+								</div>
+							) : null}
+						</div>
+						<div className="flex flex-col gap-1.5 border-t border-border/70 pt-3">
+							<span className="text-xs text-muted-foreground">
+								Connected runs
+							</span>
+							{references === undefined ? (
+								<p className="text-xs text-muted-foreground">
+									Checking references…
+								</p>
+							) : references.length === 0 ? (
+								<p className="text-xs text-muted-foreground">
+									Not referenced by any run.
+								</p>
+							) : (
+								<ul className="flex flex-col gap-1 text-xs">
+									{references.map((reference: RunReference) => (
+										<li key={reference.runId} className="truncate">
+											{runLabel(reference)}
+										</li>
+									))}
+								</ul>
+							)}
+						</div>
+					</PopoverContent>
+				</Popover>
+
 				{image.url ? (
 					<Button
 						type="button"
@@ -171,6 +277,13 @@ export function ImageGallery() {
 		withSignedUrl(image, urlsByKey),
 	);
 
+	const deleteReferences = useQuery(
+		api.studio.queries.listRunsReferencingImage,
+		pendingDeleteId
+			? { imageId: pendingDeleteId as Id<"galleryImages"> }
+			: "skip",
+	);
+
 	const ordered =
 		sort === "oldest"
 			? [...withUrls].sort((a, b) => a.createdAt - b.createdAt)
@@ -188,6 +301,9 @@ export function ImageGallery() {
 			setDeleting(false);
 		}
 	};
+
+	const referencedBy = deleteReferences as RunReference[] | undefined;
+	const deleteReferenceCount = referencedBy?.length ?? 0;
 
 	return (
 		<section className="space-y-5">
@@ -251,6 +367,25 @@ export function ImageGallery() {
 							unlinks it from any runs that reference it. This cannot be undone.
 						</AlertDialogDescription>
 					</AlertDialogHeader>
+					{deleteReferenceCount > 0 && referencedBy ? (
+						<div className="flex flex-col gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
+							<span className="font-medium text-amber-800 dark:text-amber-200">
+								Be careful — this image is used by {deleteReferenceCount}{" "}
+								{deleteReferenceCount === 1 ? "run" : "runs"}:
+							</span>
+							<ul className="flex flex-col gap-1 text-xs text-amber-800/90 dark:text-amber-200/90">
+								{referencedBy.map((reference) => (
+									<li key={reference.runId} className="truncate">
+										{runLabel(reference)}
+									</li>
+								))}
+							</ul>
+							<p className="text-xs text-amber-800/90 dark:text-amber-200/90">
+								Deleting it will remove the image from those runs. Regenerating
+								their plans may be required.
+							</p>
+						</div>
+					) : null}
 					<AlertDialogFooter>
 						<AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
 						<AlertDialogAction

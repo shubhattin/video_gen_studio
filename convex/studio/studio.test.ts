@@ -631,6 +631,88 @@ describe("system prompt templates", () => {
 	});
 });
 
+describe("gallery references and guarded deletes", () => {
+	it("lists runs that reference a gallery image", async () => {
+		const t = adminConvex();
+		const runId = await t.mutation(api.studio.mutations.createShlokaDraft, {
+			shlokaText: "Image reference run",
+		});
+		const imageId = await t.mutation(internal.studio.internal.insertGalleryImage, {
+			runId,
+			objectKey: "studio/gallery/images/ref.png",
+			meta: { mimeType: "image/png", bytes: 4 },
+			source: "generated",
+		});
+		const references = await t.query(
+			api.studio.queries.listRunsReferencingImage,
+			{ imageId },
+		);
+		expect(references).toHaveLength(1);
+		expect(references[0].runId).toBe(runId);
+		expect(references[0].provenance).toBe("shloka");
+	});
+
+	it("refuses to delete a video connected to a run", async () => {
+		const t = adminConvex();
+		const runId = await t.mutation(api.studio.mutations.createShlokaDraft, {
+			shlokaText: "Connected video run",
+		});
+		const videoId = await t.mutation(internal.studio.internal.insertGalleryVideo, {
+			runId,
+			video: {
+				objectKey: "studio/gallery/videos/connected.mp4",
+				meta: { mimeType: "video/mp4" },
+				openRouterJobId: "or-connected",
+				videoParams: defaultVideoParams("bytedance/seedance-2.5"),
+				createdAt: Date.now(),
+			},
+		});
+
+		const connection = await t.query(
+			api.studio.queries.getGalleryVideoRunConnection,
+			{ videoId },
+		);
+		expect(connection?.runId).toBe(runId);
+
+		await expect(
+			t.mutation(api.studio.mutations.deleteGalleryVideo, { videoId }),
+		).rejects.toThrow(/still connected to a run/);
+
+		// Still present after the blocked delete.
+		expect(
+			await t.query(internal.studio.queries.objectKeyInGallery, {
+				objectKey: "studio/gallery/videos/connected.mp4",
+			}),
+		).toBe(true);
+	});
+
+	it("deletes an abandoned video after confirmation", async () => {
+		const t = adminConvex();
+		const videoId = await t.mutation(internal.studio.internal.insertGalleryVideo, {
+			video: {
+				objectKey: "studio/gallery/videos/orphan.mp4",
+				meta: { mimeType: "video/mp4" },
+				openRouterJobId: "or-orphan",
+				videoParams: defaultVideoParams("bytedance/seedance-2.5"),
+				createdAt: Date.now(),
+			},
+		});
+
+		const connection = await t.query(
+			api.studio.queries.getGalleryVideoRunConnection,
+			{ videoId },
+		);
+		expect(connection).toBeNull();
+
+		await t.mutation(api.studio.mutations.deleteGalleryVideo, { videoId });
+		expect(
+			await t.query(internal.studio.queries.objectKeyInGallery, {
+				objectKey: "studio/gallery/videos/orphan.mp4",
+			}),
+		).toBe(false);
+	});
+});
+
 describe("video param validation", () => {
 	it("rejects unsupported Veo duration", () => {
 		expect(() =>

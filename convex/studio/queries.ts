@@ -363,6 +363,126 @@ export const listGalleryVideos = query({
 	},
 });
 
+/**
+ * Resolve the single run a gallery video is connected to (if any): a run that
+ * attaches it, a composition clip that uses it, or the run that generated it
+ * (via sourceRunId). Returns null when the video is abandoned.
+ */
+export async function resolveGalleryVideoRunConnection(
+	ctx: DbCtx,
+	videoId: Id<"galleryVideos">,
+): Promise<{
+	runId: Id<"generationRuns">;
+	title?: string;
+	provenance: "shloka" | "model-studio";
+	status: string;
+} | null> {
+	const video = await ctx.db.get(videoId);
+	if (!video) {
+		return null;
+	}
+	const runs = await ctx.db.query("generationRuns").collect();
+	const attached = runs.find((run) =>
+		(run.attachedVideoIds ?? []).includes(videoId),
+	);
+	if (attached) {
+		return {
+			runId: attached._id,
+			title: attached.title,
+			provenance: attached.provenance,
+			status: attached.status,
+		};
+	}
+	const clips = await ctx.db.query("compositionClips").collect();
+	const clip = clips.find((item) => item.galleryVideoId === videoId);
+	if (clip) {
+		const run = await ctx.db.get(clip.runId);
+		if (run) {
+			return {
+				runId: run._id,
+				title: run.title,
+				provenance: run.provenance,
+				status: run.status,
+			};
+		}
+	}
+	if (video.sourceRunId) {
+		const run = await ctx.db.get(video.sourceRunId);
+		if (run) {
+			return {
+				runId: run._id,
+				title: run.title,
+				provenance: run.provenance,
+				status: run.status,
+			};
+		}
+	}
+	return null;
+}
+
+export const getGalleryVideoRunConnection = query({
+	args: {
+		videoId: v.id("galleryVideos"),
+	},
+	returns: v.union(v.null(), v.any()),
+	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
+		return await resolveGalleryVideoRunConnection(ctx, args.videoId);
+	},
+});
+
+/** Runs that reference a gallery image (attached, role, or clip frame). */
+export const listRunsReferencingImage = query({
+	args: {
+		imageId: v.id("galleryImages"),
+	},
+	returns: v.array(v.any()),
+	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
+		const imageId = args.imageId;
+		const runIds = new Set<Id<"generationRuns">>();
+		const runs = await ctx.db.query("generationRuns").collect();
+		for (const run of runs) {
+			if (
+				(run.attachedImageIds ?? []).includes(imageId) ||
+				run.firstFrameImageId === imageId ||
+				run.lastFrameImageId === imageId ||
+				(run.extraReferenceImageIds ?? []).includes(imageId)
+			) {
+				runIds.add(run._id);
+			}
+		}
+		const clips = await ctx.db.query("compositionClips").collect();
+		for (const clip of clips) {
+			if (
+				clip.terminalFrameImageId === imageId ||
+				clip.referenceImageId === imageId
+			) {
+				runIds.add(clip.runId);
+			}
+		}
+		const results: Array<{
+			runId: Id<"generationRuns">;
+			title?: string;
+			provenance: "shloka" | "model-studio";
+			status: string;
+		}> = [];
+		for (const runId of runIds) {
+			const run = await ctx.db.get(runId);
+			if (!run) {
+				continue;
+			}
+			results.push({
+				runId: run._id,
+				title: run.title,
+				provenance: run.provenance,
+				status: run.status,
+			});
+		}
+		return results;
+	},
+});
+
 export const getRunMediaCounts = query({
 	args: {
 		runId: v.id("generationRuns"),

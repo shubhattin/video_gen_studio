@@ -1,7 +1,18 @@
 import { api } from "@convex/_generated/api";
-import { useQuery } from "convex/react";
-import { Download, Info, Loader2 } from "lucide-react";
+import type { Id } from "@convex/_generated/dataModel";
+import { useMutation, useQuery } from "convex/react";
+import { Download, Info, Loader2, Trash2 } from "lucide-react";
 import { useState } from "react";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "#/components/ui/alert-dialog";
 import { Button } from "#/components/ui/button";
 import {
 	Popover,
@@ -26,6 +37,7 @@ import {
 	MODEL_CAPABILITY_PROFILES,
 	type VideoModelId,
 } from "#/lib/model-catalog";
+import { notifyStudioError } from "#/lib/studio-toast";
 import { cn } from "#/lib/utils";
 import {
 	downloadVideoFile,
@@ -57,6 +69,20 @@ type GalleryVideo = {
 	createdAt: number;
 };
 
+type RunConnection = {
+	runId: string;
+	title?: string;
+	provenance: "shloka" | "model-studio";
+	status: string;
+};
+
+function runLabel(run: RunConnection): string {
+	const typeLabel = run.provenance === "shloka" ? "Shloka run" : "Model run";
+	return run.title?.trim()
+		? `${run.title} · ${typeLabel}`
+		: `${typeLabel} (${run.runId.slice(0, 8)}…)`;
+}
+
 function aspectRatioValue(video: GalleryVideo): string | undefined {
 	const width = video.meta?.width;
 	const height = video.meta?.height;
@@ -72,9 +98,21 @@ function aspectRatioValue(video: GalleryVideo): string | undefined {
 	return undefined;
 }
 
-function GalleryVideoCard({ video }: { video: GalleryVideo }) {
+function GalleryVideoCard({
+	video,
+	onDelete,
+	busy,
+}: {
+	video: GalleryVideo;
+	onDelete: () => void;
+	busy: boolean;
+}) {
 	const [downloading, setDownloading] = useState(false);
 	const [open, setOpen] = useState(false);
+	const runConnection = useQuery(
+		api.studio.queries.getGalleryVideoRunConnection,
+		open ? { videoId: video.id as Id<"galleryVideos"> } : "skip",
+	);
 	const canDownload = Boolean(video.objectKey || video.url);
 	const duration =
 		video.meta?.durationSeconds ?? video.videoParams?.durationSeconds;
@@ -203,6 +241,20 @@ function GalleryVideoCard({ video }: { video: GalleryVideo }) {
 								</div>
 							) : null}
 						</div>
+						<div className="flex flex-col gap-1.5 border-t border-border/70 pt-3">
+							<span className="text-xs text-muted-foreground">Connection</span>
+							{runConnection === undefined ? (
+								<p className="text-xs text-muted-foreground">Checking…</p>
+							) : runConnection ? (
+								<p className="truncate text-xs text-foreground">
+									Connected to {runLabel(runConnection)}
+								</p>
+							) : (
+								<p className="text-xs text-muted-foreground">
+									Abandoned — not connected to any run.
+								</p>
+							)}
+						</div>
 						{prompt?.trim() ? (
 							<div className="flex flex-col gap-1.5 border-t border-border/70 pt-3">
 								<span className="text-xs text-muted-foreground">Prompt</span>
@@ -226,6 +278,17 @@ function GalleryVideoCard({ video }: { video: GalleryVideo }) {
 						{downloading ? <Loader2 className="animate-spin" /> : <Download />}
 					</Button>
 				) : null}
+
+				<Button
+					type="button"
+					variant="ghost"
+					size="icon-sm"
+					disabled={busy}
+					aria-label="Delete clip"
+					onClick={onDelete}
+				>
+					<Trash2 />
+				</Button>
 			</div>
 		</article>
 	);
@@ -233,6 +296,10 @@ function GalleryVideoCard({ video }: { video: GalleryVideo }) {
 
 export function VideoGallery() {
 	const [sort, setSort] = useState<SortOrder>("latest");
+	const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+	const [deleting, setDeleting] = useState(false);
+	const deleteVideo = useMutation(api.studio.mutations.deleteGalleryVideo);
+
 	const videos = useQuery(api.studio.queries.listGalleryVideos, { limit: 80 });
 	const objectKeys = (videos ?? []).map(
 		(video: { objectKey?: string }) => video.objectKey,
@@ -242,10 +309,36 @@ export function VideoGallery() {
 		withSignedUrl(video, urlsByKey),
 	);
 
+	const videoConnection = useQuery(
+		api.studio.queries.getGalleryVideoRunConnection,
+		pendingDeleteId
+			? { videoId: pendingDeleteId as Id<"galleryVideos"> }
+			: "skip",
+	);
+	const connectedRun =
+		videoConnection && videoConnection !== null
+			? (videoConnection as RunConnection)
+			: null;
+	const canDeleteVideo =
+		!deleting && videoConnection === null && pendingDeleteId != null;
+
 	const ordered =
 		sort === "oldest"
 			? [...withUrls].sort((a, b) => a.createdAt - b.createdAt)
 			: [...withUrls].sort((a, b) => b.createdAt - a.createdAt);
+
+	const confirmDelete = async () => {
+		if (!pendingDeleteId) return;
+		setDeleting(true);
+		try {
+			await deleteVideo({ videoId: pendingDeleteId as Id<"galleryVideos"> });
+			setPendingDeleteId(null);
+		} catch (error) {
+			notifyStudioError("Could not delete clip", error);
+		} finally {
+			setDeleting(false);
+		}
+	};
 
 	return (
 		<section className="space-y-5">
@@ -284,10 +377,57 @@ export function VideoGallery() {
 			) : (
 				<div className="columns-1 gap-4 sm:columns-2 xl:columns-3 2xl:columns-4">
 					{ordered.map((video) => (
-						<GalleryVideoCard key={video.id} video={video} />
+						<GalleryVideoCard
+							key={video.id}
+							video={video}
+							busy={deleting}
+							onDelete={() => setPendingDeleteId(video.id)}
+						/>
 					))}
 				</div>
 			)}
+
+			<AlertDialog
+				open={pendingDeleteId != null}
+				onOpenChange={(open) => {
+					if (!open) setPendingDeleteId(null);
+				}}
+			>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>Delete this clip?</AlertDialogTitle>
+						<AlertDialogDescription>
+							This permanently removes the clip from the shared gallery. This
+							cannot be undone.
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					{connectedRun ? (
+						<div className="flex flex-col gap-1.5 rounded-lg border border-border bg-muted/50 p-3 text-sm">
+							<span className="font-medium">
+								This clip is connected to a run
+							</span>
+							<span className="truncate text-xs text-muted-foreground">
+								{runLabel(connectedRun)}
+							</span>
+							<p className="text-xs text-muted-foreground">
+								Clips that are part of an existing run flow cannot be deleted.
+								Delete the run in the history sidebar (or abandon it) before
+								removing this clip.
+							</p>
+						</div>
+					) : null}
+					<AlertDialogFooter>
+						<AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+						<AlertDialogAction
+							variant="destructive"
+							disabled={!canDeleteVideo}
+							onClick={() => void confirmDelete()}
+						>
+							{deleting ? "Deleting…" : "Delete"}
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 		</section>
 	);
 }

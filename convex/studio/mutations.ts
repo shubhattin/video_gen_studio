@@ -28,6 +28,7 @@ import { leftoverObjectKeys } from "./migrateLegacy";
 import {
 	listCompositionJobsForRunCtx,
 	resolveActiveCompositionJob,
+	resolveGalleryVideoRunConnection,
 } from "./queries";
 
 const galleryIdOrNull = v.optional(
@@ -796,6 +797,15 @@ export const deleteGalleryVideo = mutation({
 		const video = await ctx.db.get(args.videoId);
 		if (!video) {
 			return null;
+		}
+		const connection = await resolveGalleryVideoRunConnection(
+			ctx,
+			args.videoId,
+		);
+		if (connection) {
+			throw new Error(
+				"This clip is still connected to a run and cannot be deleted.",
+			);
 		}
 		await unlinkGalleryVideoFromRuns(ctx, args.videoId);
 		await ctx.db.delete(args.videoId);
