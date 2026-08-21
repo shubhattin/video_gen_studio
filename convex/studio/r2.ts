@@ -22,7 +22,6 @@ const ALLOWED_REFERENCE_UPLOAD_MIME_TYPES = new Set([
 ]);
 
 const MAX_REFERENCE_UPLOAD_BYTES = 20 * 1024 * 1024;
-const MAX_TERMINAL_FRAME_BYTES = 10 * 1024 * 1024;
 
 function normalizeMimeType(mimeType: string) {
 	return mimeType.toLowerCase();
@@ -154,11 +153,15 @@ export const finalizeReferenceImageUpload = action({
 	},
 });
 
-export const prepareTerminalFrameUpload = action({
+// ── Model-studio reference image uploads ────────────────────────────────
+
+// ── Model-studio reference image uploads ────────────────────────────────
+
+export const prepareModelStudioReferenceImageUpload = action({
 	args: {
-		runId: v.id("generationRuns"),
-		clipId: v.id("compositionClips"),
-		mimeType: v.optional(v.string()),
+		runId: v.id("modelStudioRuns"),
+		mimeType: v.string(),
+		bytes: v.optional(v.number()),
 	},
 	returns: v.object({
 		uploadUrl: v.string(),
@@ -167,28 +170,25 @@ export const prepareTerminalFrameUpload = action({
 	}),
 	handler: async (ctx, args) => {
 		await requireAdmin(ctx);
-		const job = await ctx.runQuery(
-			internal.studio.queries.getCompositionJobByRun,
+		const run = await ctx.runQuery(
+			internal.studio.queries.getModelStudioRunDoc,
 			{ runId: args.runId },
 		);
-		if (!job) {
-			throw new Error("Composition job was not found.");
+		if (!run) {
+			throw new Error("Run not found.");
 		}
-		if (job.status !== "awaiting_terminal_frame") {
-			throw new Error("Composition is not waiting for a continuity frame.");
-		}
-		const clip = await ctx.runQuery(internal.studio.queries.getCompositionClip, {
-			clipId: args.clipId,
-		});
-		if (!clip || clip.jobId !== job._id) {
-			throw new Error("Composition clip was not found.");
-		}
-		const mimeType = normalizeMimeType(args.mimeType ?? "image/jpeg");
+		const mimeType = normalizeMimeType(args.mimeType);
 		if (!ALLOWED_REFERENCE_UPLOAD_MIME_TYPES.has(mimeType)) {
-			throw new Error("Unsupported continuity-frame type.");
+			throw new Error("Unsupported image type. Use PNG, JPEG, WebP, or GIF.");
+		}
+		if (
+			args.bytes !== undefined &&
+			args.bytes > MAX_REFERENCE_UPLOAD_BYTES
+		) {
+			throw new Error("Image is too large. Max size is 20MB.");
 		}
 		const objectKey = buildStudioObjectKey({
-			kind: "frames",
+			kind: "images",
 			mimeType,
 		});
 		const uploadUrl = await createPresignedPutUrl({
@@ -199,72 +199,78 @@ export const prepareTerminalFrameUpload = action({
 	},
 });
 
-export const finalizeTerminalFrameUpload = action({
+export const finalizeModelStudioReferenceImageUpload = action({
 	args: {
-		runId: v.id("generationRuns"),
-		clipId: v.id("compositionClips"),
+		runId: v.id("modelStudioRuns"),
 		objectKey: v.string(),
+		mimeType: v.string(),
+		width: v.optional(v.number()),
+		height: v.optional(v.number()),
+		bytes: v.optional(v.number()),
+		setAsFirstFrame: v.optional(v.boolean()),
 	},
-	returns: v.null(),
-	handler: async (ctx, args) => {
+	returns: v.object({
+		imageId: v.id("galleryImages"),
+	}),
+	handler: async (ctx, args): Promise<{ imageId: Id<"galleryImages"> }> => {
 		await requireAdmin(ctx);
-		const job = await ctx.runQuery(
-			internal.studio.queries.getCompositionJobByRun,
+		const run = await ctx.runQuery(
+			internal.studio.queries.getModelStudioRunDoc,
 			{ runId: args.runId },
 		);
-		if (!job) {
-			await deleteR2Objects([args.objectKey]);
-			throw new Error("Composition job was not found.");
+		if (!run) {
+			throw new Error("Run not found.");
 		}
-		if (job.status !== "awaiting_terminal_frame") {
-			await deleteR2Objects([args.objectKey]);
-			throw new Error("Composition is not waiting for a continuity frame.");
-		}
-		const clip = await ctx.runQuery(internal.studio.queries.getCompositionClip, {
-			clipId: args.clipId,
-		});
-		if (!clip || clip.jobId !== job._id) {
-			await deleteR2Objects([args.objectKey]);
-			throw new Error("Composition clip was not found.");
-		}
-		if (!args.objectKey.startsWith("studio/gallery/frames/")) {
-			await deleteR2Objects([args.objectKey]);
+		if (!args.objectKey.startsWith("studio/gallery/images/")) {
 			throw new Error("Uploaded object key is invalid for the gallery.");
 		}
+		const mimeType = normalizeMimeType(args.mimeType);
+		if (!ALLOWED_REFERENCE_UPLOAD_MIME_TYPES.has(mimeType)) {
+			await deleteR2Objects([args.objectKey]);
+			throw new Error("Unsupported image type. Use PNG, JPEG, WebP, or GIF.");
+		}
+
 		let head: Awaited<ReturnType<typeof headObject>>;
 		try {
 			head = await headObject(args.objectKey);
 		} catch {
-			throw new Error("Uploaded continuity frame not found in storage.");
+			throw new Error("Uploaded file not found in storage.");
 		}
+		const contentLength = head.contentLength ?? args.bytes;
 		if (
-			head.contentLength !== null &&
-			head.contentLength > MAX_TERMINAL_FRAME_BYTES
+			contentLength !== undefined &&
+			contentLength !== null &&
+			contentLength > MAX_REFERENCE_UPLOAD_BYTES
 		) {
 			await deleteR2Objects([args.objectKey]);
-			throw new Error("Continuity frame is too large.");
+			throw new Error("Image is too large. Max size is 20MB.");
 		}
-		const terminalFrameImageId = await ctx.runMutation(
+		if (
+			head.contentType &&
+			!ALLOWED_REFERENCE_UPLOAD_MIME_TYPES.has(
+				normalizeMimeType(head.contentType),
+			)
+		) {
+			await deleteR2Objects([args.objectKey]);
+			throw new Error("Unsupported image type. Use PNG, JPEG, WebP, or GIF.");
+		}
+
+		const imageId = await ctx.runMutation(
 			internal.studio.internal.insertGalleryImage,
 			{
+				modelStudioRunId: args.runId,
 				objectKey: args.objectKey,
 				meta: {
-					mimeType: head.contentType ?? "image/jpeg",
-					bytes: head.contentLength ?? undefined,
+					mimeType,
+					width: args.width,
+					height: args.height,
+					bytes: contentLength ?? args.bytes ?? undefined,
 				},
-				source: "terminal_frame",
-				attachToRun: false,
+				source: "uploaded",
+				setAsFirstFrame: args.setAsFirstFrame === true,
 			},
 		);
-		await ctx.runMutation(
-			internal.studio.internal.attachCompositionTerminalFrame,
-			{
-				jobId: job._id,
-				clipId: args.clipId,
-				terminalFrameImageId,
-			},
-		);
-		return null;
+		return { imageId };
 	},
 });
 

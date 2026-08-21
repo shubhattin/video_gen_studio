@@ -1,6 +1,6 @@
 # R2 media storage
 
-Studio media (reference images, generated videos, continuity frames) lives in **private Cloudflare R2**. Convex stores `objectKey` strings on **shared gallery** tables (`galleryImages`, `galleryVideos`); browsers receive short-lived **presigned URLs**.
+Studio media (reference images, generated videos) lives in **private Cloudflare R2**. Convex stores `objectKey` strings on **shared gallery** tables (`galleryImages`, `galleryVideos`); browsers receive short-lived **presigned URLs**.
 
 Runs only *attach* gallery IDs. Deleting a run or removing an image from a run unlinks text/plan data — it does **not** delete R2 objects. Hard-delete from the gallery (or `wipeAllStudioData`) is what removes files.
 
@@ -18,7 +18,6 @@ Set on the Convex deployment (not `VITE_*`, not required on Vercel for normal pl
 ```
 studio/gallery/images/<id>.<ext>
 studio/gallery/videos/<id>.<ext>
-studio/gallery/frames/<id>.<ext>
 ```
 
 ## Client flow
@@ -41,12 +40,8 @@ To start over:
 2. Deploy the new functions.
 3. Repeat on **prod**.
 
-Wipe clears runs, plans, composition rows, gallery tables, catalog cache, and the corresponding R2 objects. `GET /studio/media` allows any `studio/…` key that exists in the gallery.
+Wipe clears shloka runs + plans, model-studio runs, gallery tables, catalog cache, and the corresponding R2 objects. `GET /studio/media` allows any `studio/…` key that exists in the gallery.
 
 ## Checksums
 
 AWS SDK v3 defaults can add `x-amz-checksum-mode=ENABLED` to signed GETs, which breaks browser `fetch`. The R2 client in `convex/lib/r2.ts` uses `requestChecksumCalculation` / `responseChecksumValidation`: `WHEN_REQUIRED`.
-
-## Continuity frames (browser only)
-
-Continuation compositions pause after each mid-clip so the **browser** extracts the terminal frame with WASM FFmpeg and uploads it to R2 as a gallery image (`source: terminal_frame`). The next clip starts only after that handoff. If the client goes offline (or the tab closes), generation stays paused until the studio page is open again.

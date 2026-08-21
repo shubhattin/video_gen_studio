@@ -37,12 +37,6 @@ Never request photorealistic, documentary, or live-action people. All humans, de
 - Always include a short style clause such as: "stylized Indian miniature painting, not a photo of a real person".
 `;
 
-export const MODEL_STUDIO_PLANNER_SYSTEM_PROMPT = `You are a precise cinematic video director.
-
-Turn the user's video brief into a short, coherent visual plan. Keep the supplied subject, style, action, and constraints intact. Use concise provider-ready language: specific subject identity, setting, camera movement, lighting, motion, visual continuity, and exclusions. Avoid boilerplate, text overlays, watermarks, and unsupported claims.
-
-When the brief does not specify otherwise, prefer stylized / illustrated characters over photoreal people.`;
-
 /** System prompt for compressing an over-limit provider video prompt. */
 export const VIDEO_PROMPT_SUMMARIZER_SYSTEM_PROMPT = `You compress video-generation prompts so they fit a hard character limit without losing the shot plan.
 
@@ -57,6 +51,7 @@ Rules:
 export function singleClipPlannerInstructions(args?: {
 	durationSeconds?: number;
 	maxPromptChars?: number;
+	aspectRatio?: string;
 }) {
 	const durationHint =
 		args?.durationSeconds != null
@@ -66,6 +61,10 @@ export function singleClipPlannerInstructions(args?: {
 		args?.maxPromptChars != null
 			? `The videoScenes JSON will later be flattened into a single provider text prompt with a hard limit of about ${args.maxPromptChars} characters.`
 			: "The videoScenes JSON will later be flattened into a single provider text prompt with a hard character limit (see user prompt).";
+	const ratioHint =
+		args?.aspectRatio != null
+			? `The video will be rendered at ${args.aspectRatio}; compose every beat's framing, subject placement, and camera moves for that frame.`
+			: "Respect the aspect ratio given in the user prompt when composing scenes.";
 
 	return `## Output shape
 Always return \`kind: "single-clip"\` with:
@@ -93,39 +92,12 @@ ${durationHint}
 - 25–30s → 5–6 beats
 Prefer fewer denser beats over many thin ones. Absolute maximum: 12.
 
+## Aspect ratio
+${ratioHint}
+
 ## Provider text budget
 ${charHint}
 Write fields so the flattened prompt stays useful within that budget. Prefer density over long prose. Never request text overlays, logos, watermarks, or photoreal / live-action people.`;
-}
-
-export function multiClipPlannerInstructions(args: {
-	mode: "continuation" | "cut-scenes";
-	clipCount: number;
-	clipDurationSeconds: number;
-	maxPromptChars: number;
-}) {
-	const continuity =
-		args.mode === "continuation"
-			? "Continue directly from the prior clip's final composition, subject pose, lighting, movement, and emotional beat. Every handoff must name the visual anchor that the next clip should preserve."
-			: "Make each clip a distinct but coherent cut scene. Preserve the story-wide visual identity and describe a clean editorial transition from the preceding clip.";
-
-	return `## Output shape (multi-clip — overrides single-clip / videoScenes)
-Create exactly ${args.clipCount} ordered clips, each ${args.clipDurationSeconds} seconds. Return \`kind: "multi-clip"\` (do not return \`videoScenes\`).
-
-Still produce a strong \`imagePrompt\` for the establishing reference still (Clip 1's opening frame), following the reference-image rules above — stylized Indian miniature / temple-mural illustration, warm Indian-devotional palette, no photoreal people. There is no character limit on \`imagePrompt\` (gpt-image-2 accepts long prompts), so make it as detailed as needed.
-
-Also provide \`overallDescription\`: one concise description of the finished multi-clip video.
-
-For every clip, provide:
-- \`clipIndex\`: zero-based and consecutive from 0 through ${args.clipCount - 1};
-- \`globalDescription\`: the same concise description of the whole finished video;
-- \`scenePrompt\`: a self-contained provider-ready prompt no longer than ${args.maxPromptChars} characters; keep the Indian-devotional stylized look and include a non-photoreal style clause;
-- \`continuityInstructions\`: visual identity and prior-scene handoff instructions;
-- \`transition\`: how this beat starts from or cuts after the preceding clip.
-
-${continuity}
-
-Each clip must advance the story rather than repeat the same shot. Clip 1 must establish the reference still. The final clip must resolve the story. Never request text overlays, logos, watermarks, or photoreal / live-action people.`;
 }
 
 function isBuiltInPlannerSystemPrompt(value: string) {
@@ -164,21 +136,14 @@ export function resolvePlannerSystemPrompt(
 /** Full system string for Shloka planning: creative base + output-shape appendix. */
 export function buildShlokaPlannerSystemPrompt(args: {
 	stored?: string | null;
-	composition?: {
-		mode: "continuation" | "cut-scenes";
-		clipCount: number;
-		clipDurationSeconds: number;
-		maxPromptChars: number;
-	} | null;
-	/** Single-clip duration + provider char budget (ignored when composition is set). */
+	/** Single-clip duration + provider char budget + aspect ratio. */
 	singleClip?: {
 		durationSeconds: number;
 		maxPromptChars: number;
+		aspectRatio?: string;
 	} | null;
 }) {
 	const base = resolvePlannerSystemPrompt(args.stored);
-	const appendix = args.composition
-		? multiClipPlannerInstructions(args.composition)
-		: singleClipPlannerInstructions(args.singleClip ?? undefined);
+	const appendix = singleClipPlannerInstructions(args.singleClip ?? undefined);
 	return `${base}\n\n${appendix}`;
 }

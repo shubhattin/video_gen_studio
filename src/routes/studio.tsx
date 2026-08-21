@@ -1,16 +1,16 @@
+import { api } from "@convex/_generated/api";
+import type { Id } from "@convex/_generated/dataModel";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "convex/react";
 import { useEffect } from "react";
-import { api } from "@convex/_generated/api";
-import type { Id } from "@convex/_generated/dataModel";
 import { ModelStudio } from "#/components/studio/model/model-studio";
 import { HistoryPanel } from "#/components/studio/shell/history-panel";
 import { NewRunSetup } from "#/components/studio/shell/new-run-setup";
-import { StudioShell } from "#/components/studio/shell/studio-shell";
 import { StudioRunSkeleton } from "#/components/studio/shell/studio-run-skeleton";
+import { StudioShell } from "#/components/studio/shell/studio-shell";
 import {
-	studioRunSearchSchema,
 	type StudioRunSearch,
+	studioRunSearchSchema,
 } from "#/lib/studio-run-search";
 
 export const Route = createFileRoute("/studio")({
@@ -19,17 +19,18 @@ export const Route = createFileRoute("/studio")({
 });
 
 function clearRunSearch(prev: StudioRunSearch): StudioRunSearch {
-	const { run: _removed, ...rest } = prev;
+	const { run: _run, plan: _plan, ...rest } = prev;
 	return rest;
 }
 
 function ModelStudioPage() {
 	const navigate = useNavigate({ from: Route.fullPath });
 	const { run: runSearch } = Route.useSearch();
-	const selectedRunId = (runSearch as Id<"generationRuns"> | undefined) ?? null;
+	const selectedRunId =
+		(runSearch as Id<"modelStudioRuns"> | undefined) ?? null;
 
 	const setSelectedRunId = (
-		id: Id<"generationRuns"> | null,
+		id: Id<"modelStudioRuns"> | null,
 		replace = false,
 	) => {
 		void navigate({
@@ -39,30 +40,19 @@ function ModelStudioPage() {
 	};
 
 	const run = useQuery(
-		api.studio.queries.getRun,
+		api.studio.queries.getModelStudioRun,
 		selectedRunId ? { runId: selectedRunId } : "skip",
 	);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: only re-check existence when the selected run or its load state changes.
 	useEffect(() => {
 		if (!selectedRunId) {
 			return;
 		}
 		if (run === null) {
 			setSelectedRunId(null, true);
-			return;
 		}
-		if (!run) {
-			return;
-		}
-		if (run.provenance === "shloka") {
-			void navigate({
-				to: "/",
-				search: { run: selectedRunId },
-				replace: true,
-			});
-		}
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [selectedRunId, run?._id, run === null]);
+	}, [selectedRunId, run === null, run]);
 
 	return (
 		<StudioShell
@@ -81,8 +71,7 @@ function ModelStudioPage() {
 			{!selectedRunId ? (
 				<div className="rounded-2xl border border-border/80 bg-card p-4 sm:p-6">
 					<NewRunSetup
-						provenance="model-studio"
-						onCreated={(id) => setSelectedRunId(id)}
+						onCreated={(id) => setSelectedRunId(id as Id<"modelStudioRuns">)}
 					/>
 				</div>
 			) : run === undefined ? (

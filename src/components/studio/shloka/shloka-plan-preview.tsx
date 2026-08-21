@@ -1,4 +1,4 @@
-import { Copy, GitFork, Pencil, Trash2 } from "lucide-react";
+import { Copy, Pencil, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { MessageResponse } from "#/components/ai-elements/message";
 import {
@@ -12,16 +12,7 @@ import {
 	AlertDialogTitle,
 } from "#/components/ui/alert-dialog";
 import { Button } from "#/components/ui/button";
-import {
-	Dialog,
-	DialogContent,
-	DialogDescription,
-	DialogFooter,
-	DialogHeader,
-	DialogTitle,
-} from "#/components/ui/dialog";
-import { Input } from "#/components/ui/input";
-import { Label } from "#/components/ui/label";
+import { MarkdownTextarea } from "#/components/ui/markdown-textarea";
 import {
 	Popover,
 	PopoverContent,
@@ -31,26 +22,14 @@ import {
 	PopoverTrigger,
 } from "#/components/ui/popover";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs";
-import { MarkdownTextarea } from "#/components/ui/markdown-textarea";
 import {
+	type EditableVideoScene,
 	markdownToVideoScenes,
 	normalizeVideoScenes,
 	videoScenesToMarkdown,
-	type EditableVideoScene,
 } from "#/lib/video-plan-markdown";
-import { cn } from "#/lib/utils";
 
 type VideoScene = EditableVideoScene;
-
-type CompositionClipPlan = {
-	clipIndex: number;
-	durationSeconds: number;
-	scenePrompt: string;
-	globalDescription?: string;
-	continuityInstructions?: string;
-	transition?: string;
-	usesPreviousTerminalFrame: boolean;
-};
 
 type ShlokaPlanPreviewProps = {
 	imagePrompt?: string;
@@ -59,14 +38,12 @@ type ShlokaPlanPreviewProps = {
 	videoPrompt?: string;
 	/** Cached compressed prompt when over the model character limit. */
 	summarizedVideoPrompt?: string;
-	compositionOverallDescription?: string;
-	compositionClips?: CompositionClipPlan[];
 	activePlanId?: string | null;
-	attempts?: Array<{ attemptNumber: number }>;
+	/** Videos produced by this plan — not deleted with the plan. */
+	videoCount?: number;
 	disabled?: boolean;
 	onSaveImagePrompt?: (imagePrompt: string) => Promise<void> | void;
 	onSaveVideoScenes?: (videoScenes: VideoScene[]) => Promise<void> | void;
-	onFork?: (planId: string, title: string) => void;
 	onDelete?: (planId: string) => void;
 };
 
@@ -84,6 +61,7 @@ function PlanEditor({
 	editMode,
 	onEditModeChange,
 	editorClassName,
+	viewClassName,
 }: {
 	title: string;
 	description: string;
@@ -92,10 +70,12 @@ function PlanEditor({
 	saving?: boolean;
 	ariaLabel: string;
 	/** Returns an optional non-blocking warning string. Throw to hard-block. */
-	onSave: (next: string) => Promise<string | void> | void;
+	onSave: (next: string) => Promise<string | undefined> | undefined;
 	editMode: "view" | "edit";
 	onEditModeChange: (mode: "view" | "edit") => void;
 	editorClassName?: string;
+	/** Optional classes for the read-only view (e.g. a capped scroll area). */
+	viewClassName?: string;
 }) {
 	const [draft, setDraft] = useState(value);
 	const [error, setError] = useState<string | null>(null);
@@ -117,78 +97,65 @@ function PlanEditor({
 	return (
 		<div className="space-y-3">
 			<div>
-				<p className="text-sm font-medium">{title}</p>
-				<p className="text-sm text-muted-foreground">{description}</p>
+				<p className="font-heading text-sm font-semibold">{title}</p>
+				<p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
 			</div>
-
-			{warning ? (
-				<p className="text-sm text-amber-600 dark:text-amber-400">{warning}</p>
-			) : null}
-
-			{editMode === "view" ? (
-				<div className="max-h-[min(28rem,55vh)] overflow-y-auto overscroll-contain rounded-lg border border-border/80 bg-muted/20 p-4">
+			{editMode === "edit" ? (
+				<MarkdownTextarea
+					value={draft}
+					onChange={(event) => setDraft(event.target.value)}
+					className={editorClassName}
+					aria-label={ariaLabel}
+					disabled={disabled || saving}
+				/>
+			) : (
+				<div className={viewClassName}>
 					<MessageResponse className={markdownViewClassName}>
-						{value || "_Empty_"}
+						{value}
 					</MessageResponse>
 				</div>
-			) : (
-				<div className="space-y-3">
-					<MarkdownTextarea
-						value={draft}
-						onChange={(event) => {
-							setDraft(event.target.value);
-							setError(null);
-							setWarning(null);
-						}}
-						className={cn("min-h-96 max-h-[70vh] resize-y", editorClassName)}
-						disabled={disabled || saving}
-						aria-label={ariaLabel}
-					/>
-					{error ? <p className="text-sm text-destructive">{error}</p> : null}
-					<div className="flex flex-wrap justify-end gap-2">
-						<Button
-							type="button"
-							variant="ghost"
-							size="sm"
-							className="min-h-11"
-							disabled={disabled || saving || !dirty}
-							onClick={() => {
-								setDraft(value);
-								setError(null);
-								setWarning(null);
-							}}
-						>
-							Discard
-						</Button>
-						<Button
-							type="button"
-							size="sm"
-							className="min-h-11"
-							disabled={disabled || saving || !dirty}
-							onClick={() => {
-								void (async () => {
-									try {
-										const result = await onSave(draft);
-										setWarning(
-											typeof result === "string" && result ? result : null,
-										);
-										setError(null);
-										onEditModeChange("view");
-									} catch (saveError) {
-										setError(
-											saveError instanceof Error
-												? saveError.message
-												: "Could not save changes.",
-										);
-									}
-								})();
-							}}
-						>
-							{saving ? "Saving…" : "Save to run"}
-						</Button>
-					</div>
-				</div>
 			)}
+			{error ? <p className="text-xs text-destructive">{error}</p> : null}
+			{warning ? (
+				<p className="text-xs text-amber-700 dark:text-amber-300">{warning}</p>
+			) : null}
+			{editMode === "edit" ? (
+				<div className="flex items-center gap-2">
+					<Button
+						size="sm"
+						className="min-h-11"
+						disabled={disabled || saving || !dirty}
+						onClick={() => {
+							void (async () => {
+								try {
+									const result = await onSave(draft);
+									if (typeof result === "string") {
+										setWarning(result);
+									}
+									onEditModeChange("view");
+								} catch (caught) {
+									setError(
+										caught instanceof Error
+											? caught.message
+											: "Could not save.",
+									);
+								}
+							})();
+						}}
+					>
+						{saving ? "Saving…" : "Save"}
+					</Button>
+					<Button
+						variant="ghost"
+						size="sm"
+						className="min-h-11"
+						disabled={saving}
+						onClick={() => onEditModeChange("view")}
+					>
+						Cancel
+					</Button>
+				</div>
+			) : null}
 		</div>
 	);
 }
@@ -198,14 +165,11 @@ export function ShlokaPlanPreview({
 	videoScenes,
 	videoPrompt,
 	summarizedVideoPrompt,
-	compositionOverallDescription,
-	compositionClips,
 	activePlanId,
-	attempts,
+	videoCount = 0,
 	disabled,
 	onSaveImagePrompt,
 	onSaveVideoScenes,
-	onFork,
 	onDelete,
 }: ShlokaPlanPreviewProps) {
 	const [copied, setCopied] = useState<string | null>(null);
@@ -215,12 +179,8 @@ export function ShlokaPlanPreview({
 		"image-prompt",
 	);
 	const [editing, setEditing] = useState(false);
-	const [forkOpen, setForkOpen] = useState(false);
-	const [forkTitle, setForkTitle] = useState("");
-	const [forking, setForking] = useState(false);
 	const [deleteOpen, setDeleteOpen] = useState(false);
-	const hasCompositionClips = Boolean(compositionClips?.length);
-	const hasScenes = Boolean(videoScenes?.length) || hasCompositionClips;
+	const hasScenes = Boolean(videoScenes?.length);
 	const normalizedScenes = videoScenes?.length
 		? normalizeVideoScenes(videoScenes)
 		: [];
@@ -228,26 +188,7 @@ export function ShlokaPlanPreview({
 		? videoScenesToMarkdown(normalizedScenes)
 		: "";
 	const showSummarizedPrompt = Boolean(summarizedVideoPrompt?.trim());
-	const videoPlanMarkdown = normalizedScenes.length
-		? scenesMarkdown
-		: hasCompositionClips
-			? (compositionClips ?? [])
-					.map((clip, index) => {
-						const parts = [`## Clip ${index + 1} (${clip.durationSeconds}s)`];
-						if (clip.globalDescription) parts.push(clip.globalDescription);
-						parts.push(clip.scenePrompt);
-						if (clip.continuityInstructions)
-							parts.push(`Continuity: ${clip.continuityInstructions}`);
-						if (clip.transition) parts.push(`Transition: ${clip.transition}`);
-						return parts.join("\n\n");
-					})
-					.join("\n\n---\n\n")
-			: "";
-	const nextAttemptNumber =
-		((attempts ?? []).reduce(
-			(acc, item) => Math.max(acc, item.attemptNumber),
-			0,
-		) || 0) + 1;
+	const videoPlanMarkdown = normalizedScenes.length ? scenesMarkdown : "";
 
 	if (!imagePrompt && !hasScenes) {
 		return null;
@@ -271,28 +212,10 @@ export function ShlokaPlanPreview({
 	const canEdit =
 		activeTab === "image-prompt"
 			? Boolean(onSaveImagePrompt && imagePrompt)
-			: Boolean(
-					!hasCompositionClips && onSaveVideoScenes && videoScenes?.length,
-				);
+			: Boolean(onSaveVideoScenes && videoScenes?.length);
 
 	const editMode = editing ? "edit" : "view";
 	const setEditMode = (mode: "view" | "edit") => setEditing(mode === "edit");
-
-	const openFork = () => {
-		setForkTitle("");
-		setForkOpen(true);
-	};
-
-	const confirmFork = async () => {
-		if (!activePlanId || !onFork) return;
-		setForking(true);
-		try {
-			await onFork(activePlanId, forkTitle);
-			setForkOpen(false);
-		} finally {
-			setForking(false);
-		}
-	};
 
 	return (
 		<section className="space-y-4 border-t border-border/80 pt-5">
@@ -364,18 +287,6 @@ export function ShlokaPlanPreview({
 							{editing ? "Editing" : "Edit"}
 						</Button>
 					) : null}
-					{onFork && activePlanId ? (
-						<Button
-							variant="outline"
-							size="sm"
-							className="min-h-11"
-							disabled={disabled}
-							onClick={openFork}
-						>
-							<GitFork className="size-4" />
-							Fork plan
-						</Button>
-					) : null}
 					{onDelete && activePlanId ? (
 						<Button
 							type="button"
@@ -402,20 +313,18 @@ export function ShlokaPlanPreview({
 			>
 				<TabsList>
 					<TabsTrigger value="image-prompt">Reference image prompt</TabsTrigger>
-					<TabsTrigger value="video-scenes">
-						{hasCompositionClips ? "Video clips" : "Video scenes"}
-					</TabsTrigger>
+					<TabsTrigger value="video-scenes">Video scenes</TabsTrigger>
 				</TabsList>
 				<TabsContent value="image-prompt" className="space-y-3">
 					{onSaveImagePrompt && imagePrompt ? (
 						<PlanEditor
 							title="Reference image prompt"
-							description="Saved on this run and used for reference image generation."
+							description="Saved on this plan and used for reference image generation."
 							value={imagePrompt}
 							disabled={disabled}
 							saving={savingImage}
 							ariaLabel="Edit reference image prompt"
-							editorClassName="min-h-40"
+							editorClassName="min-h-48"
 							editMode={editMode}
 							onEditModeChange={setEditMode}
 							onSave={async (next) => {
@@ -434,74 +343,16 @@ export function ShlokaPlanPreview({
 					) : null}
 				</TabsContent>
 				<TabsContent value="video-scenes" className="space-y-3">
-					{hasCompositionClips ? (
-						<div className="max-h-[min(28rem,55vh)] space-y-3 overflow-y-auto overscroll-contain pr-1">
-							{compositionOverallDescription ? (
-								<p className="rounded-lg border border-border/80 bg-muted/30 p-4 text-sm leading-relaxed">
-									{compositionOverallDescription}
-								</p>
-							) : null}
-							{compositionClips?.map((clip) => (
-								<div
-									key={clip.clipIndex}
-									className="rounded-lg border border-border/80 p-4"
-								>
-									<p className="text-sm font-medium">
-										Clip {clip.clipIndex + 1} · {clip.durationSeconds}s
-										{clip.usesPreviousTerminalFrame
-											? " · continues from previous clip"
-											: ""}
-									</p>
-									{clip.globalDescription ? (
-										<p className="mt-2 text-sm leading-relaxed">
-											{clip.globalDescription}
-										</p>
-									) : null}
-									<p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
-										{clip.scenePrompt}
-									</p>
-									<dl className="mt-3 grid gap-2 text-sm text-muted-foreground">
-										{clip.continuityInstructions ? (
-											<div>
-												<dt className="font-medium text-foreground">
-													Continuity
-												</dt>
-												<dd>{clip.continuityInstructions}</dd>
-											</div>
-										) : null}
-										{clip.transition ? (
-											<div>
-												<dt className="font-medium text-foreground">
-													Transition
-												</dt>
-												<dd>{clip.transition}</dd>
-											</div>
-										) : null}
-									</dl>
-									<Button
-										variant="ghost"
-										size="sm"
-										className="mt-2 min-h-11"
-										onClick={() =>
-											copyText(`clip-${clip.clipIndex}`, clip.scenePrompt)
-										}
-									>
-										<Copy className="size-4" />
-										{copied === `clip-${clip.clipIndex}`
-											? "Copied"
-											: "Copy clip prompt"}
-									</Button>
-								</div>
-							))}
-						</div>
-					) : onSaveVideoScenes && videoScenes?.length ? (
+					{onSaveVideoScenes && videoScenes?.length ? (
 						<PlanEditor
 							title="Video plan"
-							description="Edit as markdown. Saving updates the structured scenes on this run and the provider video prompt."
+							description="Edit as markdown. Saving updates the structured scenes on this plan and the provider video prompt."
 							value={scenesMarkdown}
 							disabled={disabled}
 							saving={savingScenes}
 							ariaLabel="Edit video plan markdown"
+							editorClassName="min-h-64 border-border shadow-sm"
+							viewClassName="max-h-[min(32rem,60vh)] overflow-y-auto overscroll-contain pr-1"
 							editMode={editMode}
 							onEditModeChange={setEditMode}
 							onSave={async (next) => {
@@ -572,61 +423,23 @@ export function ShlokaPlanPreview({
 				</TabsContent>
 			</Tabs>
 
-			<Dialog open={forkOpen} onOpenChange={setForkOpen}>
-				<DialogContent>
-					<DialogHeader>
-						<DialogTitle>Fork plan</DialogTitle>
-						<DialogDescription>
-							Create a copy of this plan as a new attempt. You can edit the copy
-							without affecting the original.
-						</DialogDescription>
-					</DialogHeader>
-					<div className="flex flex-col gap-2">
-						<Label htmlFor="fork-plan-title" className="text-xs">
-							Name (optional)
-						</Label>
-						<Input
-							id="fork-plan-title"
-							value={forkTitle}
-							onChange={(event) => setForkTitle(event.target.value)}
-							placeholder={`Plan ${nextAttemptNumber}`}
-							maxLength={90}
-							autoFocus
-							onKeyDown={(event) => {
-								if (event.key === "Enter") {
-									event.preventDefault();
-									void confirmFork();
-								}
-							}}
-						/>
-						<p className="text-xs text-muted-foreground">
-							Leave blank to use “Plan {nextAttemptNumber}”.
-						</p>
-					</div>
-					<DialogFooter>
-						<Button
-							variant="outline"
-							disabled={forking}
-							onClick={() => setForkOpen(false)}
-						>
-							Cancel
-						</Button>
-						<Button disabled={forking} onClick={() => void confirmFork()}>
-							{forking ? "Forking…" : "Fork plan"}
-						</Button>
-					</DialogFooter>
-				</DialogContent>
-			</Dialog>
-
 			<AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
 				<AlertDialogContent>
 					<AlertDialogHeader>
 						<AlertDialogTitle>Delete this plan?</AlertDialogTitle>
 						<AlertDialogDescription>
-							This permanently deletes this plan attempt and its content. This
+							This permanently deletes the plan and its prompts and scenes. This
 							cannot be undone.
 						</AlertDialogDescription>
 					</AlertDialogHeader>
+					{videoCount > 0 ? (
+						<div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-xs leading-relaxed text-amber-800 dark:text-amber-200">
+							This plan has {videoCount} video{videoCount === 1 ? "" : "s"}{" "}
+							linked to it. Videos are <strong>not deleted</strong> — they
+							become abandoned items in the shared gallery and can be removed
+							individually from there.
+						</div>
+					) : null}
 					<AlertDialogFooter>
 						<AlertDialogCancel disabled={disabled}>Cancel</AlertDialogCancel>
 						<AlertDialogAction

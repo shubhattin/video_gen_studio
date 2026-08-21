@@ -5,10 +5,6 @@ import { useMutation } from "convex/react";
 import { Clapperboard, Plus, Sparkles } from "lucide-react";
 import { useState } from "react";
 import {
-	type CompositionSettings,
-	MultiClipCompositionControls,
-} from "#/components/studio/composition/multi-clip-composition-controls";
-import {
 	type VideoConfigState,
 	VideoConfiguration,
 } from "#/components/studio/video/video-configuration";
@@ -53,7 +49,10 @@ const STUDIOS: Array<{
  */
 export function StudioLauncher({ onShlokaRunCreated }: StudioLauncherProps) {
 	const navigate = useNavigate();
-	const createStudioRun = useMutation(api.studio.mutations.createStudioRun);
+	const createShlokaDraft = useMutation(api.studio.mutations.createShlokaDraft);
+	const createModelStudioDraft = useMutation(
+		api.studio.mutations.createModelStudioDraft,
+	);
 	const [studio, setStudio] = useState<StudioType>("shloka");
 	const [selectedModel, setSelectedModel] = useState<VideoModelId>(
 		"bytedance/seedance-2.5",
@@ -61,31 +60,19 @@ export function StudioLauncher({ onShlokaRunCreated }: StudioLauncherProps) {
 	const [videoConfig, setVideoConfig] = useState<VideoConfigState>(() =>
 		defaultVideoParams("bytedance/seedance-2.5"),
 	);
-	const [composition, setComposition] = useState<CompositionSettings>({
-		enabled: false,
-		mode: "continuation",
-		multiplier: 2,
-	});
 	const [creating, setCreating] = useState(false);
 
 	const onStart = async () => {
 		setCreating(true);
 		try {
-			const runId = await createStudioRun({
-				provenance: studio === "shloka" ? "shloka" : "model-studio",
-				selectedModelId: selectedModel,
-				videoParams: { ...videoConfig, modelId: selectedModel },
-				compositionMode: composition.enabled ? composition.mode : undefined,
-				compositionMultiplier: composition.enabled
-					? composition.multiplier
-					: undefined,
-				compositionClipCount: composition.enabled
-					? composition.multiplier
-					: undefined,
-			});
 			if (studio === "shloka") {
+				const { runId } = await createShlokaDraft({});
 				onShlokaRunCreated(runId);
 			} else {
+				const runId = await createModelStudioDraft({
+					modelId: selectedModel,
+					prompt: "",
+				});
 				void navigate({ to: "/studio", search: { run: runId } });
 			}
 		} catch (error) {
@@ -142,27 +129,22 @@ export function StudioLauncher({ onShlokaRunCreated }: StudioLauncherProps) {
 				</Button>
 			</div>
 
-			<div className="flex flex-col gap-5 border-t border-border/80 pt-5">
-				<section className="flex flex-col gap-1.5">
-					<p className="text-sm font-medium">Video model</p>
-					<VideoModelSelector
-						value={selectedModel}
-						onValueChange={(modelId) => {
-							setSelectedModel(modelId);
-							setVideoConfig(defaultVideoParams(modelId));
-						}}
-					/>
-				</section>
+			{studio === "model" ? (
+				<div className="flex flex-col gap-5 border-t border-border/80 pt-5">
+					<section className="flex flex-col gap-1.5">
+						<p className="text-sm font-medium">Video model</p>
+						<VideoModelSelector
+							value={selectedModel}
+							onValueChange={(modelId) => {
+								setSelectedModel(modelId);
+								setVideoConfig(defaultVideoParams(modelId));
+							}}
+						/>
+					</section>
 
-				<MultiClipCompositionControls
-					value={composition}
-					modelId={selectedModel}
-					durationSeconds={videoConfig.durationSeconds}
-					onChange={setComposition}
-				/>
-
-				<VideoConfiguration value={videoConfig} onChange={setVideoConfig} />
-			</div>
+					<VideoConfiguration value={videoConfig} onChange={setVideoConfig} />
+				</div>
+			) : null}
 		</div>
 	);
 }

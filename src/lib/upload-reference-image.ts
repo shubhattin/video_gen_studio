@@ -1,5 +1,3 @@
-import type { Id } from "@convex/_generated/dataModel";
-
 const ALLOWED_MIME_TYPES = new Set([
 	"image/png",
 	"image/jpeg",
@@ -49,11 +47,11 @@ export function assertReferenceImageFile(file: File) {
 	}
 }
 
-type UploadReferenceImageArgs = {
-	runId: Id<"generationRuns">;
+type UploadReferenceImageArgs<RunId extends string> = {
+	runId: RunId;
 	file: File;
 	prepareUpload: (args: {
-		runId: Id<"generationRuns">;
+		runId: RunId;
 		mimeType: string;
 		bytes?: number;
 	}) => Promise<{
@@ -62,7 +60,7 @@ type UploadReferenceImageArgs = {
 		contentType: string;
 	}>;
 	finalizeUpload: (args: {
-		runId: Id<"generationRuns">;
+		runId: RunId;
 		objectKey: string;
 		mimeType: string;
 		width?: number;
@@ -72,12 +70,12 @@ type UploadReferenceImageArgs = {
 	}) => Promise<{ imageId: string }>;
 };
 
-export async function uploadReferenceImage({
+export async function uploadReferenceImage<RunId extends string>({
 	runId,
 	file,
 	prepareUpload,
 	finalizeUpload,
-}: UploadReferenceImageArgs) {
+}: UploadReferenceImageArgs<RunId>) {
 	assertReferenceImageFile(file);
 	const dimensions = await readImageDimensions(file);
 	const mimeType = file.type || "image/png";

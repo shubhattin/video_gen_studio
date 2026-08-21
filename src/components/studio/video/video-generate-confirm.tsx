@@ -1,6 +1,6 @@
-import { useState, type ReactNode } from "react";
 import { Clapperboard } from "lucide-react";
-import { Button } from "#/components/ui/button";
+import { type ReactNode, useState } from "react";
+import type { VideoConfigState } from "#/components/studio/video/video-configuration";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -13,11 +13,11 @@ import {
 	AlertDialogTitle,
 	AlertDialogTrigger,
 } from "#/components/ui/alert-dialog";
+import { Button } from "#/components/ui/button";
 import {
 	MODEL_CAPABILITY_PROFILES,
 	type VideoModelId,
 } from "#/lib/model-catalog";
-import type { VideoConfigState } from "#/components/studio/video/video-configuration";
 import { cn } from "#/lib/utils";
 
 type VideoGenerateConfirmProps = {
@@ -26,17 +26,20 @@ type VideoGenerateConfirmProps = {
 	generating?: boolean;
 	triggerLabel: string;
 	generatingLabel?: string;
-	planLabel?: string;
+	/** Brief amber warning shown inside the dialog (e.g. settings divergence). */
+	warning?: string;
 	className?: string;
 	onConfirm: () => void;
 };
 
 function DetailRow({ label, value }: { label: string; value: ReactNode }) {
 	return (
-		<div className="flex items-start justify-between gap-3 rounded-lg border border-border/70 bg-muted/20 px-3 py-2">
-			<span className="shrink-0 text-xs text-muted-foreground">{label}</span>
-			<span className="min-w-0 text-right text-sm font-medium">{value}</span>
-		</div>
+		<span className="inline-flex items-center gap-1.5 rounded-lg border border-border/70 bg-muted/20 px-2.5 py-1.5 text-xs">
+			<span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+				{label}
+			</span>
+			<span className="min-w-0 font-medium">{value}</span>
+		</span>
 	);
 }
 
@@ -51,7 +54,7 @@ export function VideoGenerateConfirm({
 	generating,
 	triggerLabel,
 	generatingLabel = "Generating video…",
-	planLabel,
+	warning,
 	className,
 	onConfirm,
 }: VideoGenerateConfirmProps) {
@@ -60,12 +63,6 @@ export function VideoGenerateConfirm({
 
 	return (
 		<div className="flex flex-col gap-1.5">
-			{planLabel ? (
-				<p className="text-xs text-muted-foreground">
-					Using plan:{" "}
-					<span className="font-medium text-foreground">{planLabel}</span>
-				</p>
-			) : null}
 			<AlertDialog open={open} onOpenChange={setOpen}>
 				<AlertDialogTrigger
 					render={
@@ -90,7 +87,11 @@ export function VideoGenerateConfirm({
 					</AlertDialogHeader>
 
 					<div className="grid gap-2">
-						{planLabel ? <DetailRow label="Plan" value={planLabel} /> : null}
+						{warning ? (
+							<p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-700 dark:text-amber-300">
+								{warning}
+							</p>
+						) : null}
 						<DetailRow
 							label="Model"
 							value={profile?.displayName ?? config.modelId}

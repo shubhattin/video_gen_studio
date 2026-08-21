@@ -1,6 +1,6 @@
+import type { Id } from "@convex/_generated/dataModel";
 import { Download, Info, Loader2 } from "lucide-react";
 import { useState } from "react";
-import type { Id } from "@convex/_generated/dataModel";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
 import {
@@ -11,11 +11,11 @@ import {
 	PopoverTitle,
 	PopoverTrigger,
 } from "#/components/ui/popover";
-import { fetchStudioMedia } from "#/lib/studio-media-proxy";
 import {
 	MODEL_CAPABILITY_PROFILES,
 	type VideoModelId,
 } from "#/lib/model-catalog";
+import { fetchStudioMedia } from "#/lib/studio-media-proxy";
 import { cn } from "#/lib/utils";
 
 export type VideoResultItem = {
@@ -147,7 +147,12 @@ function VideoClipCard({
 						controls
 						playsInline
 						preload="metadata"
-						className="mx-auto max-h-[min(70vh,560px)] w-full object-contain"
+						className="block max-h-96 w-full object-contain"
+						style={
+							video.meta?.width && video.meta?.height
+								? { aspectRatio: `${video.meta.width} / ${video.meta.height}` }
+								: undefined
+						}
 					/>
 				) : (
 					<div className="flex h-56 items-center justify-center text-sm text-muted-foreground">

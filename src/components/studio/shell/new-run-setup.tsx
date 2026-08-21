@@ -3,10 +3,6 @@ import { useState } from "react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import {
-	type CompositionSettings,
-	MultiClipCompositionControls,
-} from "#/components/studio/composition/multi-clip-composition-controls";
-import {
 	type VideoConfigState,
 	VideoConfiguration,
 } from "#/components/studio/video/video-configuration";
@@ -16,45 +12,32 @@ import { defaultVideoParams, type VideoModelId } from "#/lib/model-catalog";
 import { notifyStudioError } from "#/lib/studio-toast";
 
 type NewRunSetupProps = {
-	provenance: "shloka" | "model-studio";
-	onCreated: (runId: Id<"generationRuns">) => void;
+	onCreated: (runId: Id<"modelStudioRuns">) => void;
 };
 
 /**
- * Lean "start a new run" setup shown before any run exists. Only configuration
- * (video model, composition, video settings) is shown here — text fields appear
- * once the run is created. Clicking "Create run" creates the run up-front and
- * navigates to it, avoiding a lazy redirect on first action.
+ * Lean "start a new run" setup for Model Studio shown before any run exists.
+ * Only configuration (video model, video settings) is shown here — the prompt
+ * field appears once the run is created. Clicking "Create run" creates the
+ * run up-front and navigates to it, avoiding a lazy redirect on first action.
  */
-export function NewRunSetup({ provenance, onCreated }: NewRunSetupProps) {
-	const createStudioRun = useMutation(api.studio.mutations.createStudioRun);
+export function NewRunSetup({ onCreated }: NewRunSetupProps) {
+	const createModelStudioDraft = useMutation(
+		api.studio.mutations.createModelStudioDraft,
+	);
 	const [selectedModel, setSelectedModel] = useState<VideoModelId>(
 		"bytedance/seedance-2.5",
 	);
 	const [videoConfig, setVideoConfig] = useState<VideoConfigState>(() =>
 		defaultVideoParams("bytedance/seedance-2.5"),
 	);
-	const [composition, setComposition] = useState<CompositionSettings>({
-		enabled: false,
-		mode: "continuation",
-		multiplier: 2,
-	});
 	const [creating, setCreating] = useState(false);
 
 	const onCreate = async () => {
 		setCreating(true);
 		try {
-			const runId = await createStudioRun({
-				provenance,
-				selectedModelId: selectedModel,
-				videoParams: { ...videoConfig, modelId: selectedModel },
-				compositionMode: composition.enabled ? composition.mode : undefined,
-				compositionMultiplier: composition.enabled
-					? composition.multiplier
-					: undefined,
-				compositionClipCount: composition.enabled
-					? composition.multiplier
-					: undefined,
+			const runId = await createModelStudioDraft({
+				modelId: selectedModel,
 			});
 			onCreated(runId);
 		} catch (error) {
@@ -72,7 +55,7 @@ export function NewRunSetup({ provenance, onCreated }: NewRunSetupProps) {
 					disabled={creating}
 					onClick={() => void onCreate()}
 				>
-					{creating ? "Creating…" : "Create New Thread"}
+					{creating ? "Creating…" : "Create New Run"}
 				</Button>
 			</div>
 
@@ -87,13 +70,6 @@ export function NewRunSetup({ provenance, onCreated }: NewRunSetupProps) {
 						}}
 					/>
 				</section>
-
-				<MultiClipCompositionControls
-					value={composition}
-					modelId={selectedModel}
-					durationSeconds={videoConfig.durationSeconds}
-					onChange={setComposition}
-				/>
 
 				<VideoConfiguration value={videoConfig} onChange={setVideoConfig} />
 			</div>

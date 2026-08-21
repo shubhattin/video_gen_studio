@@ -28,16 +28,14 @@ import {
 } from "../lib/openrouterVideo";
 import {
 	imageConfigSchema,
-	compositionPlannerOutputSchema,
 	normalPlannerOutputSchema,
 	videoParamsSchema,
 	type ImageConfig,
+	type LastModelParamsUsed,
 } from "../lib/schemas";
 import {
-	MODEL_STUDIO_PLANNER_SYSTEM_PROMPT,
 	VIDEO_PROMPT_SUMMARIZER_SYSTEM_PROMPT,
 	buildShlokaPlannerSystemPrompt,
-	multiClipPlannerInstructions,
 } from "../lib/plannerPrompt";
 import {
 	buildVideoPromptFromScenes,
@@ -48,14 +46,12 @@ import { adaptOpenRouterVideoRequest } from "../lib/videoAdapters";
 import {
 	buildStudioObjectKey,
 	createPresignedGetUrl,
-	deleteObjects as deleteR2Objects,
 	putObjectBytes,
 } from "../lib/r2";
 
 function buildPlannerPrompt(args: {
 	shlokaText: string;
 	customInstructions?: string;
-	mode: "single-clip" | "multi-clip";
 	durationSeconds?: number;
 	maxPromptChars?: number;
 	aspectRatio?: string;
@@ -103,63 +99,38 @@ function buildPlannerPrompt(args: {
 		sections.push(["## Generation constraints", ...meta].join("\n"));
 	}
 
-	if (args.mode === "multi-clip") {
-		sections.push(
-			"## Task\nProduce imagePrompt + overallDescription + ordered clips for a portrait multi-clip short rooted in this shloka.",
-		);
-	} else {
-		sections.push(
-			"## Task\nProduce imagePrompt + videoScenes (Seedance six-part beats) for a portrait short rooted in this shloka.",
-		);
-	}
+	sections.push(
+		"## Task\nProduce imagePrompt + videoScenes (Seedance six-part beats) for a portrait short rooted in this shloka.",
+	);
 
 	return sections.join("\n\n");
 }
 
-function buildModelStudioPlannerPrompt(prompt: string) {
-	return `Video brief (follow closely):\n"""\n${prompt}\n"""`;
-}
-
-function compositionPlannerExtension(run: {
-	compositionMode?: "continuation" | "cut-scenes";
-	compositionClipCount?: number;
-	videoParams?: { durationSeconds: number; modelId: string };
-}) {
-	if (
-		!run.compositionMode ||
-		!run.compositionClipCount ||
-		!run.videoParams ||
-		!isVideoModelId(run.videoParams.modelId)
-	) {
-		return null;
+function planBudgetFromConfig(config: {
+	modelId: string;
+	aspectRatio: string;
+	resolution: string;
+	durationSeconds: number;
+	generateAudio?: boolean;
+	negativePrompt?: string;
+	cfgScale?: number;
+}): { budget: LastModelParamsUsed; modelId: VideoModelId } {
+	if (!isVideoModelId(config.modelId)) {
+		throw new Error("Select a supported video model.");
 	}
+	const profile = MODEL_CAPABILITY_PROFILES[config.modelId];
 	return {
-		mode: run.compositionMode,
-		clipCount: run.compositionClipCount,
-		clipDurationSeconds: run.videoParams.durationSeconds,
-		maxPromptChars: MODEL_CAPABILITY_PROFILES[run.videoParams.modelId]
-			.maxPromptChars,
-	};
-}
-
-function singleClipPlannerBudget(run: {
-	videoParams?: { durationSeconds: number; modelId: string; aspectRatio?: string };
-	selectedModelId?: string;
-}) {
-	const modelId =
-		(run.videoParams?.modelId && isVideoModelId(run.videoParams.modelId)
-			? run.videoParams.modelId
-			: null) ??
-		(run.selectedModelId && isVideoModelId(run.selectedModelId)
-			? run.selectedModelId
-			: null) ??
-		"bytedance/seedance-2.5";
-	const profile = MODEL_CAPABILITY_PROFILES[modelId];
-	return {
-		modelId,
-		durationSeconds: run.videoParams?.durationSeconds ?? 8,
-		maxPromptChars: profile.maxPromptChars,
-		aspectRatio: run.videoParams?.aspectRatio ?? "9:16",
+		modelId: config.modelId,
+		budget: {
+			modelId: config.modelId,
+			aspectRatio: config.aspectRatio,
+			resolution: config.resolution,
+			durationSeconds: config.durationSeconds,
+			generateAudio: config.generateAudio,
+			negativePrompt: config.negativePrompt,
+			cfgScale: config.cfgScale,
+			maxPromptChars: profile.maxPromptChars,
+		},
 	};
 }
 
@@ -215,22 +186,19 @@ async function summarizeVideoPromptToLimit(
 async function resolveProviderVideoPrompt(
 	ctx: ActionCtx,
 	args: {
-		runId: Id<"generationRuns">;
+		planId: Id<"shlokaPlans">;
 		fullPrompt: string;
 		maxPromptChars: number;
 		cachedSummary?: string;
 		cachedHash?: string;
-		persist?: boolean;
 	},
 ): Promise<{ prompt: string; usedSummary: boolean }> {
 	const full = args.fullPrompt.trim();
 	const sourceHash = hashVideoPromptSource(full);
 	if (full.length <= args.maxPromptChars) {
-		if (args.persist) {
-			await ctx.runMutation(internal.studio.internal.clearVideoPromptSummary, {
-				runId: args.runId,
-			});
-		}
+		await ctx.runMutation(internal.studio.internal.clearPlanPromptSummary, {
+			planId: args.planId,
+		});
 		return { prompt: full, usedSummary: false };
 	}
 
@@ -246,13 +214,11 @@ async function resolveProviderVideoPrompt(
 		full,
 		args.maxPromptChars,
 	);
-	if (args.persist) {
-		await ctx.runMutation(internal.studio.internal.setVideoPromptSummaryCache, {
-			runId: args.runId,
-			sourceHash,
-			summarizedVideoPrompt: summarized,
-		});
-	}
+	await ctx.runMutation(internal.studio.internal.setPlanPromptSummaryCache, {
+		planId: args.planId,
+		sourceHash,
+		summarizedVideoPrompt: summarized,
+	});
 	return { prompt: summarized, usedSummary: true };
 }
 
@@ -303,9 +269,12 @@ async function signedReadUrl(objectKey: string) {
 	return await createPresignedGetUrl({ objectKey });
 }
 
+// ── Shloka planning ─────────────────────────────────────────────────────
+
 export const planShlokaRun = action({
 	args: {
 		runId: v.id("generationRuns"),
+		planId: v.id("shlokaPlans"),
 		force: v.optional(v.boolean()),
 	},
 	returns: v.null(),
@@ -317,174 +286,85 @@ export const planShlokaRun = action({
 		if (!run) {
 			throw new Error("Run not found.");
 		}
+		const plan = (await ctx.runQuery(internal.studio.queries.getPlanDoc, {
+			planId: args.planId,
+		})) as Doc<"shlokaPlans"> | null;
+		if (!plan || plan.runId !== args.runId) {
+			throw new Error("Plan not found for this run.");
+		}
 		if (!run.shlokaText?.trim()) {
 			throw new Error("Shloka text is required before planning.");
 		}
 		if (!run.plannerPromptSelection) {
-			throw new Error(
-				"Select a system prompt template before planning.",
+			throw new Error("Select a system prompt template before planning.");
+		}
+		// No idempotency short-circuit here: regeneration is explicitly
+		// confirmed in the UI, so an already-"ready" plan is always overwritten
+		// (image prompt + scenes + lastModelParamsUsed). The action also
+		// re-establishes the "planning" status so progress UI updates.
+
+		await ctx.runMutation(internal.studio.internal.setPlanStatus, {
+			planId: args.planId,
+			status: "planning",
+		});
+		await ctx.runMutation(internal.studio.internal.setRunStatus, {
+			runId: args.runId,
+			status: "planning",
+		});
+
+		try {
+			const resolvedPrompt = await ctx.runQuery(
+				internal.studio.queries.resolvePlannerPromptSelectionForRun,
+				{ selection: run.plannerPromptSelection },
 			);
-		}
-		const resolvedPrompt = await ctx.runQuery(
-			internal.studio.queries.resolvePlannerPromptSelectionForRun,
-			{ selection: run.plannerPromptSelection },
-		);
+			const { budget } = planBudgetFromConfig(plan.videoParams);
 
-		const planningKey = `plan-${args.runId}-${Date.now().toString(36)}`;
-		if (!args.force && run.status === "plan_ready" && run.activePlanId) {
-			return null;
-		}
-
-		await ctx.runMutation(internal.studio.internal.setRunStatus, {
-			runId: args.runId,
-			status: "planning",
-		});
-
-		try {
-			const openrouter = getOpenRouterProvider();
-			const composition = compositionPlannerExtension(run);
-			const budget = singleClipPlannerBudget(run);
-			if (composition) {
-				const result = await generateText({
-					model: openrouter(PLANNER_MODEL_ID),
-					reasoning: "medium",
-					instructions: buildShlokaPlannerSystemPrompt({
-						stored: resolvedPrompt.content,
-						composition,
-					}),
-					prompt: buildPlannerPrompt({
-						shlokaText: run.shlokaText,
-						customInstructions: run.customInstructions,
-						mode: "multi-clip",
-						durationSeconds: composition.clipDurationSeconds,
-						maxPromptChars: composition.maxPromptChars,
-						aspectRatio: budget.aspectRatio,
-					}),
-					output: Output.object({ schema: compositionPlannerOutputSchema }),
-				});
-				const plan = result.output;
-				const warnings = warningMessages(result.warnings ?? []);
-				await ctx.runMutation(internal.studio.internal.commitCompositionPlan, {
-					runId: args.runId,
-					plannerModel: PLANNER_MODEL_ID,
-					plannerReasoning: "medium",
-					imagePrompt: plan.imagePrompt,
-					overallDescription: plan.overallDescription,
-					clips: plan.clips,
-					warnings: warnings.length > 0 ? warnings : undefined,
-					planningKey,
-				});
-			} else {
-				const result = await generateText({
-					model: openrouter(PLANNER_MODEL_ID),
-					reasoning: "medium",
-					instructions: buildShlokaPlannerSystemPrompt({
-						stored: resolvedPrompt.content,
-						composition: null,
-						singleClip: {
-							durationSeconds: budget.durationSeconds,
-							maxPromptChars: budget.maxPromptChars,
-						},
-					}),
-					prompt: buildPlannerPrompt({
-						shlokaText: run.shlokaText,
-						customInstructions: run.customInstructions,
-						mode: "single-clip",
-						durationSeconds: budget.durationSeconds,
-						maxPromptChars: budget.maxPromptChars,
-						aspectRatio: budget.aspectRatio,
-					}),
-					output: Output.object({ schema: normalPlannerOutputSchema }),
-				});
-				const plan = result.output;
-				const warnings = warningMessages(result.warnings ?? []);
-				const videoScenes = normalizeVideoScenes(plan.videoScenes);
-				await ctx.runMutation(internal.studio.internal.commitPlan, {
-					runId: args.runId,
-					plannerModel: PLANNER_MODEL_ID,
-					plannerReasoning: "medium",
-					imagePrompt: plan.imagePrompt,
-					videoScenes,
-					warnings: warnings.length > 0 ? warnings : undefined,
-					planningKey,
-					plannerSystemPrompt: resolvedPrompt.content,
-					plannerSystemPromptTemplateId:
-						resolvedPrompt.source === "template"
-							? resolvedPrompt.templateId
-							: undefined,
-				});
-			}
-		} catch (error) {
-			const message =
-				error instanceof Error ? error.message : "Planning failed.";
-			await ctx.runMutation(internal.studio.internal.setRunStatus, {
-				runId: args.runId,
-				status: "failed",
-				lastError: message,
-			});
-			throw error;
-		}
-
-		return null;
-	},
-});
-
-export const planModelStudioComposition = action({
-	args: {
-		runId: v.id("generationRuns"),
-		force: v.optional(v.boolean()),
-	},
-	returns: v.null(),
-	handler: async (ctx, args) => {
-		await requireAdmin(ctx);
-		const run = await ctx.runQuery(internal.studio.queries.getRunDoc, {
-			runId: args.runId,
-		});
-		const prompt = run?.videoPrompt?.trim() ?? run?.videoParams?.prompt?.trim();
-		if (!run || !prompt) {
-			throw new Error("A video prompt is required before planning.");
-		}
-		const composition = compositionPlannerExtension(run);
-		if (!composition) {
-			throw new Error("Enable multi-clip composition before planning.");
-		}
-		const planningKey = `model-composition-plan-${args.runId}`;
-		if (
-			!args.force &&
-			run.planningKey === planningKey &&
-			run.status === "plan_ready"
-		) {
-			return null;
-		}
-		await ctx.runMutation(internal.studio.internal.setRunStatus, {
-			runId: args.runId,
-			status: "planning",
-		});
-		try {
 			const result = await generateText({
 				model: getOpenRouterProvider()(PLANNER_MODEL_ID),
 				reasoning: "medium",
-				instructions: `${MODEL_STUDIO_PLANNER_SYSTEM_PROMPT}\n\n${multiClipPlannerInstructions(composition)}`,
-				prompt: buildModelStudioPlannerPrompt(prompt),
-				output: Output.object({ schema: compositionPlannerOutputSchema }),
+				instructions: buildShlokaPlannerSystemPrompt({
+					stored: resolvedPrompt.content,
+					singleClip: {
+						durationSeconds: budget.durationSeconds,
+						maxPromptChars: budget.maxPromptChars,
+						aspectRatio: budget.aspectRatio,
+					},
+				}),
+				prompt: buildPlannerPrompt({
+					shlokaText: run.shlokaText,
+					customInstructions: run.customInstructions,
+					durationSeconds: budget.durationSeconds,
+					maxPromptChars: budget.maxPromptChars,
+					aspectRatio: budget.aspectRatio,
+				}),
+				output: Output.object({ schema: normalPlannerOutputSchema }),
 			});
-			const plan = result.output;
-			await ctx.runMutation(internal.studio.internal.commitCompositionPlan, {
-				runId: args.runId,
+			const planOutput = result.output;
+			const warnings = warningMessages(result.warnings ?? []);
+			const videoScenes = normalizeVideoScenes(planOutput.videoScenes);
+
+			await ctx.runMutation(internal.studio.internal.commitPlanContent, {
+				planId: args.planId,
+				imagePrompt: planOutput.imagePrompt,
+				videoScenes,
 				plannerModel: PLANNER_MODEL_ID,
 				plannerReasoning: "medium",
-				imagePrompt: plan.imagePrompt,
-				overallDescription: plan.overallDescription,
-				clips: plan.clips,
-				warnings:
-					warningMessages(result.warnings ?? []).length > 0
-						? warningMessages(result.warnings ?? [])
+				plannerSystemPrompt: resolvedPrompt.content,
+				plannerSystemPromptTemplateId:
+					resolvedPrompt.source === "template"
+						? resolvedPrompt.templateId
 						: undefined,
-				planningKey,
+				lastModelParamsUsed: budget,
+				warnings: warnings.length > 0 ? warnings : undefined,
 			});
 		} catch (error) {
 			const message =
-				error instanceof Error ? error.message : "Composition planning failed.";
+				error instanceof Error ? error.message : "Planning failed.";
+			await ctx.runMutation(internal.studio.internal.setPlanStatus, {
+				planId: args.planId,
+				status: "failed",
+				lastError: message,
+			});
 			await ctx.runMutation(internal.studio.internal.setRunStatus, {
 				runId: args.runId,
 				status: "failed",
@@ -492,9 +372,12 @@ export const planModelStudioComposition = action({
 			});
 			throw error;
 		}
+
 		return null;
 	},
 });
+
+// ── Reference image (shloka run) ────────────────────────────────────────
 
 export const generateReferenceImage = action({
 	args: {
@@ -506,17 +389,15 @@ export const generateReferenceImage = action({
 		const run = await ctx.runQuery(internal.studio.queries.getRunDoc, {
 			runId: args.runId,
 		});
-		if (!run?.activePlan && !run?.videoPrompt && !run?.videoParams?.prompt) {
+		if (!run) {
+			throw new Error("Run not found.");
+		}
+		const imagePrompt = run.activePlan?.imagePrompt?.trim();
+		if (!imagePrompt) {
 			throw new Error(
-				"Plan an image prompt (or provide a video prompt) before generating a reference image.",
+				"Generate the plan's reference-image prompt before generating an image.",
 			);
 		}
-
-		const imagePrompt =
-			run.activePlan?.imagePrompt?.trim() ||
-			run.videoPrompt?.trim() ||
-			run.videoParams?.prompt?.trim() ||
-			"";
 
 		const imageConfig = imageConfigSchema.parse({
 			size: run.imageSize ?? "1024x1536",
@@ -582,9 +463,12 @@ export const generateReferenceImage = action({
 	},
 });
 
+// ── Video generation (shloka plan) ──────────────────────────────────────
+
 export const generateVideoForRun = action({
 	args: {
 		runId: v.id("generationRuns"),
+		planId: v.id("shlokaPlans"),
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
@@ -595,13 +479,28 @@ export const generateVideoForRun = action({
 		if (!run) {
 			throw new Error("Run not found.");
 		}
-
-		const modelId = run.selectedModelId ?? run.videoParams?.modelId;
-		if (!modelId || !isVideoModelId(modelId)) {
-			throw new Error("Select a supported video model.");
+		const plan = (await ctx.runQuery(internal.studio.queries.getPlanDoc, {
+			planId: args.planId,
+		})) as Doc<"shlokaPlans"> | null;
+		if (!plan || plan.runId !== args.runId) {
+			throw new Error("Plan not found for this run.");
 		}
+		if (plan.status !== "ready" || !plan.videoScenes?.length) {
+			throw new Error("Generate the plan before generating a video.");
+		}
+		// ★ Generation uses the config snapshot from plan-generation time —
+		// NOT the user's current edits (those apply after regeneration).
+		const used = plan.lastModelParamsUsed as LastModelParamsUsed | null;
+		if (!used) {
+			throw new Error(
+				"This plan has no generation config snapshot. Regenerate the plan.",
+			);
+		}
+		if (!isVideoModelId(used.modelId)) {
+			throw new Error("This plan uses an unsupported video model.");
+		}
+		const profile = MODEL_CAPABILITY_PROFILES[used.modelId];
 
-		const profile = MODEL_CAPABILITY_PROFILES[modelId];
 		type RefImage = {
 			id: string;
 			objectKey: string;
@@ -614,9 +513,7 @@ export const generateVideoForRun = action({
 			(image: RefImage) => image.id === run.lastFrameImageId,
 		);
 		const extraIds = (run.extraReferenceImageIds ?? []) as string[];
-		const imagesById = new Map(
-			images.map((image: RefImage) => [image.id, image]),
-		);
+		const imagesById = new Map(images.map((image: RefImage) => [image.id, image]));
 		const extras = extraIds
 			.filter((id: string) => id !== first?.id && id !== last?.id)
 			.map((id: string) => imagesById.get(id))
@@ -627,32 +524,22 @@ export const generateVideoForRun = action({
 		}
 
 		const parsedParams = videoParamsSchema.parse({
-			...run.videoParams,
-			modelId,
+			modelId: used.modelId,
+			aspectRatio: used.aspectRatio,
+			resolution: used.resolution,
+			durationSeconds: used.durationSeconds,
+			generateAudio: used.generateAudio,
+			negativePrompt: used.negativePrompt,
+			cfgScale: used.cfgScale,
 		});
 
-		// Shloka runs derive the provider prompt from the active plan's scenes;
-		// model-studio runs use their stored video prompt.
-		const fullPrompt =
-			run.provenance === "shloka"
-				? (run.activePlan
-					? buildVideoPromptFromScenes(run.activePlan.videoScenes)
-					: undefined)
-				: (run.videoPrompt?.trim() || run.videoParams?.prompt?.trim()) ||
-					"Warm Indian cinematic motion portrait.";
-		if (!fullPrompt?.trim()) {
-			throw new Error(
-				"Plan the run (or provide a video prompt) before generating.",
-			);
-		}
-
+		const fullPrompt = buildVideoPromptFromScenes(plan.videoScenes);
 		const resolved = await resolveProviderVideoPrompt(ctx, {
-			runId: args.runId,
+			planId: args.planId,
 			fullPrompt,
-			maxPromptChars: profile.maxPromptChars,
-			cachedSummary: run.summarizedVideoPrompt,
-			cachedHash: run.videoPromptSourceHash,
-			persist: true,
+			maxPromptChars: used.maxPromptChars,
+			cachedSummary: plan.summarizedVideoPrompt,
+			cachedHash: plan.videoPromptSourceHash,
 		});
 
 		const firstUrl = first ? await signedReadUrl(first.objectKey) : null;
@@ -670,13 +557,6 @@ export const generateVideoForRun = action({
 			firstFrameUrl: firstUrl,
 			lastFrameUrl: lastUrl,
 			referenceUrls,
-		});
-
-		await ctx.runMutation(internal.studio.internal.updateVideoConfig, {
-			runId: args.runId,
-			selectedModelId: modelId,
-			videoParams: parsedParams,
-			videoPrompt: fullPrompt,
 		});
 
 		await ctx.runMutation(internal.studio.internal.setRunStatus, {
@@ -702,36 +582,48 @@ export const generateVideoForRun = action({
 				...adapted.warnings,
 				...(resolved.usedSummary
 					? [
-							`Provider prompt was summarized to fit ${profile.maxPromptChars} characters.`,
+							`Provider prompt was summarized to fit ${used.maxPromptChars} characters.`,
 						]
 					: []),
 			];
 
-			await ctx.runMutation(internal.studio.internal.insertGalleryVideo, {
-				runId: args.runId,
-				video: {
-					objectKey,
-					meta: {
-						mimeType: downloaded.mimeType,
-						durationSeconds: adapted.body.duration,
-						bytes: downloaded.bytes.byteLength,
+			const videoId = await ctx.runMutation(
+				internal.studio.internal.insertGalleryVideo,
+				{
+					runId: args.runId,
+					video: {
+						objectKey,
+						meta: {
+							mimeType: downloaded.mimeType,
+							durationSeconds: adapted.body.duration,
+							bytes: downloaded.bytes.byteLength,
+						},
+						openRouterJobId: completed.id,
+						openRouterGenerationId: completed.generation_id,
+						actualCostUsd:
+							typeof completed.usage?.cost === "number"
+								? completed.usage.cost
+								: undefined,
+						videoParams: parsedParams,
+						videoPrompt: adapted.body.prompt,
+						warnings: genWarnings.length > 0 ? genWarnings : undefined,
+						createdAt: Date.now(),
 					},
-					openRouterJobId: completed.id,
-					openRouterGenerationId: completed.generation_id,
-					actualCostUsd:
-						typeof completed.usage?.cost === "number"
-							? completed.usage.cost
-							: undefined,
-					videoParams: parsedParams,
-					videoPrompt: adapted.body.prompt,
 					warnings: genWarnings.length > 0 ? genWarnings : undefined,
-					createdAt: Date.now(),
 				},
+			);
+			await ctx.runMutation(internal.studio.internal.appendPlanVideoOutput, {
+				planId: args.planId,
+				videoId,
 				warnings: genWarnings.length > 0 ? genWarnings : undefined,
 			});
 		} catch (error) {
 			const message =
 				error instanceof Error ? error.message : "Video generation failed.";
+			await ctx.runMutation(internal.studio.internal.failPlanVideoGeneration, {
+				planId: args.planId,
+				message,
+			});
 			await ctx.runMutation(internal.studio.internal.setRunStatus, {
 				runId: args.runId,
 				status: "failed",
@@ -744,144 +636,197 @@ export const generateVideoForRun = action({
 	},
 });
 
-/** Rebuild / refresh summarized provider prompt when scenes or model budget change. */
-export const refreshVideoPromptSummary = internalAction({
+/** Rebuild / refresh the Luna-compressed provider prompt for a plan. */
+export const refreshPlanPromptSummary = internalAction({
 	args: {
-		runId: v.id("generationRuns"),
+		planId: v.id("shlokaPlans"),
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
-		const run = await ctx.runQuery(internal.studio.queries.getRunDoc, {
-			runId: args.runId,
-		});
-		if (!run) {
+		const plan = (await ctx.runQuery(internal.studio.queries.getPlanDoc, {
+			planId: args.planId,
+		})) as Doc<"shlokaPlans"> | null;
+		if (!plan?.videoScenes?.length || !plan.lastModelParamsUsed) {
 			return null;
 		}
-		// Shloka runs derive the provider prompt from the active plan's scenes;
-		// model-studio runs use their stored video prompt.
-		const fullPrompt =
-			run.provenance === "shloka"
-				? (run.activePlan
-					? buildVideoPromptFromScenes(run.activePlan.videoScenes)
-					: undefined)
-				: run.videoPrompt?.trim();
-		if (!fullPrompt) {
-			return null;
-		}
-		const budget = singleClipPlannerBudget(run);
+		const fullPrompt = buildVideoPromptFromScenes(plan.videoScenes);
 		await resolveProviderVideoPrompt(ctx, {
-			runId: args.runId,
+			planId: args.planId,
 			fullPrompt,
-			maxPromptChars: budget.maxPromptChars,
-			cachedSummary: run.summarizedVideoPrompt,
-			cachedHash: run.videoPromptSourceHash,
-			persist: true,
+			maxPromptChars: plan.lastModelParamsUsed.maxPromptChars,
+			cachedSummary: plan.summarizedVideoPrompt,
+			cachedHash: plan.videoPromptSourceHash,
 		});
 		return null;
 	},
 });
 
-export const generateNextCompositionClip = internalAction({
+// ── Model studio (direct-to-API) ────────────────────────────────────────
+
+export const generateModelStudioImage = action({
 	args: {
-		jobId: v.id("compositionJobs"),
+		runId: v.id("modelStudioRuns"),
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
-		const claimed = await ctx.runMutation(
-			internal.studio.internal.claimNextCompositionClip,
-			{ jobId: args.jobId },
-		);
-		if (!claimed) {
-			return null;
+		await requireAdmin(ctx);
+		const run = (await ctx.runQuery(
+			internal.studio.queries.getModelStudioRunDoc,
+			{ runId: args.runId },
+		)) as Doc<"modelStudioRuns"> | null;
+		if (!run) {
+			throw new Error("Run not found.");
+		}
+		const imagePrompt =
+			run.prompt?.trim() || run.videoParams?.prompt?.trim() || "";
+		if (!imagePrompt) {
+			throw new Error("A prompt is required before generating an image.");
 		}
 
-		const { job, clip, previousTerminalFrameObjectKey } = claimed as {
-			job: {
-				runId: Id<"generationRuns">;
-				mode: "continuation" | "cut-scenes";
-				clipCount: number;
-				videoParams: {
-					modelId: string;
-					aspectRatio: string;
-					resolution: string;
-					durationSeconds: number;
-					generateAudio?: boolean;
-					negativePrompt?: string;
-					cfgScale?: number;
-				};
-			};
-			clip: {
-				_id: Id<"compositionClips">;
-				clipIndex: number;
-				scenePrompt: string;
-			};
-			previousTerminalFrameObjectKey?: string;
-		};
-		let generatedObjectKey: string | undefined;
+		const imageConfig = imageConfigSchema.parse({
+			size: run.imageSize ?? "1024x1536",
+			quality: run.imageQuality ?? "medium",
+		});
+
+		await ctx.runMutation(internal.studio.internal.setModelStudioStatus, {
+			runId: args.runId,
+			status: "generating",
+		});
+
 		try {
-			if (!isVideoModelId(job.videoParams.modelId)) {
-				throw new Error("Composition uses an unsupported video model.");
-			}
-			const run = await ctx.runQuery(internal.studio.queries.getRunDoc, {
-				runId: job.runId,
+			const openai = getOpenAIProvider();
+			const result = await generateImage({
+				model: openai.image("gpt-image-2"),
+				prompt: withImageStyleSafety(imagePrompt),
+				size: imageConfig.size as ImageConfig["size"],
+				providerOptions: {
+					openai: {
+						quality: imageConfig.quality,
+					},
+				},
 			});
-			if (!run) {
-				throw new Error("Composition run was not found.");
-			}
-			const profile = MODEL_CAPABILITY_PROFILES[job.videoParams.modelId];
-			const referenceWarnings: string[] = [];
-			let firstFrameUrl: string | null = null;
-			const referenceUrls: string[] = [];
 
-			const explicitReferenceObjectKey =
-				clip.clipIndex === 0
-					? (run.images ?? []).find(
-							(image: { id: string; objectKey: string }) =>
-								image.id === run.firstFrameImageId,
-						)?.objectKey
-					: undefined;
-			if (explicitReferenceObjectKey) {
-				firstFrameUrl = await signedReadUrl(explicitReferenceObjectKey);
-			}
-
-			if (previousTerminalFrameObjectKey) {
-				const terminalFrameUrl = await signedReadUrl(
-					previousTerminalFrameObjectKey,
-				);
-				if (terminalFrameUrl) {
-					if (profile.supportsFirstFrame) {
-						firstFrameUrl = terminalFrameUrl;
-					} else if (profile.supportsInputReferences) {
-						referenceUrls.push(terminalFrameUrl);
-					} else {
-						referenceWarnings.push(
-							"Previous terminal frame could not be sent because this model does not support image references; continuing from the scene prompt only.",
-						);
-					}
-				} else {
-					referenceWarnings.push(
-						"Previous terminal frame was unavailable; continuing from the scene prompt only.",
-					);
-				}
-			} else if (clip.clipIndex > 0 && job.mode === "continuation") {
-				referenceWarnings.push(
-					"Previous terminal frame is unavailable; continuing from the scene prompt only.",
-				);
-			}
-
-			const adapted = adaptOpenRouterVideoRequest({
-				params: videoParamsSchema.parse({
-					...job.videoParams,
-					prompt: clip.scenePrompt,
-				}),
-				fallbackPrompt: clip.scenePrompt,
-				firstFrameUrl,
-				referenceUrls,
+			const image = result.image;
+			const objectKey = await storeBytes({
+				kind: "images",
+				bytes: image.uint8Array,
+				mimeType: image.mediaType,
 			});
+			const [width, height] = imageConfig.size.split("x").map(Number);
+			const warnings = warningMessages(result.warnings ?? []);
+			const openaiMeta = result.providerMetadata?.openai as
+				| { revisedPrompt?: string }
+				| undefined;
+
+			await ctx.runMutation(internal.studio.internal.insertGalleryImage, {
+				modelStudioRunId: args.runId,
+				objectKey,
+				meta: {
+					mimeType: image.mediaType,
+					width,
+					height,
+					bytes: image.uint8Array.byteLength,
+				},
+				source: "generated",
+				revisedImagePrompt: openaiMeta?.revisedPrompt,
+				setAsFirstFrame: false,
+				warnings: warnings.length > 0 ? warnings : undefined,
+			});
+			await ctx.runMutation(internal.studio.internal.setModelStudioStatus, {
+				runId: args.runId,
+				status: "draft",
+			});
+		} catch (error) {
+			const message =
+				error instanceof Error ? error.message : "Image generation failed.";
+			await ctx.runMutation(internal.studio.internal.setModelStudioStatus, {
+				runId: args.runId,
+				status: "failed",
+				lastError: message,
+			});
+			throw error;
+		}
+
+		return null;
+	},
+});
+
+export const generateModelStudioVideo = action({
+	args: {
+		runId: v.id("modelStudioRuns"),
+	},
+	returns: v.null(),
+	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
+		const run = (await ctx.runQuery(
+			internal.studio.queries.getModelStudioRunDoc,
+			{ runId: args.runId },
+		)) as Doc<"modelStudioRuns"> | null;
+		if (!run) {
+			throw new Error("Run not found.");
+		}
+		const modelId = run.selectedModelId ?? run.videoParams?.modelId;
+		if (!modelId || !isVideoModelId(modelId)) {
+			throw new Error("Select a supported video model.");
+		}
+		const prompt =
+			run.prompt?.trim() || run.videoParams?.prompt?.trim() || "";
+		if (!prompt) {
+			throw new Error("A video prompt is required before generating.");
+		}
+		const profile = MODEL_CAPABILITY_PROFILES[modelId];
+
+		type RefImage = {
+			id: string;
+			objectKey: string;
+		};
+		const images = ((await ctx.runQuery(
+			internal.studio.queries.listModelStudioRunImages,
+			{ runId: args.runId },
+		)) ?? []) as RefImage[];
+		const first = images.find((image) => image.id === run.firstFrameImageId);
+		const last = images.find((image) => image.id === run.lastFrameImageId);
+		const extraIds = (run.extraReferenceImageIds ?? []) as string[];
+		const imagesById = new Map(images.map((image) => [image.id, image]));
+		const extras = extraIds
+			.filter((id) => id !== first?.id && id !== last?.id)
+			.map((id) => imagesById.get(id))
+			.filter((image): image is RefImage => Boolean(image));
+
+		if (profile.requiresFirstFrame && !first) {
+			throw new Error("This model requires a first-frame reference image.");
+		}
+
+		const parsedParams = videoParamsSchema.parse({
+			...(run.videoParams ?? {}),
+			modelId,
+			prompt,
+		});
+
+		const firstUrl = first ? await signedReadUrl(first.objectKey) : null;
+		const lastUrl = last ? await signedReadUrl(last.objectKey) : null;
+		const referenceUrls = await Promise.all(
+			extras.map(async (image) => signedReadUrl(image.objectKey)),
+		);
+
+		const adapted = adaptOpenRouterVideoRequest({
+			params: parsedParams,
+			fallbackPrompt: prompt,
+			firstFrameUrl: firstUrl,
+			lastFrameUrl: lastUrl,
+			referenceUrls,
+		});
+
+		await ctx.runMutation(internal.studio.internal.setModelStudioStatus, {
+			runId: args.runId,
+			status: "generating",
+		});
+
+		try {
 			const apiKey = getOpenRouterApiKey();
 			const submitted = await submitOpenRouterVideoJob(apiKey, adapted.body);
 			const completed = await waitForOpenRouterVideoJob(apiKey, submitted, {
-				intervalMs: 8_000,
+				intervalMs: 8000,
 				timeoutMs: 540_000,
 			});
 			const downloaded = await downloadOpenRouterVideo(apiKey, completed);
@@ -890,57 +835,121 @@ export const generateNextCompositionClip = internalAction({
 				bytes: downloaded.bytes,
 				mimeType: downloaded.mimeType,
 			});
-			generatedObjectKey = objectKey;
-			// Continuation mid-clips pause for browser-side FFmpeg frame extraction.
-			// Next clip generation resumes only after the client uploads the frame.
-			const awaitTerminalFrame =
-				clip.clipIndex < job.clipCount - 1 && job.mode === "continuation";
-			const warnings = [
-				...adapted.warnings,
-				...referenceWarnings,
-			];
-			await ctx.runMutation(internal.studio.internal.completeCompositionClip, {
-				jobId: args.jobId,
-				clipId: clip._id,
-				video: {
-					objectKey,
-					meta: {
-						mimeType: downloaded.mimeType,
-						durationSeconds: adapted.body.duration,
-						bytes: downloaded.bytes.byteLength,
+
+			const videoId = await ctx.runMutation(
+				internal.studio.internal.insertGalleryVideo,
+				{
+					modelStudioRunId: args.runId,
+					video: {
+						objectKey,
+						meta: {
+							mimeType: downloaded.mimeType,
+							durationSeconds: adapted.body.duration,
+							bytes: downloaded.bytes.byteLength,
+						},
+						openRouterJobId: completed.id,
+						openRouterGenerationId: completed.generation_id,
+						actualCostUsd:
+							typeof completed.usage?.cost === "number"
+								? completed.usage.cost
+								: undefined,
+						videoParams: parsedParams,
+						videoPrompt: adapted.body.prompt,
+						warnings:
+							adapted.warnings.length > 0 ? adapted.warnings : undefined,
+						createdAt: Date.now(),
 					},
-					openRouterJobId: completed.id,
-					openRouterGenerationId: completed.generation_id,
-					actualCostUsd:
-						typeof completed.usage?.cost === "number"
-							? completed.usage.cost
-							: undefined,
-					videoParams: videoParamsSchema.parse({
-						...job.videoParams,
-						prompt: adapted.body.prompt,
-					}),
-					videoPrompt: adapted.body.prompt,
-					warnings: warnings.length > 0 ? warnings : undefined,
-					createdAt: Date.now(),
+					warnings:
+						adapted.warnings.length > 0 ? adapted.warnings : undefined,
 				},
-				warnings: warnings.length > 0 ? warnings : undefined,
-				awaitTerminalFrame,
-			});
-			generatedObjectKey = undefined;
+			);
+			void videoId;
 		} catch (error) {
-			if (generatedObjectKey) {
-				await deleteR2Objects([generatedObjectKey]);
-			}
-			await ctx.runMutation(internal.studio.internal.failCompositionClip, {
-				jobId: args.jobId,
-				clipId: clip._id,
-				message:
-					error instanceof Error
-						? error.message
-						: "Composition clip generation failed.",
+			const message =
+				error instanceof Error ? error.message : "Video generation failed.";
+			await ctx.runMutation(internal.studio.internal.setModelStudioStatus, {
+				runId: args.runId,
+				status: "failed",
+				lastError: message,
 			});
+			throw error;
 		}
+
 		return null;
+	},
+});
+
+// ── Model studio titles ─────────────────────────────────────────────────
+
+async function modelStudioTitleGeneration(
+	ctx: ActionCtx,
+	args: { runId: Id<"modelStudioRuns">; force?: boolean },
+): Promise<string> {
+	const run: Doc<"modelStudioRuns"> | null = await ctx.runQuery(
+		internal.studio.queries.getModelStudioRunDoc,
+		{ runId: args.runId },
+	);
+	if (!run) {
+		throw new Error("Run not found.");
+	}
+	if (!args.force && run.title?.trim()) {
+		return run.title;
+	}
+
+	const prompt = (run.prompt as string | undefined)?.trim();
+	const modelId = run.selectedModelId;
+	const modelLabel =
+		modelId && isVideoModelId(modelId)
+			? MODEL_CAPABILITY_PROFILES[modelId as VideoModelId].displayName
+			: null;
+	const fallback = modelLabel ?? "Model Run";
+
+	const context = prompt ? `Video prompt: ${prompt.slice(0, 600)}` : "";
+	if (!context.trim()) {
+		return fallback;
+	}
+
+	try {
+		const result = await generateText({
+			model: getOpenRouterProvider()(TITLE_MODEL_ID),
+			reasoning: "none",
+			instructions:
+				"You write short, clear titles for video-generation runs (under 60 characters). No quotes, emoji, hashtags, or trailing punctuation.",
+			prompt: `Write a short title for this run.\n\n${context}`,
+		});
+		const title =
+			result.text.replace(/^["'`\s]+|["'`\s]+$/g, "").trim().slice(0, 90) ||
+			fallback;
+		await ctx.runMutation(internal.studio.internal.setModelStudioTitle, {
+			runId: args.runId,
+			title,
+		});
+		return title;
+	} catch {
+		return fallback;
+	}
+}
+
+export const generateModelStudioTitle = action({
+	args: {
+		runId: v.id("modelStudioRuns"),
+		force: v.optional(v.boolean()),
+	},
+	returns: v.string(),
+	handler: async (ctx, args): Promise<string> => {
+		await requireAdmin(ctx);
+		return await modelStudioTitleGeneration(ctx, args);
+	},
+});
+
+export const generateModelStudioTitleScheduled = internalAction({
+	args: {
+		runId: v.id("modelStudioRuns"),
+		force: v.optional(v.boolean()),
+	},
+	returns: v.string(),
+	handler: async (ctx, args): Promise<string> => {
+		return await modelStudioTitleGeneration(ctx, args);
 	},
 });
 
@@ -976,11 +985,10 @@ async function runTitleGeneration(
 	ctx: ActionCtx,
 	args: { runId: Id<"generationRuns">; force?: boolean },
 ): Promise<string> {
-	const run: Doc<"generationRuns"> & {
-		activePlan?: { videoScenes?: Array<{ intent?: string }> } | null;
-	} | null = await ctx.runQuery(internal.studio.queries.getRunDoc, {
-		runId: args.runId,
-	});
+	const run: Doc<"generationRuns"> | null = await ctx.runQuery(
+		internal.studio.queries.getRunDoc,
+		{ runId: args.runId },
+	);
 	if (!run) {
 		throw new Error("Run not found.");
 	}
@@ -991,26 +999,9 @@ async function runTitleGeneration(
 	}
 
 	const shloka = (run.shlokaText as string | undefined)?.trim();
-	const videoBrief =
-		(run.videoPrompt as string | undefined)?.trim() ||
-		(run.videoParams?.prompt as string | undefined)?.trim();
-	const modelLabel = isVideoModelId(run.selectedModelId ?? "")
-		? MODEL_CAPABILITY_PROFILES[run.selectedModelId as VideoModelId].displayName
-		: null;
-	const provenanceLabel =
-		run.provenance === "model-studio" ? "Model Run" : "Shloka Run";
-	const fallback = modelLabel ?? provenanceLabel;
+	const fallback = "Shloka Run";
 
-	const sceneIntents = (run.activePlan?.videoScenes ?? [])
-		.map((scene) => scene.intent)
-		.filter(Boolean)
-		.slice(0, 4)
-		.join(", ");
-	const context = shloka
-		? `Shloka: ${shloka.slice(0, 600)}`
-		: videoBrief
-			? `Video brief: ${videoBrief.slice(0, 600)}`
-			: sceneIntents;
+	const context = shloka ? `Shloka: ${shloka.slice(0, 600)}` : "";
 	if (!context.trim()) {
 		// Nothing to summarize yet — leave the title null (UI shows a neutral
 		// fallback) so the real generation can happen once content exists.

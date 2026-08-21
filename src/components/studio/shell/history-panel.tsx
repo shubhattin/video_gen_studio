@@ -1,7 +1,7 @@
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { Link } from "@tanstack/react-router";
-import { useAction, useMutation, useQuery } from "convex/react";
+import { useAction, useConvexAuth, useMutation, useQuery } from "convex/react";
 import { formatDistanceToNow } from "date-fns";
 import {
 	Clapperboard,
@@ -57,41 +57,60 @@ import {
 import { cn } from "#/lib/utils";
 
 type HistoryRun = {
-	_id: Id<"generationRuns">;
-	provenance: "shloka" | "model-studio" | string;
+	_id: Id<"generationRuns"> | Id<"modelStudioRuns">;
+	kind: "shloka" | "model-studio";
 	status: string;
 	title?: string;
-	shlokaText?: string;
+	subtitle?: string;
 	selectedModelId?: string;
 	createdAt: number;
-	videos?: Array<{ url?: string | null }>;
+	videoCount?: number;
 };
 
 type HistoryPanelProps = {
-	selectedRunId?: Id<"generationRuns"> | null;
-	onDeleted?: (runId: Id<"generationRuns">) => void;
+	selectedRunId?: Id<"generationRuns"> | Id<"modelStudioRuns"> | null;
+	onDeleted?: (runId: Id<"generationRuns"> | Id<"modelStudioRuns">) => void;
 };
 
-function pathForProvenance(provenance: string): "/" | "/studio" {
-	return provenance === "model-studio" ? "/studio" : "/";
-}
-
-function isShlokaRun(provenance: string) {
-	return provenance !== "model-studio";
+function pathForKind(kind: string): "/" | "/studio" {
+	return kind === "model-studio" ? "/studio" : "/";
 }
 
 export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
-	const runs = useQuery(api.studio.queries.listRecentRuns, { limit: 24 });
+	const { isAuthenticated } = useConvexAuth();
+	// Single unified feed — subscribe only once auth is ready so the admin
+	// query never fires without a JWT and dies with an auth error.
+	const runs = useQuery(
+		api.studio.queries.listRecentActivity,
+		isAuthenticated ? { limit: 24 } : "skip",
+	);
 	const deleteRun = useMutation(api.studio.mutations.deleteRun);
+	const deleteModelStudioRun = useMutation(
+		api.studio.mutations.deleteModelStudioRun,
+	);
 	const renameRun = useMutation(api.studio.mutations.renameRun);
+	const renameModelStudioRun = useMutation(
+		api.studio.mutations.renameModelStudioRun,
+	);
 	const generateRunTitle = useAction(api.studio.actions.generateRunTitle);
-	const [pendingDeleteId, setPendingDeleteId] =
-		useState<Id<"generationRuns"> | null>(null);
+	const generateModelStudioTitle = useAction(
+		api.studio.actions.generateModelStudioTitle,
+	);
+	const [pendingDeleteId, setPendingDeleteId] = useState<
+		Id<"generationRuns"> | Id<"modelStudioRuns"> | null
+	>(null);
+	const [pendingDeleteKind, setPendingDeleteKind] = useState<
+		"shloka" | "model-studio" | null
+	>(null);
 	const [deleting, setDeleting] = useState(false);
 	const [deleteMedia, setDeleteMedia] = useState(false);
+	const pendingShlokaDeleteId =
+		pendingDeleteId != null && pendingDeleteKind === "shloka"
+			? (pendingDeleteId as Id<"generationRuns">)
+			: null;
 	const deleteMediaCounts = useQuery(
 		api.studio.queries.getRunMediaCounts,
-		pendingDeleteId ? { runId: pendingDeleteId } : "skip",
+		pendingShlokaDeleteId ? { runId: pendingShlokaDeleteId } : "skip",
 	);
 	const [renameTarget, setRenameTarget] = useState<HistoryRun | null>(null);
 	const [renameValue, setRenameValue] = useState("");
@@ -102,17 +121,25 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 	const historyRuns = runs as HistoryRun[] | undefined;
 
 	const confirmDelete = async () => {
-		if (!pendingDeleteId) {
+		if (!pendingDeleteId || !pendingDeleteKind) {
 			return;
 		}
 		setDeleting(true);
 		try {
-			await deleteRun({
-				runId: pendingDeleteId,
-				deleteMedia,
-			});
+			if (pendingDeleteKind === "shloka") {
+				await deleteRun({
+					runId: pendingDeleteId as Id<"generationRuns">,
+					deleteMedia,
+				});
+			} else {
+				await deleteModelStudioRun({
+					runId: pendingDeleteId as Id<"modelStudioRuns">,
+					deleteMedia,
+				});
+			}
 			onDeleted?.(pendingDeleteId);
 			setPendingDeleteId(null);
+			setPendingDeleteKind(null);
 		} finally {
 			setDeleting(false);
 		}
@@ -129,17 +156,40 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 		}
 		setRenaming(true);
 		try {
-			await renameRun({ runId: renameTarget._id, title: renameValue });
+			if (renameTarget.kind === "shloka") {
+				await renameRun({
+					runId: renameTarget._id as Id<"generationRuns">,
+					title: renameValue,
+				});
+			} else {
+				await renameModelStudioRun({
+					runId: renameTarget._id as Id<"modelStudioRuns">,
+					title: renameValue,
+				});
+			}
 			setRenameTarget(null);
 		} finally {
 			setRenaming(false);
 		}
 	};
 
-	const regenerateTitle = async (runId: Id<"generationRuns">) => {
-		setRegeneratingId(runId);
+	const regenerateTitle = async (
+		runId: Id<"generationRuns"> | Id<"modelStudioRuns">,
+		kind: "shloka" | "model-studio",
+	) => {
+		setRegeneratingId(runId as Id<"generationRuns">);
 		try {
-			await generateRunTitle({ runId, force: true });
+			if (kind === "model-studio") {
+				await generateModelStudioTitle({
+					runId: runId as Id<"modelStudioRuns">,
+					force: true,
+				});
+			} else {
+				await generateRunTitle({
+					runId: runId as Id<"generationRuns">,
+					force: true,
+				});
+			}
 		} finally {
 			setRegeneratingId(null);
 		}
@@ -154,14 +204,16 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 			) : (
 				<SidebarMenu className="gap-1">
 					{historyRuns.map((run) => {
-						const shloka = isShlokaRun(run.provenance);
-						const to = pathForProvenance(run.provenance);
+						const shloka = run.kind === "shloka";
+						const to = pathForKind(run.kind);
 						const title =
-							run.title?.trim() || (shloka ? "Shloka Run" : "Model Run");
+							run.title?.trim() ||
+							run.subtitle?.trim() ||
+							(shloka ? "Shloka Run" : "Model Run");
 						const meta = [
 							formatDistanceToNow(run.createdAt, { addSuffix: true }),
-							run.videos?.length
-								? `${run.videos.length} video${run.videos.length === 1 ? "" : "s"}`
+							run.videoCount
+								? `${run.videoCount} video${run.videoCount === 1 ? "" : "s"}`
 								: null,
 						]
 							.filter(Boolean)
@@ -240,7 +292,7 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 										<DropdownMenuItem
 											className="gap-2"
 											disabled={regeneratingId === run._id}
-											onClick={() => void regenerateTitle(run._id)}
+											onClick={() => void regenerateTitle(run._id, run.kind)}
 										>
 											<RefreshCw
 												className={
@@ -257,6 +309,7 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 											className="gap-2"
 											onClick={() => {
 												setDeleteMedia(false);
+												setPendingDeleteKind(run.kind);
 												setPendingDeleteId(run._id);
 											}}
 										>
@@ -276,6 +329,7 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 				onOpenChange={(open) => {
 					if (!open) {
 						setPendingDeleteId(null);
+						setPendingDeleteKind(null);
 					}
 				}}
 			>

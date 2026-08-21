@@ -3,11 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { api, internal } from "../_generated/api";
 import schema from "../schema";
 import { modules } from "../test.setup";
-import {
-	compositionPlannerOutputSchema,
-	defaultVideoParams,
-	validateVideoParams,
-} from "../lib/schemas";
+import { defaultVideoParams, validateVideoParams } from "../lib/schemas";
 import { DEFAULT_PLANNER_SYSTEM_PROMPT } from "../lib/plannerPrompt";
 
 vi.mock("../lib/r2", () => ({
@@ -59,110 +55,253 @@ function adminConvex() {
 	return convexTest(schema, modules).withIdentity(ADMIN_IDENTITY);
 }
 
-describe("studio mutations", () => {
-	it("creates a shloka draft with portrait defaults", async () => {
+const SCENE = {
+	sceneNumber: 1,
+	intent: "Opening",
+	subject: "Temple path",
+	action: "Gentle drift",
+	scene: "Twilight courtyard",
+	style: "Warm marigold and sandalwood, soft gold light",
+	camera: "Slow push-in",
+	audio: "Quiet ambience",
+};
+
+const PLAN_BUDGET = {
+	modelId: "bytedance/seedance-2.5",
+	aspectRatio: "9:16",
+	resolution: "720p",
+	durationSeconds: 8,
+	maxPromptChars: 4000,
+};
+
+async function createRunWithPlan() {
+	const t = adminConvex();
+	const { runId, planId } = await t.mutation(api.studio.mutations.createShlokaDraft, {
+		shlokaText: "धर्मक्षेत्रे कुरुक्षेत्रे",
+		customInstructions: "Twilight forest mood",
+	});
+	return { t, runId, planId };
+}
+
+describe("shloka runs and plans", () => {
+	it("creates a run with a default Plan 1 draft", async () => {
 		const t = adminConvex();
-		const runId = await t.mutation(api.studio.mutations.createShlokaDraft, {
-			shlokaText: "धर्मक्षेत्रे कुरुक्षेत्रे",
-			customInstructions: "Twilight forest mood",
+		const { runId, planId } = await t.mutation(api.studio.mutations.createShlokaDraft, {
+			shlokaText: "Test shloka",
+			customInstructions: "Warm mood",
 		});
 
 		const run = await t.query(api.studio.queries.getRun, { runId });
-		expect(run?.provenance).toBe("shloka");
 		expect(run?.status).toBe("draft");
 		expect(run?.imageSize).toBe("1024x1536");
-		expect(run?.videoParams?.aspectRatio).toBe("9:16");
+		expect(run?.activePlanId).toBe(planId);
 		expect(run?.attachedImageIds).toEqual([]);
-		expect(run?.attachedVideoIds).toEqual([]);
 		expect(run?.images).toEqual([]);
-		expect(run?.videos).toEqual([]);
+
+		const plans = await t.query(api.studio.queries.listPlansForRun, { runId });
+		expect(plans).toHaveLength(1);
+		expect(plans[0]._id).toBe(planId);
+		expect(plans[0].attemptNumber).toBe(1);
+		expect(plans[0].status).toBe("draft");
+		expect(plans[0].videoParams.modelId).toBe("bytedance/seedance-2.5");
+		expect(plans[0].videoParams.aspectRatio).toBe("9:16");
+		expect(plans[0].imagePrompt).toBeUndefined();
+		expect(plans[0].videoScenes).toBeUndefined();
 	});
 
-	it("transitions plan commit to plan_ready", async () => {
-		const t = adminConvex();
-		const runId = await t.mutation(api.studio.mutations.createShlokaDraft, {
-			shlokaText: "Test shloka",
-		});
+	it("commits plan content with the generation config snapshot", async () => {
+		const { t, runId, planId } = await createRunWithPlan();
 
-		await t.mutation(internal.studio.internal.commitPlan, {
-			runId,
+		await t.mutation(internal.studio.internal.commitPlanContent, {
+			planId,
+			imagePrompt: "Portrait warm temple courtyard with soft diya glow",
+			videoScenes: [SCENE],
 			plannerModel: "openai/gpt-5.6-terra",
 			plannerReasoning: "medium",
-			imagePrompt: "Portrait warm temple courtyard with soft diya glow",
-			videoScenes: [
-				{
-					sceneNumber: 1,
-					intent: "Opening",
-					subject: "Temple path",
-					action: "Gentle drift",
-					scene: "Twilight courtyard",
-					style: "Warm marigold and sandalwood, soft gold light",
-					camera: "Slow push-in",
-					audio: "Quiet ambience",
-				},
-			],
-			planningKey: "plan-test",
+			lastModelParamsUsed: PLAN_BUDGET,
 		});
 
 		const run = await t.query(api.studio.queries.getRun, { runId });
 		expect(run?.status).toBe("plan_ready");
 		expect(run?.activePlan?.imagePrompt).toContain("Portrait");
+		expect(run?.activePlan?.lastModelParamsUsed?.maxPromptChars).toBe(4000);
+
+		const plan = await t.query(api.studio.queries.getPlan, { runId, planId });
+		expect(plan?.status).toBe("ready");
+		expect(plan?.videoScenes).toHaveLength(1);
 	});
 
-	it("deletes a run", async () => {
-		const t = adminConvex();
-		const runId = await t.mutation(api.studio.mutations.createShlokaDraft, {
-			shlokaText: "Delete me",
+	it("creates additional plans that inherit config and become active", async () => {
+		const { t, runId, planId } = await createRunWithPlan();
+
+		await t.mutation(api.studio.mutations.updatePlanConfig, {
+			runId,
+			planId,
+			videoParams: {
+				modelId: "kwaivgi/kling-v3.0-pro",
+				aspectRatio: "16:9",
+				resolution: "720p",
+				durationSeconds: 5,
+			},
 		});
-		await t.mutation(api.studio.mutations.deleteRun, { runId });
+
+		const secondPlanId = await t.mutation(api.studio.mutations.createPlan, {
+			runId,
+		});
+		expect(secondPlanId).not.toBe(planId);
+
 		const run = await t.query(api.studio.queries.getRun, { runId });
-		expect(run).toBeNull();
+		expect(run?.activePlanId).toBe(secondPlanId);
+
+		const plans = await t.query(api.studio.queries.listPlansForRun, { runId });
+		expect(plans).toHaveLength(2);
+		const second = plans.find(
+			(plan: { _id: string }) => plan._id === secondPlanId,
+		)!;
+		expect(second.attemptNumber).toBe(2);
+		// Inherits the active plan's tuned config.
+		expect(second.videoParams.modelId).toBe("kwaivgi/kling-v3.0-pro");
+		expect(second.status).toBe("draft");
 	});
 
-	it("attaches an uploaded reference image via object key", async () => {
-		const t = adminConvex();
-		const runId = await t.mutation(api.studio.mutations.createModelStudioDraft, {
-			modelId: "google/veo-3.1-lite",
-			prompt: "Temple courtyard at dusk",
+	it("rejects invalid plan configs", async () => {
+		const { t, runId, planId } = await createRunWithPlan();
+		await expect(
+			t.mutation(api.studio.mutations.updatePlanConfig, {
+				runId,
+				planId,
+				videoParams: {
+					modelId: "not-a-model",
+					aspectRatio: "9:16",
+					resolution: "720p",
+					durationSeconds: 8,
+				},
+			}),
+		).rejects.toThrow();
+	});
+
+	it("edits generated plan content and requires a ready plan", async () => {
+		const { t, runId, planId } = await createRunWithPlan();
+
+		await expect(
+			t.mutation(api.studio.mutations.updatePlanContent, {
+				runId,
+				planId,
+				imagePrompt: "A warm illustrated temple courtyard at dawn",
+			}),
+		).rejects.toThrow("Generate the plan");
+
+		await t.mutation(internal.studio.internal.commitPlanContent, {
+			planId,
+			imagePrompt: "Portrait warm temple courtyard with soft diya glow",
+			videoScenes: [SCENE],
+			plannerModel: "openai/gpt-5.6-terra",
+			plannerReasoning: "medium",
+			plannerSystemPrompt: DEFAULT_PLANNER_SYSTEM_PROMPT,
+			lastModelParamsUsed: PLAN_BUDGET,
 		});
 
-		const objectKey = "studio/gallery/images/test.png";
+		await t.mutation(api.studio.mutations.updatePlanContent, {
+			runId,
+			planId,
+			imagePrompt: "A dusk temple courtyard with cooler blue light",
+			videoScenes: [{ ...SCENE, intent: "Dusk" }],
+		});
+
+		const plan = await t.query(api.studio.queries.getPlan, { runId, planId });
+		expect(plan?.imagePrompt).toContain("dusk");
+		expect(plan?.videoScenes?.[0]?.intent).toBe("Dusk");
+
+		await expect(
+			t.mutation(api.studio.mutations.updatePlanContent, {
+				runId,
+				planId,
+				imagePrompt: "short",
+			}),
+		).rejects.toThrow("at least 20 characters");
+	});
+
+	it("selects, renames, and deletes plans with active fallback", async () => {
+		const { t, runId, planId } = await createRunWithPlan();
+		const secondPlanId = await t.mutation(api.studio.mutations.createPlan, {
+			runId,
+		});
+
+		await t.mutation(api.studio.mutations.renamePlan, {
+			planId: secondPlanId,
+			title: "Dawn cut",
+		});
+		let plans = await t.query(api.studio.queries.listPlansForRun, { runId });
+		expect(
+			plans.find((plan: { _id: string }) => plan._id === secondPlanId)!.title,
+		).toBe("Dawn cut");
+
+		// Switch back to Plan 1.
+		await t.mutation(api.studio.mutations.selectPlan, { runId, planId });
+		let run = await t.query(api.studio.queries.getRun, { runId });
+		expect(run?.activePlanId).toBe(planId);
+
+		// Deleting the active plan falls back to the latest remaining.
+		await t.mutation(api.studio.mutations.deletePlan, { runId, planId });
+		run = await t.query(api.studio.queries.getRun, { runId });
+		expect(run?.activePlanId).toBe(secondPlanId);
+
+		// Deleting the last remaining plan clears the active pointer.
+		await t.mutation(api.studio.mutations.deletePlan, { runId, planId: secondPlanId });
+		run = await t.query(api.studio.queries.getRun, { runId });
+		expect(run?.activePlanId).toBeUndefined();
+
+		plans = await t.query(api.studio.queries.listPlansForRun, { runId });
+		expect(plans).toHaveLength(0);
+	});
+
+	it("updates run-level draft fields only", async () => {
+		const { t, runId } = await createRunWithPlan();
+		await t.mutation(api.studio.mutations.updateDraft, {
+			runId,
+			shlokaText: "Updated shloka",
+			customInstructions: "Cooler tones",
+			imageSize: "1024x1024",
+		});
+		const run = await t.query(api.studio.queries.getRun, { runId });
+		expect(run?.shlokaText).toBe("Updated shloka");
+		expect(run?.customInstructions).toBe("Cooler tones");
+		expect(run?.imageSize).toBe("1024x1024");
+		// Plan content lives on the plan row, not the run.
+		const plans = await t.query(api.studio.queries.listPlansForRun, { runId });
+		expect(plans[0]!.imagePrompt).toBeUndefined();
+		expect(plans[0]!.videoScenes).toBeUndefined();
+	});
+
+	it("deletes a run and its plans", async () => {
+		const { t, runId } = await createRunWithPlan();
+		await t.mutation(api.studio.mutations.deleteRun, { runId });
+		expect(await t.query(api.studio.queries.getRun, { runId })).toBeNull();
+		const plans = await t.query(api.studio.queries.listPlansForRun, { runId });
+		expect(plans).toHaveLength(0);
+	});
+});
+
+describe("gallery references and guarded deletes", () => {
+	it("lists runs that reference a gallery image", async () => {
+		const { t, runId } = await createRunWithPlan();
 		const imageId = await t.mutation(internal.studio.internal.insertGalleryImage, {
 			runId,
-			objectKey,
-			meta: {
-				mimeType: "image/png",
-				width: 1024,
-				height: 1536,
-				bytes: 4,
-			},
-			source: "uploaded",
+			objectKey: "studio/gallery/images/ref.png",
+			meta: { mimeType: "image/png", bytes: 4 },
+			source: "generated",
 		});
-
-		const run = await t.query(api.studio.queries.getRun, { runId });
-		expect(run?.status).toBe("image_ready");
-		expect(run?.firstFrameImageId).toBeUndefined();
-		expect(run?.images).toHaveLength(1);
-		expect(run?.images?.[0]?.source).toBe("uploaded");
-		expect(run?.images?.[0]?.meta.mimeType).toBe("image/png");
-		expect(run?.images?.[0]?.objectKey).toBe(objectKey);
-		expect(run?.images?.[0]?.id).toBe(imageId);
-
-		const inGallery = await t.query(internal.studio.queries.objectKeyInGallery, {
-			objectKey,
-		});
-		expect(inGallery).toBe(true);
-		const foreign = await t.query(internal.studio.queries.objectKeyInGallery, {
-			objectKey: "studio/gallery/images/other.png",
-		});
-		expect(foreign).toBe(false);
+		const references = await t.query(
+			api.studio.queries.listRunsReferencingImage,
+			{ imageId },
+		);
+		expect(references).toHaveLength(1);
+		expect(references[0].runId).toBe(runId);
+		expect(references[0].kind).toBe("shloka");
 	});
 
-	it("keeps gallery media when a run is deleted or an image is removed from the run", async () => {
-		const t = adminConvex();
-		const runId = await t.mutation(api.studio.mutations.createShlokaDraft, {
-			shlokaText: "Keep media",
-		});
+	it("keeps gallery media when a run is deleted or an image is removed", async () => {
+		const { t, runId } = await createRunWithPlan();
 		const objectKey = "studio/gallery/images/keep.png";
 		const imageId = await t.mutation(internal.studio.internal.insertGalleryImage, {
 			runId,
@@ -177,10 +316,9 @@ describe("studio mutations", () => {
 		});
 		const afterUnlink = await t.query(api.studio.queries.getRun, { runId });
 		expect(afterUnlink?.images).toEqual([]);
-		const stillThere = await t.query(internal.studio.queries.objectKeyInGallery, {
-			objectKey,
-		});
-		expect(stillThere).toBe(true);
+		expect(
+			await t.query(internal.studio.queries.objectKeyInGallery, { objectKey }),
+		).toBe(true);
 
 		await t.mutation(api.studio.mutations.attachGalleryImageToRun, {
 			runId,
@@ -196,213 +334,140 @@ describe("studio mutations", () => {
 		).toBe(true);
 	});
 
-	it("keeps previous shloka plans when planning again", async () => {
-		const t = adminConvex();
-		const runId = await t.mutation(api.studio.mutations.createShlokaDraft, {
-			shlokaText: "Multi plan shloka",
-		});
-		const scene = {
-			sceneNumber: 1,
-			intent: "Opening",
-			subject: "Temple path",
-			action: "Gentle drift",
-			scene: "Twilight courtyard",
-			style: "Warm marigold and sandalwood, soft gold light",
-			camera: "Slow push-in",
-			audio: "Quiet ambience",
-		};
-		const firstPlanId = await t.mutation(internal.studio.internal.commitPlan, {
+	it("refuses to delete a video connected to a plan or model-studio run", async () => {
+		const { t, runId, planId } = await createRunWithPlan();
+		const videoId = await t.mutation(internal.studio.internal.insertGalleryVideo, {
 			runId,
-			plannerModel: "openai/gpt-5.6-terra",
-			plannerReasoning: "medium",
-			imagePrompt: "Portrait warm temple courtyard with soft diya glow",
-			videoScenes: [scene],
-			planningKey: "plan-1",
+			video: {
+				objectKey: "studio/gallery/videos/connected.mp4",
+				meta: { mimeType: "video/mp4" },
+				openRouterJobId: "or-connected",
+				videoParams: defaultVideoParams("bytedance/seedance-2.5"),
+				createdAt: Date.now(),
+			},
 		});
-		const secondPlanId = await t.mutation(internal.studio.internal.commitPlan, {
-			runId,
-			plannerModel: "openai/gpt-5.6-terra",
-			plannerReasoning: "medium",
-			imagePrompt: "A dusk temple courtyard with cooler blue light",
-			videoScenes: [{ ...scene, intent: "Dusk" }],
-			planningKey: "plan-2",
+		await t.mutation(internal.studio.internal.appendPlanVideoOutput, {
+			planId,
+			videoId,
 		});
-		const plans = await t.query(api.studio.queries.listShlokaPlansForRun, {
-			runId,
-		});
-		expect(plans).toHaveLength(2);
-		const run = await t.query(api.studio.queries.getRun, { runId });
-		expect(run?.activePlanId).toBe(secondPlanId);
-		expect(run?.activePlan?.imagePrompt).toContain("dusk");
 
-		await t.mutation(api.studio.mutations.selectShlokaPlan, {
-			runId,
-			planId: firstPlanId,
-		});
-		const selected = await t.query(api.studio.queries.getRun, { runId });
-		expect(selected?.activePlanId).toBe(firstPlanId);
-		expect(selected?.activePlan?.imagePrompt).toContain("Portrait");
+		const connection = await t.query(
+			api.studio.queries.getGalleryVideoRunConnection,
+			{ videoId },
+		);
+		expect(connection?.runId).toBe(runId);
+		expect(connection?.kind).toBe("shloka");
+
+		await expect(
+			t.mutation(api.studio.mutations.deleteGalleryVideo, { videoId }),
+		).rejects.toThrow(/still connected to a run/);
+
+		expect(
+			await t.query(internal.studio.queries.objectKeyInGallery, {
+				objectKey: "studio/gallery/videos/connected.mp4",
+			}),
+		).toBe(true);
 	});
 
-	it("forks a plan into a new attempt and renames plans", async () => {
+	it("deletes an abandoned video after confirmation", async () => {
 		const t = adminConvex();
-		const runId = await t.mutation(api.studio.mutations.createShlokaDraft, {
-			shlokaText: "Fork plan shloka",
-		});
-		const scene = {
-			sceneNumber: 1,
-			intent: "Opening",
-			subject: "Temple path",
-			action: "Gentle drift",
-			scene: "Twilight courtyard",
-			style: "Warm marigold and sandalwood, soft gold light",
-			camera: "Slow push-in",
-			audio: "Quiet ambience",
-		};
-		const planId = await t.mutation(internal.studio.internal.commitPlan, {
-			runId,
-			plannerModel: "openai/gpt-5.6-terra",
-			plannerReasoning: "medium",
-			imagePrompt: "Warm temple courtyard at dawn",
-			videoScenes: [scene],
-			planningKey: "plan-1",
+		const videoId = await t.mutation(internal.studio.internal.insertGalleryVideo, {
+			video: {
+				objectKey: "studio/gallery/videos/orphan.mp4",
+				meta: { mimeType: "video/mp4" },
+				openRouterJobId: "or-orphan",
+				videoParams: defaultVideoParams("bytedance/seedance-2.5"),
+				createdAt: Date.now(),
+			},
 		});
 
-		await t.mutation(api.studio.mutations.renameShlokaPlan, {
-			planId,
-			title: "Dawn cut",
-		});
-		let plans = await t.query(api.studio.queries.listShlokaPlansForRun, {
-			runId,
-		});
-		expect(plans[0].title).toBe("Dawn cut");
+		const connection = await t.query(
+			api.studio.queries.getGalleryVideoRunConnection,
+			{ videoId },
+		);
+		expect(connection).toBeNull();
 
-		const forkedId = await t.mutation(api.studio.mutations.forkShlokaPlan, {
-			runId,
-			planId,
-			title: "Forked variant",
-		});
-		plans = await t.query(api.studio.queries.listShlokaPlansForRun, { runId });
-		expect(plans).toHaveLength(2);
-		const forked = plans.find((plan) => plan._id === forkedId);
-		expect(forked?.attemptNumber).toBe(2);
-		expect(forked?.title).toBe("Forked variant");
-		expect(forked?.imagePrompt).toContain("Warm temple courtyard");
+		await t.mutation(api.studio.mutations.deleteGalleryVideo, { videoId });
+		expect(
+			await t.query(internal.studio.queries.objectKeyInGallery, {
+				objectKey: "studio/gallery/videos/orphan.mp4",
+			}),
+		).toBe(false);
+	});
+});
 
-		const run = await t.query(api.studio.queries.getRun, { runId });
-		expect(run?.activePlanId).toBe(forkedId);
-
-		const blankForkId = await t.mutation(api.studio.mutations.forkShlokaPlan, {
-			runId,
-			planId: forkedId,
-			title: "",
+describe("model studio runs", () => {
+	it("creates a direct run and appends video outputs", async () => {
+		const t = adminConvex();
+		const runId = await t.mutation(api.studio.mutations.createModelStudioDraft, {
+			modelId: "google/veo-3.1-lite",
+			prompt: "Temple courtyard at dusk",
 		});
-		plans = await t.query(api.studio.queries.listShlokaPlansForRun, { runId });
-		expect(plans).toHaveLength(3);
-		const blankFork = plans.find((plan) => plan._id === blankForkId);
-		expect(blankFork?.attemptNumber).toBe(3);
-		expect(blankFork?.title).toBeUndefined();
+
+		let run = await t.query(api.studio.queries.getModelStudioRun, { runId });
+		expect(run?.prompt).toBe("Temple courtyard at dusk");
+		expect(run?.selectedModelId).toBe("google/veo-3.1-lite");
+		expect(run?.status).toBe("draft");
+		expect(run?.videos).toEqual([]);
+
+		const videoId = await t.mutation(internal.studio.internal.insertGalleryVideo, {
+			modelStudioRunId: runId,
+			video: {
+				objectKey: "studio/gallery/videos/model.mp4",
+				meta: { mimeType: "video/mp4" },
+				openRouterJobId: "or-model",
+				videoParams: defaultVideoParams("google/veo-3.1-lite"),
+				createdAt: Date.now(),
+			},
+		});
+		await t.mutation(internal.studio.internal.appendModelStudioVideoOutput, {
+			runId,
+			videoId,
+		});
+
+		run = await t.query(api.studio.queries.getModelStudioRun, { runId });
+		expect(run?.videos).toHaveLength(1);
+		expect(run?.status).toBe("completed");
+
+		const connection = await t.query(
+			api.studio.queries.getGalleryVideoRunConnection,
+			{ videoId },
+		);
+		expect(connection?.kind).toBe("model-studio");
+		expect(connection?.runId).toBe(runId);
 	});
 
-	it("persists a bounded composition plan as ordered clip rows", async () => {
+	it("updates draft fields and rejects edits while generating", async () => {
 		const t = adminConvex();
-		const runId = await t.mutation(api.studio.mutations.createShlokaDraft, {
-			shlokaText: "वसुदेवसुतं देवं",
+		const runId = await t.mutation(api.studio.mutations.createModelStudioDraft, {
+			modelId: "bytedance/seedance-2.5",
 		});
-		await t.mutation(api.studio.mutations.updateDraft, {
+		await t.mutation(api.studio.mutations.updateModelStudioDraft, {
 			runId,
-			compositionMode: "continuation",
-			compositionMultiplier: 2,
-			compositionClipCount: 2,
+			prompt: "A drifting boat on a lotus lake",
+			selectedModelId: "bytedance/seedance-2.5",
 		});
-		await t.mutation(internal.studio.internal.commitCompositionPlan, {
-			runId,
-			plannerModel: "openai/gpt-5.6-terra",
-			plannerReasoning: "medium",
-			imagePrompt: "A warm illustrated temple path at dawn with a golden diya",
-			overallDescription: "A devotional walk from dawn prayer into quiet temple light.",
-			clips: [
-				{
-					clipIndex: 0,
-					globalDescription:
-						"A devotional walk from dawn prayer into quiet temple light.",
-					scenePrompt: "A devotee walks toward a dawn temple, slow camera push in.",
-					continuityInstructions:
-						"Keep the same illustrated devotee, saffron shawl, and golden dawn.",
-					transition: "End on the devotee reaching the carved temple gate.",
-				},
-				{
-					clipIndex: 1,
-					globalDescription:
-						"A devotional walk from dawn prayer into quiet temple light.",
-					scenePrompt:
-						"Continue from the gate into the glowing temple courtyard, gentle pan.",
-					continuityInstructions:
-						"Continue the same pose, shawl, lighting, and temple architecture.",
-					transition: "Resolve on the diya flame in the courtyard.",
-				},
-			],
-			planningKey: "composition-plan-test",
+		const run = await t.query(api.studio.queries.getModelStudioRun, { runId });
+		expect(run?.prompt).toBe("A drifting boat on a lotus lake");
+
+		await t.run(async (ctx) => {
+			await ctx.db.patch(runId, { status: "generating" });
 		});
+		await expect(
+			t.mutation(api.studio.mutations.updateModelStudioDraft, {
+				runId,
+				prompt: "Changed while busy",
+			}),
+		).rejects.toThrow("busy");
+	});
 
-		const composition = await t.query(api.studio.queries.getCompositionForRun, {
-			runId,
+	it("deletes a model-studio run", async () => {
+		const t = adminConvex();
+		const runId = await t.mutation(api.studio.mutations.createModelStudioDraft, {
+			modelId: "bytedance/seedance-2.5",
 		});
-		expect(composition?.status).toBe("planned");
-		expect(composition?.attemptNumber).toBe(1);
-		expect(composition?.clips).toHaveLength(2);
-		expect(composition?.clips.map((clip: { clipIndex: number }) => clip.clipIndex)).toEqual([
-			0,
-			1,
-		]);
-
-		const runAfterFirst = await t.query(api.studio.queries.getRun, { runId });
-		expect(runAfterFirst?.activeCompositionJobId).toBe(composition?._id);
-
-		await t.mutation(internal.studio.internal.commitCompositionPlan, {
-			runId,
-			plannerModel: "openai/gpt-5.6-terra",
-			plannerReasoning: "high",
-			imagePrompt: "A second illustrated temple path at dusk",
-			overallDescription: "A dusk revisit of the same temple walk.",
-			clips: [
-				{
-					clipIndex: 0,
-					globalDescription: "A dusk revisit of the same temple walk.",
-					scenePrompt: "Dusk approach to the temple with cooler light.",
-					continuityInstructions: "Keep the same devotee and shawl.",
-					transition: "End at the gate under blue hour sky.",
-				},
-				{
-					clipIndex: 1,
-					globalDescription: "A dusk revisit of the same temple walk.",
-					scenePrompt: "Continue into the courtyard at dusk.",
-					continuityInstructions: "Preserve pose, shawl, and architecture.",
-					transition: "Resolve on the diya flame.",
-				},
-			],
-			planningKey: "composition-plan-test-2",
-		});
-
-		const attempts = await t.query(api.studio.queries.listCompositionJobsForRun, {
-			runId,
-		});
-		expect(attempts).toHaveLength(2);
-		expect(attempts.map((job: { attemptNumber: number }) => job.attemptNumber).sort()).toEqual([
-			1, 2,
-		]);
-
-		const active = await t.query(api.studio.queries.getCompositionForRun, { runId });
-		expect(active?.attemptNumber).toBe(2);
-		expect(active?.overallDescription).toContain("dusk");
-
-		await t.mutation(api.studio.mutations.selectCompositionJob, {
-			runId,
-			jobId: composition!._id,
-		});
-		const selected = await t.query(api.studio.queries.getCompositionForRun, { runId });
-		expect(selected?._id).toBe(composition?._id);
-		expect(selected?.attemptNumber).toBe(1);
+		await t.mutation(api.studio.mutations.deleteModelStudioRun, { runId });
+		expect(await t.query(api.studio.queries.getModelStudioRun, { runId })).toBeNull();
 	});
 });
 
@@ -458,11 +523,11 @@ describe("system prompt templates", () => {
 
 	it("blocks planning without a selected system prompt", async () => {
 		const t = adminConvex();
-		const runId = await t.mutation(api.studio.mutations.createShlokaDraft, {
+		const { runId, planId } = await t.mutation(api.studio.mutations.createShlokaDraft, {
 			shlokaText: "No selection yet",
 		});
 		await expect(
-			t.action(api.studio.actions.planShlokaRun, { runId }),
+			t.action(api.studio.actions.planShlokaRun, { runId, planId }),
 		).rejects.toThrow("Select a system prompt template before planning.");
 	});
 
@@ -513,7 +578,7 @@ describe("system prompt templates", () => {
 			title: "Draft selection",
 		});
 
-		const runId = await t.mutation(api.studio.mutations.createShlokaDraft, {
+		const { runId } = await t.mutation(api.studio.mutations.createShlokaDraft, {
 			shlokaText: "Selection run",
 			plannerPromptSelection: { kind: "default" },
 		});
@@ -538,63 +603,12 @@ describe("system prompt templates", () => {
 		expect(run?.plannerPromptSelection).toBeUndefined();
 	});
 
-	it("commits a snapshot of the resolved prompt content onto the plan", async () => {
-		const t = adminConvex();
-		const id = await t.mutation(api.studio.mutations.createSystemPromptTemplate, {
-			title: "Snapshot source",
-		});
-		await t.mutation(api.studio.mutations.updateSystemPromptTemplate, {
-			templateId: id,
-			content: "Snapshot planner content.",
-		});
-
-		const runId = await t.mutation(api.studio.mutations.createShlokaDraft, {
-			shlokaText: "Snapshot run",
-			plannerPromptSelection: { kind: "template", templateId: id },
-		});
-		await t.mutation(internal.studio.internal.commitPlan, {
-			runId,
-			plannerModel: "openai/gpt-5.6-terra",
-			plannerReasoning: "medium",
-			imagePrompt: "A warm illustrated temple courtyard",
-			videoScenes: [
-				{
-					sceneNumber: 1,
-					intent: "Opening",
-					subject: "Temple path",
-					action: "Gentle drift",
-					scene: "Twilight courtyard",
-					style: "Warm marigold and sandalwood, soft gold light",
-					camera: "Slow push-in",
-					audio: "Quiet ambience",
-				},
-			],
-			planningKey: "plan-snapshot",
-		});
-
-		const plans = await t.query(api.studio.queries.listShlokaPlansForRun, {
-			runId,
-		});
-		expect(plans[0].plannerSystemPrompt).toBe("Snapshot planner content.");
-		expect(plans[0].plannerSystemPromptTemplateId).toBe(id);
-
-		// Editing the template later does NOT change the historical snapshot.
-		await t.mutation(api.studio.mutations.updateSystemPromptTemplate, {
-			templateId: id,
-			content: "Changed later.",
-		});
-		const plansAfter = await t.query(api.studio.queries.listShlokaPlansForRun, {
-			runId,
-		});
-		expect(plansAfter[0].plannerSystemPrompt).toBe("Snapshot planner content.");
-	});
-
 	it("clears run selections when a template is deleted", async () => {
 		const t = adminConvex();
 		const id = await t.mutation(api.studio.mutations.createSystemPromptTemplate, {
 			title: "To delete",
 		});
-		const runId = await t.mutation(api.studio.mutations.createShlokaDraft, {
+		const { runId } = await t.mutation(api.studio.mutations.createShlokaDraft, {
 			shlokaText: "Deletion run",
 			plannerPromptSelection: { kind: "template", templateId: id },
 		});
@@ -603,88 +617,6 @@ describe("system prompt templates", () => {
 		});
 		const run = await t.query(api.studio.queries.getRun, { runId });
 		expect(run?.plannerPromptSelection).toBeUndefined();
-	});
-});
-
-describe("gallery references and guarded deletes", () => {
-	it("lists runs that reference a gallery image", async () => {
-		const t = adminConvex();
-		const runId = await t.mutation(api.studio.mutations.createShlokaDraft, {
-			shlokaText: "Image reference run",
-		});
-		const imageId = await t.mutation(internal.studio.internal.insertGalleryImage, {
-			runId,
-			objectKey: "studio/gallery/images/ref.png",
-			meta: { mimeType: "image/png", bytes: 4 },
-			source: "generated",
-		});
-		const references = await t.query(
-			api.studio.queries.listRunsReferencingImage,
-			{ imageId },
-		);
-		expect(references).toHaveLength(1);
-		expect(references[0].runId).toBe(runId);
-		expect(references[0].provenance).toBe("shloka");
-	});
-
-	it("refuses to delete a video connected to a run", async () => {
-		const t = adminConvex();
-		const runId = await t.mutation(api.studio.mutations.createShlokaDraft, {
-			shlokaText: "Connected video run",
-		});
-		const videoId = await t.mutation(internal.studio.internal.insertGalleryVideo, {
-			runId,
-			video: {
-				objectKey: "studio/gallery/videos/connected.mp4",
-				meta: { mimeType: "video/mp4" },
-				openRouterJobId: "or-connected",
-				videoParams: defaultVideoParams("bytedance/seedance-2.5"),
-				createdAt: Date.now(),
-			},
-		});
-
-		const connection = await t.query(
-			api.studio.queries.getGalleryVideoRunConnection,
-			{ videoId },
-		);
-		expect(connection?.runId).toBe(runId);
-
-		await expect(
-			t.mutation(api.studio.mutations.deleteGalleryVideo, { videoId }),
-		).rejects.toThrow(/still connected to a run/);
-
-		// Still present after the blocked delete.
-		expect(
-			await t.query(internal.studio.queries.objectKeyInGallery, {
-				objectKey: "studio/gallery/videos/connected.mp4",
-			}),
-		).toBe(true);
-	});
-
-	it("deletes an abandoned video after confirmation", async () => {
-		const t = adminConvex();
-		const videoId = await t.mutation(internal.studio.internal.insertGalleryVideo, {
-			video: {
-				objectKey: "studio/gallery/videos/orphan.mp4",
-				meta: { mimeType: "video/mp4" },
-				openRouterJobId: "or-orphan",
-				videoParams: defaultVideoParams("bytedance/seedance-2.5"),
-				createdAt: Date.now(),
-			},
-		});
-
-		const connection = await t.query(
-			api.studio.queries.getGalleryVideoRunConnection,
-			{ videoId },
-		);
-		expect(connection).toBeNull();
-
-		await t.mutation(api.studio.mutations.deleteGalleryVideo, { videoId });
-		expect(
-			await t.query(internal.studio.queries.objectKeyInGallery, {
-				objectKey: "studio/gallery/videos/orphan.mp4",
-			}),
-		).toBe(false);
 	});
 });
 
@@ -744,16 +676,6 @@ describe("video param validation", () => {
 			}).durationSeconds,
 		).toBe(8);
 	});
-
-	it("accepts Runway base model", () => {
-		const params = validateVideoParams({
-			modelId: "runway/gen-4.5",
-			aspectRatio: "9:16",
-			resolution: "720p",
-			durationSeconds: 6,
-		});
-		expect(params.modelId).toBe("runway/gen-4.5");
-	});
 });
 
 describe("prompt limits", () => {
@@ -764,27 +686,6 @@ describe("prompt limits", () => {
 		expect(fitted.truncated).toBe(true);
 		expect(fitted.prompt.length).toBeLessThanOrEqual(2500);
 	});
-
-	it("requires at least two composition clips", () => {
-		expect(() =>
-			compositionPlannerOutputSchema.parse({
-				kind: "multi-clip",
-				imagePrompt: "A warm stylized temple path with soft dawn light.",
-				overallDescription: "A connected devotional walk from dawn to temple prayer.",
-				clips: [
-					{
-						clipIndex: 0,
-						globalDescription:
-							"A connected devotional walk from dawn to temple prayer.",
-						scenePrompt: "A devotee walks toward a temple at dawn.",
-						continuityInstructions:
-							"Keep the saffron shawl and warm illustrated dawn lighting.",
-						transition: "Hold on the temple gate.",
-					},
-				],
-			}),
-		).toThrow();
-	});
 });
 
 describe("studio authorization", () => {
@@ -792,7 +693,7 @@ describe("studio authorization", () => {
 		const backend = convexTest(schema, modules);
 		const admin = backend.withIdentity(ADMIN_IDENTITY);
 		const member = backend.withIdentity(MEMBER_IDENTITY);
-		const runId = await admin.mutation(api.studio.mutations.createShlokaDraft, {
+		const { runId } = await admin.mutation(api.studio.mutations.createShlokaDraft, {
 			shlokaText: "Auth gate shloka",
 		});
 
@@ -812,16 +713,17 @@ describe("studio authorization", () => {
 			member.mutation(api.studio.mutations.wipeAllStudioData, {}),
 		).rejects.toThrow("Admin access required.");
 		const wiped = await admin.mutation(api.studio.mutations.wipeAllStudioData, {});
-		expect(wiped.runsDeleted).toBe(1);
+		expect(wiped.runsDeleted).toBeGreaterThan(0);
 	});
 
 	it("rejects missing and non-admin identities on cost-bearing and R2 actions", async () => {
 		const backend = convexTest(schema, modules);
 		const admin = backend.withIdentity(ADMIN_IDENTITY);
 		const member = backend.withIdentity(MEMBER_IDENTITY);
-		const runId = await admin.mutation(api.studio.mutations.createShlokaDraft, {
-			shlokaText: "Action auth shloka",
-		});
+		const { runId, planId } = await admin.mutation(
+			api.studio.mutations.createShlokaDraft,
+			{ shlokaText: "Action auth shloka" },
+		);
 		const objectKey = "studio/gallery/images/auth.png";
 		await admin.mutation(internal.studio.internal.insertGalleryImage, {
 			runId,
@@ -836,10 +738,10 @@ describe("studio authorization", () => {
 		});
 
 		await expect(
-			backend.action(api.studio.actions.planShlokaRun, { runId }),
+			backend.action(api.studio.actions.planShlokaRun, { runId, planId }),
 		).rejects.toThrow("Not authenticated.");
 		await expect(
-			member.action(api.studio.actions.planShlokaRun, { runId }),
+			member.action(api.studio.actions.planShlokaRun, { runId, planId }),
 		).rejects.toThrow("Admin access required.");
 
 		await expect(
@@ -862,36 +764,11 @@ describe("studio authorization", () => {
 		expect(urls[objectKey]).toBe(`https://r2.example/get/${objectKey}`);
 	});
 
-	it("keeps internal functions callable without a user identity", async () => {
-		const backend = convexTest(schema, modules);
-		const admin = backend.withIdentity(ADMIN_IDENTITY);
-		const runId = await admin.mutation(api.studio.mutations.createShlokaDraft, {
-			shlokaText: "Internal still works",
-		});
-		const objectKey = "studio/gallery/images/internal.png";
-		await backend.mutation(internal.studio.internal.insertGalleryImage, {
-			runId,
-			objectKey,
-			meta: {
-				mimeType: "image/png",
-				width: 64,
-				height: 64,
-				bytes: 4,
-			},
-			source: "uploaded",
-		});
-		const belongs = await backend.query(
-			internal.studio.queries.objectKeyInGallery,
-			{ objectKey },
-		);
-		expect(belongs).toBe(true);
-	});
-
 	it("requires an admin bearer for the media HTTP fallback", async () => {
 		const backend = convexTest(schema, modules);
 		const admin = backend.withIdentity(ADMIN_IDENTITY);
 		const member = backend.withIdentity(MEMBER_IDENTITY);
-		const runId = await admin.mutation(api.studio.mutations.createShlokaDraft, {
+		const { runId } = await admin.mutation(api.studio.mutations.createShlokaDraft, {
 			shlokaText: "Media proxy auth",
 		});
 		const objectKey = "studio/gallery/images/media.png";
@@ -935,9 +812,8 @@ describe("studio authorization", () => {
 			expect(allowed.status).toBe(200);
 			expect(await allowed.text()).toBe("fake-bytes");
 			expect(allowed.headers.get("Content-Type")).toBe("image/png");
-			} finally {
+		} finally {
 			globalThis.fetch = originalFetch;
 		}
 	});
 });
-

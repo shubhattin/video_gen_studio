@@ -4,25 +4,27 @@ import { useMutation } from "convex/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { VideoConfigState } from "#/components/studio/video/video-configuration";
 import type { PlannerPromptSelection } from "#/lib/planner-prompt";
+import type { EditableVideoScene } from "#/lib/video-plan-markdown";
 
 export type RunAutosaveStatus = "idle" | "saving" | "saved" | "error";
 
-/** Subset of updateDraft args that the studios autosave. */
+/** Run-level draft patch (shloka runs). */
 export type DraftPatch = {
 	shlokaText?: string;
 	customInstructions?: string;
 	plannerPromptSelection?: PlannerPromptSelection | null;
 	imageSize?: string;
 	imageQuality?: string;
-	selectedModelId?: string;
-	videoParams?: VideoConfigState;
-	videoPrompt?: string;
-	compositionMode?: "continuation" | "cut-scenes" | null;
-	compositionMultiplier?: number | null;
-	compositionClipCount?: number | null;
 	firstFrameImageId?: Id<"galleryImages"> | null;
 	lastFrameImageId?: Id<"galleryImages"> | null;
 	extraReferenceImageIds?: Id<"galleryImages">[];
+};
+
+/** Plan-level patch (video config + generated content edits). */
+export type PlanPatch = {
+	videoParams?: VideoConfigState;
+	imagePrompt?: string;
+	videoScenes?: EditableVideoScene[];
 };
 
 export type SaveMode = "debounced" | "immediate";
@@ -56,45 +58,39 @@ export function isTextOnlyConfigChange(
 	return true;
 }
 
-function isRunBusyError(error: unknown): boolean {
-	return error instanceof Error && /run is busy/i.test(error.message);
+function isBusyError(error: unknown): boolean {
+	return (
+		error instanceof Error &&
+		/run is busy|wait for generation to finish/i.test(error.message)
+	);
 }
 
-/**
- * Autosave pipeline for run drafts.
- *
- * - Text fields: debounced writes after the last keystroke.
- * - Discrete fields: immediate writes.
- * - Pending edits flush when the tab is hidden, on pagehide, on unmount, and
- *   when the selected run changes (flushed to the previous run).
- * - updateDraft rejects writes while a run is planning/generating; those
- *   writes are held and retried once the run becomes idle.
- */
-export function useRunAutosave({
-	runId,
-	runStatus,
-	onError,
-}: {
-	runId: Id<"generationRuns"> | null;
-	runStatus?: string | null;
+type QueueOptions<P> = {
+	isBusy: () => boolean;
+	flush: (patch: P) => Promise<void>;
 	onError?: (error: unknown) => void;
-}) {
-	const updateDraft = useMutation(api.studio.mutations.updateDraft);
+};
+
+/**
+ * Shared autosave queue: debounced/immediate writes, pending merge, busy-hold
+ * with retry-on-idle, flush on run switch / pagehide / unmount.
+ */
+function useAutosaveQueue<P extends object>(options: QueueOptions<P>) {
 	const [status, setStatus] = useState<RunAutosaveStatus>("idle");
 	const [hasPending, setHasPending] = useState(false);
 
-	const pendingRef = useRef<DraftPatch>({});
+	const pendingRef = useRef<P>({} as P);
 	const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-	const runIdRef = useRef(runId);
-	const runBusyRef = useRef(false);
+	const busyRef = useRef(false);
 	const retryWhenIdleRef = useRef(false);
 	const chainRef = useRef<Promise<void>>(Promise.resolve());
-	const onErrorRef = useRef(onError);
+	const onErrorRef = useRef(options.onError);
+	const optionsRef = useRef(options);
 
-	runBusyRef.current =
-		runStatus === "planning" || runStatus === "video_generating";
-	onErrorRef.current = onError;
+	busyRef.current = options.isBusy();
+	onErrorRef.current = options.onError;
+	optionsRef.current = options;
 
 	const markSaved = useCallback(() => {
 		if (savedTimerRef.current) {
@@ -107,66 +103,52 @@ export function useRunAutosave({
 		}, SAVED_BADGE_MS);
 	}, []);
 
-	const flush = useCallback(
-		(targetRunId?: Id<"generationRuns">): Promise<void> => {
-			if (timerRef.current) {
-				clearTimeout(timerRef.current);
-				timerRef.current = null;
-			}
-			const effectiveRunId = targetRunId ?? runIdRef.current;
-			const patch = pendingRef.current;
-			if (!effectiveRunId) {
-				pendingRef.current = {};
-				setHasPending(false);
-				return chainRef.current;
-			}
-			if (Object.keys(patch).length === 0) {
-				return chainRef.current;
-			}
-			// Hold the patch while the stage is busy; retry when it finishes.
-			if (runBusyRef.current && targetRunId === undefined) {
-				retryWhenIdleRef.current = true;
-				return chainRef.current;
-			}
-			const bestEffort = targetRunId !== undefined;
-			pendingRef.current = {};
-			setHasPending(false);
-			if (savedTimerRef.current) {
-				clearTimeout(savedTimerRef.current);
-				savedTimerRef.current = null;
-			}
-			setStatus("saving");
-			const attempt = async () => {
-				try {
-					await updateDraft({ runId: effectiveRunId, ...patch });
-					if (Object.keys(pendingRef.current).length === 0) {
-						markSaved();
-					}
-				} catch (error) {
-					if (bestEffort) {
-						console.warn("[autosave] dropped draft patch", error);
-						return;
-					}
-					// Newer edits win when merging the failed patch back.
-					pendingRef.current = { ...patch, ...pendingRef.current };
-					setHasPending(true);
-					if (isRunBusyError(error)) {
-						retryWhenIdleRef.current = true;
-						setStatus("idle");
-					} else {
-						setStatus("error");
-						onErrorRef.current?.(error);
-					}
-				}
-			};
-			chainRef.current = chainRef.current.then(attempt, attempt);
+	const flush = useCallback((): Promise<void> => {
+		if (timerRef.current) {
+			clearTimeout(timerRef.current);
+			timerRef.current = null;
+		}
+		const patch = pendingRef.current;
+		if (Object.keys(patch).length === 0) {
 			return chainRef.current;
-		},
-		[updateDraft, markSaved],
-	);
+		}
+		// Hold the patch while the stage is busy; retry when it finishes.
+		if (busyRef.current) {
+			retryWhenIdleRef.current = true;
+			return chainRef.current;
+		}
+		pendingRef.current = {} as P;
+		setHasPending(false);
+		if (savedTimerRef.current) {
+			clearTimeout(savedTimerRef.current);
+			savedTimerRef.current = null;
+		}
+		setStatus("saving");
+		const attempt = async () => {
+			try {
+				await optionsRef.current.flush(patch);
+				if (Object.keys(pendingRef.current).length === 0) {
+					markSaved();
+				}
+			} catch (error) {
+				// Newer edits win when merging the failed patch back.
+				pendingRef.current = { ...patch, ...pendingRef.current };
+				setHasPending(true);
+				if (isBusyError(error)) {
+					retryWhenIdleRef.current = true;
+					setStatus("idle");
+				} else {
+					setStatus("error");
+					onErrorRef.current?.(error);
+				}
+			}
+		};
+		chainRef.current = chainRef.current.then(attempt, attempt);
+		return chainRef.current;
+	}, [markSaved]);
 
 	const save = useCallback(
-		(patch: DraftPatch, mode: SaveMode = "immediate") => {
+		(patch: Partial<P>, mode: SaveMode = "immediate") => {
 			pendingRef.current = { ...pendingRef.current, ...patch };
 			setHasPending(true);
 			setStatus((previous) => (previous === "error" ? "idle" : previous));
@@ -190,28 +172,13 @@ export function useRunAutosave({
 		void flush();
 	}, [flush]);
 
-	// Retry held writes once the run leaves a busy stage.
+	// Retry held writes once the target leaves a busy stage.
 	useEffect(() => {
-		const busy = runStatus === "planning" || runStatus === "video_generating";
-		if (!busy && retryWhenIdleRef.current) {
+		if (!busyRef.current && retryWhenIdleRef.current) {
 			retryWhenIdleRef.current = false;
 			void flush();
 		}
-	}, [runStatus, flush]);
-
-	// Flush pending edits to the previous run before switching runs.
-	useEffect(() => {
-		if (runIdRef.current === runId) {
-			return;
-		}
-		const previousRunId = runIdRef.current;
-		runIdRef.current = runId;
-		setStatus("idle");
-		setHasPending(false);
-		if (previousRunId) {
-			void flush(previousRunId);
-		}
-	}, [runId, flush]);
+	});
 
 	// Best-effort flush when the tab is hidden or the page is being unloaded.
 	useEffect(() => {
@@ -231,7 +198,7 @@ export function useRunAutosave({
 		};
 	}, [flush]);
 
-	// Fire-and-forget flush when the studio unmounts (SPA navigation).
+	// Fire-and-forget flush on unmount (SPA navigation).
 	useEffect(() => {
 		return () => {
 			if (timerRef.current) {
@@ -242,13 +209,90 @@ export function useRunAutosave({
 				clearTimeout(savedTimerRef.current);
 				savedTimerRef.current = null;
 			}
-			const patch = pendingRef.current;
-			const id = runIdRef.current;
-			if (id && Object.keys(patch).length > 0) {
-				void updateDraft({ runId: id, ...patch }).catch(() => undefined);
-			}
 		};
-	}, [updateDraft]);
+	}, []);
 
 	return { status, hasPending, save, flush, retry };
+}
+
+/** Autosave pipeline for shloka-run-level draft fields. */
+export function useRunAutosave({
+	runId,
+	runStatus,
+	onError,
+}: {
+	runId: Id<"generationRuns"> | null;
+	runStatus?: string | null;
+	onError?: (error: unknown) => void;
+}) {
+	const updateDraft = useMutation(api.studio.mutations.updateDraft);
+	const runIdRef = useRef(runId);
+
+	// Flush pending edits to the previous run before switching runs.
+	useEffect(() => {
+		if (runIdRef.current === runId) {
+			return;
+		}
+		runIdRef.current = runId;
+	}, [runId]);
+
+	const queue = useAutosaveQueue<DraftPatch>({
+		isBusy: () => runStatus === "planning" || runStatus === "video_generating",
+		flush: async (patch) => {
+			const target = runIdRef.current;
+			if (!target) return;
+			await updateDraft({ runId: target, ...patch });
+		},
+		onError,
+	});
+
+	return queue;
+}
+
+/** Autosave pipeline for plan-scoped config + content edits. */
+export function usePlanAutosave({
+	runId,
+	planId,
+	planStatus,
+	onError,
+}: {
+	runId: Id<"generationRuns"> | null;
+	planId: Id<"shlokaPlans"> | null;
+	planStatus?: string | null;
+	onError?: (error: unknown) => void;
+}) {
+	const updatePlanConfig = useMutation(api.studio.mutations.updatePlanConfig);
+	const updatePlanContent = useMutation(api.studio.mutations.updatePlanContent);
+	const idsRef = useRef({ runId, planId });
+
+	useEffect(() => {
+		idsRef.current = { runId, planId };
+	}, [runId, planId]);
+
+	const queue = useAutosaveQueue<PlanPatch>({
+		isBusy: () => planStatus === "planning",
+		flush: async (patch) => {
+			const { runId: rid, planId: pid } = idsRef.current;
+			if (!rid || !pid) return;
+			const { videoParams, ...content } = patch;
+			if (videoParams) {
+				const { prompt: _prompt, ...config } = videoParams;
+				await updatePlanConfig({
+					runId: rid,
+					planId: pid,
+					videoParams: config,
+				});
+			}
+			if (Object.keys(content).length > 0) {
+				await updatePlanContent({
+					runId: rid,
+					planId: pid,
+					...content,
+				});
+			}
+		},
+		onError,
+	});
+
+	return queue;
 }

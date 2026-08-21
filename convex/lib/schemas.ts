@@ -28,32 +28,8 @@ export const normalPlannerOutputSchema = z.object({
 	videoScenes: z.array(videoSceneSchema).min(1).max(12),
 });
 
-export const compositionClipPlanSchema = z.object({
-	clipIndex: z.number().int().min(0),
-	globalDescription: z.string().min(20).max(1_200),
-	scenePrompt: z.string().min(20).max(2_500),
-	continuityInstructions: z.string().min(10).max(1_200),
-	transition: z.string().min(1).max(400),
-});
-
-export const compositionPlannerOutputSchema = z.object({
-	kind: z.literal("multi-clip"),
-	imagePrompt: z.string().min(20),
-	overallDescription: z.string().min(20).max(2_000),
-	clips: z.array(compositionClipPlanSchema).min(2).max(6),
-});
-
-export const plannerOutputSchema = z.discriminatedUnion("kind", [
-	normalPlannerOutputSchema,
-	compositionPlannerOutputSchema,
-]);
-
-export type PlannerOutput = z.infer<typeof plannerOutputSchema>;
 export type VideoScene = z.infer<typeof videoSceneSchema>;
-export type CompositionClipPlan = z.infer<typeof compositionClipPlanSchema>;
-export type CompositionPlannerOutput = z.infer<
-	typeof compositionPlannerOutputSchema
->;
+export type NormalPlannerOutput = z.infer<typeof normalPlannerOutputSchema>;
 
 export const videoParamsSchema = z.object({
 	modelId: z.string(),
@@ -67,6 +43,50 @@ export const videoParamsSchema = z.object({
 });
 
 export type VideoParams = z.infer<typeof videoParamsSchema>;
+
+/** Video config stored per plan — no raw prompt slot. */
+export type PlanVideoConfig = Omit<VideoParams, "prompt">;
+
+export function planConfigFromParams(params: VideoParams): PlanVideoConfig {
+	const { prompt: _prompt, ...rest } = params;
+	return rest;
+}
+
+/** Config snapshot a plan was generated with (mirrors lastModelParamsUsed). */
+export type LastModelParamsUsed = {
+	modelId: string;
+	aspectRatio: string;
+	resolution: string;
+	durationSeconds: number;
+	generateAudio?: boolean;
+	negativePrompt?: string;
+	cfgScale?: number;
+	maxPromptChars: number;
+};
+
+/**
+ * True when the user's current plan config diverges from the config the plan
+ * was generated with. Divergent settings are NOT used for generation until
+ * the plan is regenerated.
+ */
+export function planConfigDiverges(
+	current: PlanVideoConfig,
+	used:
+		| Pick<
+				LastModelParamsUsed,
+				"modelId" | "aspectRatio" | "resolution" | "durationSeconds"
+		  >
+		| null
+		| undefined,
+): boolean {
+	if (!used) return false;
+	return (
+		current.modelId !== used.modelId ||
+		current.aspectRatio !== used.aspectRatio ||
+		current.resolution !== used.resolution ||
+		current.durationSeconds !== used.durationSeconds
+	);
+}
 
 export function validateVideoParams(params: VideoParams): VideoParams {
 	if (!isVideoModelId(params.modelId)) {
