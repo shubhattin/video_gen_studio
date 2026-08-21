@@ -19,7 +19,7 @@ function SystemPromptsRoute() {
 	return (
 		<StudioShell
 			activePath="/prompt-templates"
-			history={<HistoryPanel provenance="shloka" />}
+			history={<HistoryPanel />}
 		>
 			<div className="rounded-2xl border border-border/80 bg-card p-4 sm:p-6">
 				<SystemPromptsPage

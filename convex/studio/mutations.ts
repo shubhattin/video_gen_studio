@@ -61,7 +61,6 @@ export const createShlokaDraft = mutation({
 		const imageConfig = defaultImageConfig();
 		const defaultModel: VideoModelId = "bytedance/seedance-2.5";
 		const runId = await ctx.db.insert("generationRuns", {
-			provenance: "shloka",
 			status: "draft",
 			shlokaText,
 			customInstructions: args.customInstructions?.trim() || undefined,

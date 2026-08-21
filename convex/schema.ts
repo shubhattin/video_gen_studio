@@ -13,11 +13,6 @@ export const runStatusValidator = v.union(
 	v.literal("failed"),
 );
 
-export const provenanceValidator = v.union(
-	v.literal("shloka"),
-	v.literal("model-studio"),
-);
-
 /** Current Seedance six-part scene shape. */
 export const videoSceneValidator = v.object({
 	sceneNumber: v.number(),
@@ -137,7 +132,6 @@ export default defineSchema({
 
 	// ── Shloka runs ──────────────────────────────────────────────────────
 	generationRuns: defineTable({
-		provenance: provenanceValidator,
 		status: runStatusValidator,
 		title: v.optional(v.string()),
 		shlokaText: v.optional(v.string()),

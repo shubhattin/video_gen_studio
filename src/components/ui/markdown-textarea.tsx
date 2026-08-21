@@ -1,5 +1,5 @@
-import { useCallback, useRef, type ReactNode } from "react";
 import type * as React from "react";
+import { type ReactNode, useCallback, useRef } from "react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -184,7 +184,7 @@ function MarkdownTextarea({
 	);
 
 	return (
-		<div className={cn("relative isolate", className)}>
+		<div className="relative isolate">
 			{/* highlighted backdrop — must mirror the textarea's box & typography.
 			    The textarea (below) drives sizing & scroll; the pre just paints. */}
 			<pre

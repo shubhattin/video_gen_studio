@@ -92,7 +92,6 @@ describe("shloka runs and plans", () => {
 		});
 
 		const run = await t.query(api.studio.queries.getRun, { runId });
-		expect(run?.provenance).toBe("shloka");
 		expect(run?.status).toBe("draft");
 		expect(run?.imageSize).toBe("1024x1536");
 		expect(run?.activePlanId).toBe(planId);

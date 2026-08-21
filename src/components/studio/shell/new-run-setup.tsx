@@ -1,7 +1,7 @@
-import { api } from "@convex/_generated/api";
-import type { Id } from "@convex/_generated/dataModel";
 import { useMutation } from "convex/react";
 import { useState } from "react";
+import { api } from "@convex/_generated/api";
+import type { Id } from "@convex/_generated/dataModel";
 import {
 	type VideoConfigState,
 	VideoConfiguration,
@@ -12,18 +12,16 @@ import { defaultVideoParams, type VideoModelId } from "#/lib/model-catalog";
 import { notifyStudioError } from "#/lib/studio-toast";
 
 type NewRunSetupProps = {
-	provenance: "shloka" | "model-studio";
-	onCreated: (runId: Id<"generationRuns"> | Id<"modelStudioRuns">) => void;
+	onCreated: (runId: Id<"modelStudioRuns">) => void;
 };
 
 /**
- * Lean "start a new run" setup shown before any run exists. Only configuration
- * (video model, video settings) is shown here — text fields appear once the
- * run is created. Clicking "Create run" creates the run up-front and navigates
- * to it, avoiding a lazy redirect on first action.
+ * Lean "start a new run" setup for Model Studio shown before any run exists.
+ * Only configuration (video model, video settings) is shown here — the prompt
+ * field appears once the run is created. Clicking "Create run" creates the
+ * run up-front and navigates to it, avoiding a lazy redirect on first action.
  */
-export function NewRunSetup({ provenance, onCreated }: NewRunSetupProps) {
-	const createShlokaDraft = useMutation(api.studio.mutations.createShlokaDraft);
+export function NewRunSetup({ onCreated }: NewRunSetupProps) {
 	const createModelStudioDraft = useMutation(
 		api.studio.mutations.createModelStudioDraft,
 	);
@@ -38,11 +36,6 @@ export function NewRunSetup({ provenance, onCreated }: NewRunSetupProps) {
 	const onCreate = async () => {
 		setCreating(true);
 		try {
-			if (provenance === "shloka") {
-				const { runId } = await createShlokaDraft({});
-				onCreated(runId);
-				return;
-			}
 			const runId = await createModelStudioDraft({
 				modelId: selectedModel,
 			});

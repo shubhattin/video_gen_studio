@@ -49,13 +49,12 @@ export function StudioShell({
 }: StudioShellProps) {
 	const { isAuthenticated } = useConvexAuth();
 	const historyRuns = useQuery(
-		api.studio.queries.listRecentRuns,
-		isAuthenticated && activePath !== "/studio" ? { limit: 24 } : "skip",
+		api.studio.queries.listRecentActivity,
+		isAuthenticated ? { limit: 24 } : "skip",
 	);
-	const waitingForStudioData =
-		isAuthenticated && activePath !== "/studio"
-			? historyRuns === undefined
-			: false;
+	const waitingForStudioData = isAuthenticated
+		? historyRuns === undefined
+		: false;
 	const mainLabel = "Loading your runs";
 
 	return (

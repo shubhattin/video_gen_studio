@@ -39,6 +39,8 @@ type ShlokaPlanPreviewProps = {
 	/** Cached compressed prompt when over the model character limit. */
 	summarizedVideoPrompt?: string;
 	activePlanId?: string | null;
+	/** Videos produced by this plan — not deleted with the plan. */
+	videoCount?: number;
 	disabled?: boolean;
 	onSaveImagePrompt?: (imagePrompt: string) => Promise<void> | void;
 	onSaveVideoScenes?: (videoScenes: VideoScene[]) => Promise<void> | void;
@@ -59,6 +61,7 @@ function PlanEditor({
 	editMode,
 	onEditModeChange,
 	editorClassName,
+	viewClassName,
 }: {
 	title: string;
 	description: string;
@@ -71,6 +74,8 @@ function PlanEditor({
 	editMode: "view" | "edit";
 	onEditModeChange: (mode: "view" | "edit") => void;
 	editorClassName?: string;
+	/** Optional classes for the read-only view (e.g. a capped scroll area). */
+	viewClassName?: string;
 }) {
 	const [draft, setDraft] = useState(value);
 	const [error, setError] = useState<string | null>(null);
@@ -104,9 +109,11 @@ function PlanEditor({
 					disabled={disabled || saving}
 				/>
 			) : (
-				<MessageResponse className={markdownViewClassName}>
-					{value}
-				</MessageResponse>
+				<div className={viewClassName}>
+					<MessageResponse className={markdownViewClassName}>
+						{value}
+					</MessageResponse>
+				</div>
 			)}
 			{error ? <p className="text-xs text-destructive">{error}</p> : null}
 			{warning ? (
@@ -159,6 +166,7 @@ export function ShlokaPlanPreview({
 	videoPrompt,
 	summarizedVideoPrompt,
 	activePlanId,
+	videoCount = 0,
 	disabled,
 	onSaveImagePrompt,
 	onSaveVideoScenes,
@@ -316,7 +324,7 @@ export function ShlokaPlanPreview({
 							disabled={disabled}
 							saving={savingImage}
 							ariaLabel="Edit reference image prompt"
-							editorClassName="min-h-40"
+							editorClassName="min-h-48"
 							editMode={editMode}
 							onEditModeChange={setEditMode}
 							onSave={async (next) => {
@@ -343,6 +351,8 @@ export function ShlokaPlanPreview({
 							disabled={disabled}
 							saving={savingScenes}
 							ariaLabel="Edit video plan markdown"
+							editorClassName="min-h-64"
+							viewClassName="max-h-[min(32rem,60vh)] overflow-y-auto overscroll-contain pr-1"
 							editMode={editMode}
 							onEditModeChange={setEditMode}
 							onSave={async (next) => {
@@ -418,11 +428,18 @@ export function ShlokaPlanPreview({
 					<AlertDialogHeader>
 						<AlertDialogTitle>Delete this plan?</AlertDialogTitle>
 						<AlertDialogDescription>
-							This permanently deletes this plan and its content. Videos it
-							produced stay in the shared gallery unless you delete them there.
-							This cannot be undone.
+							This permanently deletes the plan and its prompts and scenes. This
+							cannot be undone.
 						</AlertDialogDescription>
 					</AlertDialogHeader>
+					{videoCount > 0 ? (
+						<div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-xs leading-relaxed text-amber-800 dark:text-amber-200">
+							This plan has {videoCount} video{videoCount === 1 ? "" : "s"}{" "}
+							linked to it. Videos are <strong>not deleted</strong> — they
+							become abandoned items in the shared gallery and can be removed
+							individually from there.
+						</div>
+					) : null}
 					<AlertDialogFooter>
 						<AlertDialogCancel disabled={disabled}>Cancel</AlertDialogCancel>
 						<AlertDialogAction

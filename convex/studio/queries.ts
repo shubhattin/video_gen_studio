@@ -176,11 +176,10 @@ export const listRecentRuns = query({
 		return await Promise.all(
 			runs.map(async (run) => ({
 				_id: run._id,
-				provenance: run.provenance,
+				kind: "shloka" as const,
 				status: run.status,
 				title: run.title,
 				shlokaText: run.shlokaText,
-				selectedModelId: undefined,
 				createdAt: run.createdAt,
 				videoCount: await countShlokaRunVideos(ctx, run._id),
 			})),
@@ -188,28 +187,69 @@ export const listRecentRuns = query({
 	},
 });
 
-export const listRecentModelStudioRuns = query({
+/**
+ * Unified sidebar feed: shloka runs + model-studio runs merged into one
+ * newest-first list. One stable query for the history panel so both sources
+ * always render together.
+ */
+export const listRecentActivity = query({
 	args: {
 		limit: v.optional(v.number()),
 	},
 	returns: v.array(v.any()),
 	handler: async (ctx, args) => {
 		await requireAdmin(ctx);
-		const limit = Math.min(args.limit ?? 20, 50);
-		const runs = await ctx.db
-			.query("modelStudioRuns")
-			.withIndex("by_createdAt")
-			.order("desc")
-			.take(limit);
-		return runs.map((run) => ({
-			_id: run._id,
-			status: run.status,
-			title: run.title,
-			prompt: run.prompt,
-			selectedModelId: run.selectedModelId,
-			createdAt: run.createdAt,
-			videoCount: run.videoOutputIds?.length ?? 0,
-		}));
+		const limit = Math.min(args.limit ?? 24, 50);
+		const [shlokaRuns, modelRuns] = await Promise.all([
+			ctx.db
+				.query("generationRuns")
+				.withIndex("by_createdAt")
+				.order("desc")
+				.take(limit),
+			ctx.db
+				.query("modelStudioRuns")
+				.withIndex("by_createdAt")
+				.order("desc")
+				.take(limit),
+		]);
+
+		const items: Array<{
+			_id: Id<"generationRuns"> | Id<"modelStudioRuns">;
+			kind: "shloka" | "model-studio";
+			status: string;
+			title?: string;
+			subtitle?: string;
+			selectedModelId?: string;
+			createdAt: number;
+			videoCount: number;
+		}> = [];
+
+		for (const run of shlokaRuns) {
+			items.push({
+				_id: run._id,
+				kind: "shloka",
+				status: run.status,
+				title: run.title,
+				subtitle: run.shlokaText?.slice(0, 80),
+				createdAt: run.createdAt,
+				videoCount: await countShlokaRunVideos(ctx, run._id),
+			});
+		}
+		for (const run of modelRuns) {
+			items.push({
+				_id: run._id,
+				kind: "model-studio",
+				status: run.status,
+				title: run.title,
+				subtitle: run.prompt?.slice(0, 80),
+				selectedModelId: run.selectedModelId,
+				createdAt: run.createdAt,
+				videoCount: run.videoOutputIds?.length ?? 0,
+			});
+		}
+
+		items.sort((a, b) => b.createdAt - a.createdAt);
+		return items.slice(0, limit);
 	},
 });
 
@@ -417,8 +457,9 @@ export const listGalleryVideos = query({
 
 /**
  * Resolve the single owner of a gallery video (if any): a shloka plan that
- * produced it, a model-studio run that produced it, or the generating run via
- * sourceRunId. Returns null when the video is abandoned.
+ * produced it, or a model-studio run that produced it. Videos are linked only
+ * through `videoOutputIds` — deleting a plan abandons its videos (no
+ * sourceRunId fallback, so they become individually deletable).
  */
 export async function resolveGalleryVideoRunConnection(
 	ctx: DbCtx,
@@ -429,10 +470,6 @@ export async function resolveGalleryVideoRunConnection(
 	title?: string;
 	status: string;
 } | null> {
-	const video = await ctx.db.get(videoId);
-	if (!video) {
-		return null;
-	}
 	const plans = await ctx.db.query("shlokaPlans").collect();
 	const plan = plans.find((item) =>
 		(item.videoOutputIds ?? []).includes(videoId),
@@ -459,17 +496,6 @@ export async function resolveGalleryVideoRunConnection(
 			title: modelRun.title,
 			status: modelRun.status,
 		};
-	}
-	if (video.sourceRunId) {
-		const shlokaRun = await ctx.db.get(video.sourceRunId);
-		if (shlokaRun) {
-			return {
-				runId: shlokaRun._id,
-				kind: "shloka",
-				title: shlokaRun.title,
-				status: shlokaRun.status,
-			};
-		}
 	}
 	return null;
 }

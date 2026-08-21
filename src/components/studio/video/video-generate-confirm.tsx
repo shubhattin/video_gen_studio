@@ -1,6 +1,6 @@
-import { useState, type ReactNode } from "react";
 import { Clapperboard } from "lucide-react";
-import { Button } from "#/components/ui/button";
+import { type ReactNode, useState } from "react";
+import type { VideoConfigState } from "#/components/studio/video/video-configuration";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -13,11 +13,11 @@ import {
 	AlertDialogTitle,
 	AlertDialogTrigger,
 } from "#/components/ui/alert-dialog";
+import { Button } from "#/components/ui/button";
 import {
 	MODEL_CAPABILITY_PROFILES,
 	type VideoModelId,
 } from "#/lib/model-catalog";
-import type { VideoConfigState } from "#/components/studio/video/video-configuration";
 import { cn } from "#/lib/utils";
 
 type VideoGenerateConfirmProps = {
@@ -34,10 +34,12 @@ type VideoGenerateConfirmProps = {
 
 function DetailRow({ label, value }: { label: string; value: ReactNode }) {
 	return (
-		<div className="flex items-start justify-between gap-3 rounded-lg border border-border/70 bg-muted/20 px-3 py-2">
-			<span className="shrink-0 text-xs text-muted-foreground">{label}</span>
-			<span className="min-w-0 text-right text-sm font-medium">{value}</span>
-		</div>
+		<span className="inline-flex items-center gap-1.5 rounded-lg border border-border/70 bg-muted/20 px-2.5 py-1.5 text-xs">
+			<span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+				{label}
+			</span>
+			<span className="min-w-0 font-medium">{value}</span>
+		</span>
 	);
 }
 

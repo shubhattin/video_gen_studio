@@ -140,10 +140,13 @@ function ShlokaStudioPage() {
 	);
 
 	const selectPlanTab = (id: Id<"shlokaPlans">) => {
-		if (!runId) return;
+		if (!runId || id === activePlanId) return;
+		// Search-only update: keep the current scroll position and do not
+		// treat the tab switch as a "new page" navigation.
 		void navigate({
 			search: (prev) => ({ ...prev, run: runId, plan: id }),
 			replace: true,
+			resetScroll: false,
 		});
 	};
 
@@ -351,6 +354,22 @@ function ShlokaStudioPage() {
 		}
 	};
 
+	const handleDeletePlan = async (planIdValue: Id<"shlokaPlans">) => {
+		if (!runId) return;
+		try {
+			await deletePlan({ runId, planId: planIdValue });
+			// Clear the selected-tab URL param; the active plan falls back to
+			// the run's next plan automatically.
+			void navigate({
+				search: (prev) => ({ ...prev, plan: undefined }),
+				replace: true,
+				resetScroll: false,
+			});
+		} catch (error) {
+			notifyStudioError("Could not delete plan", error);
+		}
+	};
+
 	const onPlan = async () => {
 		if (!plannerPromptSelection) {
 			notifyStudioError(
@@ -484,7 +503,6 @@ function ShlokaStudioPage() {
 			subtitle={runId ? "Turn shlokas into explainer videos" : undefined}
 			history={
 				<HistoryPanel
-					provenance="shloka"
 					selectedRunId={runId}
 					onDeleted={(id) => {
 						if (runId === id) {
@@ -539,14 +557,21 @@ function ShlokaStudioPage() {
 											</p>
 										</div>
 										<PlanTabs
-											plans={
-												(plans ?? []) as Array<{
+											plans={(plans ?? []).map(
+												(plan: {
 													_id: string;
 													attemptNumber: number;
 													title?: string;
 													status: string;
-												}>
-											}
+													videos?: unknown[];
+												}) => ({
+													_id: plan._id,
+													attemptNumber: plan.attemptNumber,
+													title: plan.title,
+													status: plan.status,
+													videoCount: plan.videos?.length ?? 0,
+												}),
+											)}
 											activePlanId={activePlanId}
 											onSelect={(id) => selectPlanTab(id as Id<"shlokaPlans">)}
 											onCreate={() => void onCreatePlan()}
@@ -556,6 +581,9 @@ function ShlokaStudioPage() {
 													title,
 												});
 											}}
+											onDelete={(planIdValue) =>
+												void handleDeletePlan(planIdValue as Id<"shlokaPlans">)
+											}
 											creating={creatingPlan}
 											disabled={anyBusy}
 										/>
@@ -718,28 +746,12 @@ function ShlokaStudioPage() {
 															"Video generation will use the updated scenes.",
 														);
 													}}
-													onDelete={(planIdValue) => {
-														if (!runId) return;
-														void deletePlan({
-															runId,
-															planId: planIdValue as Id<"shlokaPlans">,
-														})
-															.then(() => {
-																void navigate({
-																	search: (prev) => ({
-																		...prev,
-																		plan: undefined,
-																	}),
-																	replace: true,
-																});
-															})
-															.catch((error) =>
-																notifyStudioError(
-																	"Could not delete plan",
-																	error,
-																),
-															);
-													}}
+													onDelete={(planIdValue) =>
+														void handleDeletePlan(
+															planIdValue as Id<"shlokaPlans">,
+														)
+													}
+													videoCount={activePlan.videos?.length ?? 0}
 												/>
 												<ReferenceImagePanel
 													runId={runId}

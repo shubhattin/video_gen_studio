@@ -930,9 +930,7 @@ async function runTitleGeneration(
 	}
 
 	const shloka = (run.shlokaText as string | undefined)?.trim();
-	const provenanceLabel =
-		run.provenance === "model-studio" ? "Model Run" : "Shloka Run";
-	const fallback = provenanceLabel;
+	const fallback = "Shloka Run";
 
 	const context = shloka ? `Shloka: ${shloka.slice(0, 600)}` : "";
 	if (!context.trim()) {

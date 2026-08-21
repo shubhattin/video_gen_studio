@@ -1,7 +1,3 @@
-import {
-	MODEL_CAPABILITY_PROFILES,
-	type VideoModelId,
-} from "#/lib/model-catalog";
 import { Info } from "lucide-react";
 import { Label } from "#/components/ui/label";
 import {
@@ -21,6 +17,10 @@ import {
 } from "#/components/ui/select";
 import { Switch } from "#/components/ui/switch";
 import { Textarea } from "#/components/ui/textarea";
+import {
+	MODEL_CAPABILITY_PROFILES,
+	type VideoModelId,
+} from "#/lib/model-catalog";
 
 export type VideoConfigState = {
 	modelId: string;
@@ -86,115 +86,120 @@ export function VideoConfiguration({
 				) : null}
 			</div>
 
-			<div className="grid gap-4 sm:grid-cols-2">
-				<div className="space-y-2">
-					<Label>Aspect ratio</Label>
-					<Select
-						value={value.aspectRatio}
-						onValueChange={(aspectRatio) =>
-							aspectRatio && onChange({ ...value, aspectRatio })
-						}
-						disabled={disabled}
-					>
-						<SelectTrigger className="min-h-11">
-							<SelectValue />
-						</SelectTrigger>
-						<SelectContent>
-							{profile.aspectRatios.map((ratio) => (
-								<SelectItem key={ratio} value={ratio}>
-									{ratio}
-								</SelectItem>
-							))}
-						</SelectContent>
-					</Select>
+			<div className="rounded-2xl border border-border/70 bg-muted/15 p-3 sm:p-4">
+				{/* Core params sit on one line when space allows; audio toggle only
+				    appears when the selected model supports it. */}
+				<div className="flex flex-wrap items-end gap-3">
+					<div className="flex min-w-36 flex-1 flex-col gap-1.5">
+						<Label className="text-xs">Aspect ratio</Label>
+						<Select
+							value={value.aspectRatio}
+							onValueChange={(aspectRatio) =>
+								aspectRatio && onChange({ ...value, aspectRatio })
+							}
+							disabled={disabled}
+						>
+							<SelectTrigger className="h-9 min-h-9 w-full">
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								{profile.aspectRatios.map((ratio) => (
+									<SelectItem key={ratio} value={ratio}>
+										{ratio}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+					</div>
+					<div className="flex min-w-36 flex-1 flex-col gap-1.5">
+						<Label className="text-xs">Resolution</Label>
+						<Select
+							value={value.resolution}
+							onValueChange={(resolution) =>
+								resolution && onChange({ ...value, resolution })
+							}
+							disabled={disabled}
+						>
+							<SelectTrigger className="h-9 min-h-9 w-full">
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								{profile.resolutions.map((resolution) => (
+									<SelectItem key={resolution} value={resolution}>
+										{resolution}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+					</div>
+					<div className="flex min-w-32 flex-1 flex-col gap-1.5">
+						<Label className="text-xs">Duration</Label>
+						<Select
+							value={String(value.durationSeconds)}
+							onValueChange={(duration) =>
+								duration &&
+								onChange({ ...value, durationSeconds: Number(duration) })
+							}
+							disabled={disabled}
+						>
+							<SelectTrigger className="h-9 min-h-9 w-full">
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								{profile.supportedDurations.map((duration) => (
+									<SelectItem key={duration} value={String(duration)}>
+										{duration}s
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+					</div>
+					{profile.supportsAudio ? (
+						<div className="flex h-9 min-w-32 items-center gap-2 rounded-lg border border-border/70 bg-background px-3">
+							<Switch
+								id="generate-audio"
+								checked={value.generateAudio ?? false}
+								onCheckedChange={(checked) =>
+									onChange({ ...value, generateAudio: checked })
+								}
+								disabled={disabled}
+							/>
+							<Label htmlFor="generate-audio" className="text-xs font-medium">
+								Audio
+							</Label>
+						</div>
+					) : null}
 				</div>
-				<div className="space-y-2">
-					<Label>Resolution</Label>
-					<Select
-						value={value.resolution}
-						onValueChange={(resolution) =>
-							resolution && onChange({ ...value, resolution })
-						}
-						disabled={disabled}
-					>
-						<SelectTrigger className="min-h-11">
-							<SelectValue />
-						</SelectTrigger>
-						<SelectContent>
-							{profile.resolutions.map((resolution) => (
-								<SelectItem key={resolution} value={resolution}>
-									{resolution}
-								</SelectItem>
-							))}
-						</SelectContent>
-					</Select>
-				</div>
-				<div className="space-y-2">
-					<Label>Duration (seconds)</Label>
-					<Select
-						value={String(value.durationSeconds)}
-						onValueChange={(duration) =>
-							duration &&
-							onChange({ ...value, durationSeconds: Number(duration) })
-						}
-						disabled={disabled}
-					>
-						<SelectTrigger className="min-h-11">
-							<SelectValue />
-						</SelectTrigger>
-						<SelectContent>
-							{profile.supportedDurations.map((duration) => (
-								<SelectItem key={duration} value={String(duration)}>
-									{duration}s
-								</SelectItem>
-							))}
-						</SelectContent>
-					</Select>
-				</div>
+
+				{profile.supportsNegativePrompt ? (
+					<div className="mt-3 space-y-1.5">
+						<Label className="text-xs">Negative prompt</Label>
+						<Textarea
+							value={value.negativePrompt ?? ""}
+							onChange={(event) =>
+								onChange({ ...value, negativePrompt: event.target.value })
+							}
+							placeholder="blur, text overlays, distorted faces…"
+							disabled={disabled}
+							className="max-h-40 overflow-y-auto"
+						/>
+					</div>
+				) : null}
+
+				{showPrompt ? (
+					<div className="mt-3 space-y-1.5">
+						<Label className="text-xs">Video prompt</Label>
+						<Textarea
+							value={value.prompt ?? ""}
+							onChange={(event) =>
+								onChange({ ...value, prompt: event.target.value })
+							}
+							className="min-h-28 max-h-56 overflow-y-auto"
+							disabled={disabled}
+						/>
+					</div>
+				) : null}
 			</div>
-
-			{profile.supportsAudio ? (
-				<div className="flex items-center gap-3 min-h-11">
-					<Switch
-						id="generate-audio"
-						checked={value.generateAudio ?? false}
-						onCheckedChange={(checked) =>
-							onChange({ ...value, generateAudio: checked })
-						}
-						disabled={disabled}
-					/>
-					<Label htmlFor="generate-audio">Generate audio</Label>
-				</div>
-			) : null}
-
-			{profile.supportsNegativePrompt ? (
-				<div className="space-y-2">
-					<Label>Negative prompt</Label>
-					<Textarea
-						value={value.negativePrompt ?? ""}
-						onChange={(event) =>
-							onChange({ ...value, negativePrompt: event.target.value })
-						}
-						placeholder="blur, text overlays, distorted faces…"
-						disabled={disabled}
-						className="max-h-40 overflow-y-auto"
-					/>
-				</div>
-			) : null}
-
-			{showPrompt ? (
-				<div className="space-y-2">
-					<Label>Video prompt</Label>
-					<Textarea
-						value={value.prompt ?? ""}
-						onChange={(event) =>
-							onChange({ ...value, prompt: event.target.value })
-						}
-						className="min-h-28 max-h-56 overflow-y-auto"
-						disabled={disabled}
-					/>
-				</div>
-			) : null}
 		</section>
 	);
 }

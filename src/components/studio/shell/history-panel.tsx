@@ -1,7 +1,7 @@
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { Link } from "@tanstack/react-router";
-import { useAction, useMutation, useQuery } from "convex/react";
+import { useAction, useConvexAuth, useMutation, useQuery } from "convex/react";
 import { formatDistanceToNow } from "date-fns";
 import {
 	Clapperboard,
@@ -58,38 +58,31 @@ import { cn } from "#/lib/utils";
 
 type HistoryRun = {
 	_id: Id<"generationRuns"> | Id<"modelStudioRuns">;
-	provenance: "shloka" | "model-studio" | string;
+	kind: "shloka" | "model-studio";
 	status: string;
 	title?: string;
-	shlokaText?: string;
-	prompt?: string;
+	subtitle?: string;
 	selectedModelId?: string;
 	createdAt: number;
 	videoCount?: number;
 };
 
 type HistoryPanelProps = {
-	provenance: "shloka" | "model-studio";
 	selectedRunId?: Id<"generationRuns"> | Id<"modelStudioRuns"> | null;
 	onDeleted?: (runId: Id<"generationRuns"> | Id<"modelStudioRuns">) => void;
 };
 
-function pathForProvenance(provenance: string): "/" | "/studio" {
-	return provenance === "model-studio" ? "/studio" : "/";
+function pathForKind(kind: string): "/" | "/studio" {
+	return kind === "model-studio" ? "/studio" : "/";
 }
 
-export function HistoryPanel({
-	provenance,
-	selectedRunId,
-	onDeleted,
-}: HistoryPanelProps) {
-	const shlokaRuns = useQuery(
-		api.studio.queries.listRecentRuns,
-		provenance === "shloka" ? { limit: 24 } : "skip",
-	);
-	const modelRuns = useQuery(
-		api.studio.queries.listRecentModelStudioRuns,
-		provenance === "model-studio" ? { limit: 24 } : "skip",
+export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
+	const { isAuthenticated } = useConvexAuth();
+	// Single unified feed — subscribe only once auth is ready so the admin
+	// query never fires without a JWT and dies with an auth error.
+	const runs = useQuery(
+		api.studio.queries.listRecentActivity,
+		isAuthenticated ? { limit: 24 } : "skip",
 	);
 	const deleteRun = useMutation(api.studio.mutations.deleteRun);
 	const deleteModelStudioRun = useMutation(
@@ -103,13 +96,18 @@ export function HistoryPanel({
 	const [pendingDeleteId, setPendingDeleteId] = useState<
 		Id<"generationRuns"> | Id<"modelStudioRuns"> | null
 	>(null);
+	const [pendingDeleteKind, setPendingDeleteKind] = useState<
+		"shloka" | "model-studio" | null
+	>(null);
 	const [deleting, setDeleting] = useState(false);
 	const [deleteMedia, setDeleteMedia] = useState(false);
+	const pendingShlokaDeleteId =
+		pendingDeleteId != null && pendingDeleteKind === "shloka"
+			? (pendingDeleteId as Id<"generationRuns">)
+			: null;
 	const deleteMediaCounts = useQuery(
 		api.studio.queries.getRunMediaCounts,
-		pendingDeleteId && provenance === "shloka"
-			? { runId: pendingDeleteId as Id<"generationRuns"> }
-			: "skip",
+		pendingShlokaDeleteId ? { runId: pendingShlokaDeleteId } : "skip",
 	);
 	const [renameTarget, setRenameTarget] = useState<HistoryRun | null>(null);
 	const [renameValue, setRenameValue] = useState("");
@@ -117,21 +115,15 @@ export function HistoryPanel({
 	const [regeneratingId, setRegeneratingId] =
 		useState<Id<"generationRuns"> | null>(null);
 
-	const historyRuns: HistoryRun[] | undefined =
-		provenance === "shloka"
-			? (shlokaRuns as HistoryRun[] | undefined)
-			: (modelRuns as HistoryRun[] | undefined)?.map((run) => ({
-					...run,
-					provenance: "model-studio",
-				}));
+	const historyRuns = runs as HistoryRun[] | undefined;
 
 	const confirmDelete = async () => {
-		if (!pendingDeleteId) {
+		if (!pendingDeleteId || !pendingDeleteKind) {
 			return;
 		}
 		setDeleting(true);
 		try {
-			if (provenance === "shloka") {
+			if (pendingDeleteKind === "shloka") {
 				await deleteRun({
 					runId: pendingDeleteId as Id<"generationRuns">,
 					deleteMedia,
@@ -144,6 +136,7 @@ export function HistoryPanel({
 			}
 			onDeleted?.(pendingDeleteId);
 			setPendingDeleteId(null);
+			setPendingDeleteKind(null);
 		} finally {
 			setDeleting(false);
 		}
@@ -160,7 +153,7 @@ export function HistoryPanel({
 		}
 		setRenaming(true);
 		try {
-			if (provenance === "shloka") {
+			if (renameTarget.kind === "shloka") {
 				await renameRun({
 					runId: renameTarget._id as Id<"generationRuns">,
 					title: renameValue,
@@ -195,13 +188,12 @@ export function HistoryPanel({
 			) : (
 				<SidebarMenu className="gap-1">
 					{historyRuns.map((run) => {
-						const shloka = provenance === "shloka";
-						const to = pathForProvenance(run.provenance);
+						const shloka = run.kind === "shloka";
+						const to = pathForKind(run.kind);
 						const title =
 							run.title?.trim() ||
-							(shloka
-								? "Shloka Run"
-								: (run.prompt?.slice(0, 40) ?? "Model Run"));
+							run.subtitle?.trim() ||
+							(shloka ? "Shloka Run" : "Model Run");
 						const meta = [
 							formatDistanceToNow(run.createdAt, { addSuffix: true }),
 							run.videoCount
@@ -281,7 +273,7 @@ export function HistoryPanel({
 											<Pencil />
 											Rename title
 										</DropdownMenuItem>
-										{provenance === "shloka" ? (
+										{run.kind === "shloka" ? (
 											<DropdownMenuItem
 												className="gap-2"
 												disabled={regeneratingId === run._id}
@@ -305,6 +297,7 @@ export function HistoryPanel({
 											className="gap-2"
 											onClick={() => {
 												setDeleteMedia(false);
+												setPendingDeleteKind(run.kind);
 												setPendingDeleteId(run._id);
 											}}
 										>
@@ -324,6 +317,7 @@ export function HistoryPanel({
 				onOpenChange={(open) => {
 					if (!open) {
 						setPendingDeleteId(null);
+						setPendingDeleteKind(null);
 					}
 				}}
 			>

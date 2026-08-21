@@ -339,40 +339,41 @@ export const insertGalleryImage = internalMutation({
 			createdAt: Date.now(),
 		});
 
-		const attachTarget =
-			args.modelStudioRunId !== undefined
-				? ((await ctx.db.get(args.modelStudioRunId)) ?? null)
-				: args.runId !== undefined
-					? ((await ctx.db.get(args.runId)) ?? null)
-					: null;
-
-		if (attachTarget && args.attachToRun !== false) {
-			const attached = uniqueIds([
-				...(attachTarget.attachedImageIds ?? []),
-				imageId,
-			]);
-			if ("provenance" in attachTarget) {
-				await ctx.db.patch(attachTarget._id, {
-					status: "image_ready",
-					attachedImageIds: attached,
-					firstFrameImageId: args.setAsFirstFrame
-						? imageId
-						: attachTarget.firstFrameImageId,
-					warnings: args.warnings,
-					lastError: undefined,
-					updatedAt: Date.now(),
-				});
-			} else {
-				await ctx.db.patch(attachTarget._id, {
-					attachedImageIds: attached,
-					firstFrameImageId: args.setAsFirstFrame
-						? imageId
-						: attachTarget.firstFrameImageId,
-					warnings: args.warnings,
-					lastError: undefined,
-					updatedAt: Date.now(),
-				});
+		if (args.modelStudioRunId !== undefined && args.attachToRun !== false) {
+			const modelRun = await ctx.db.get(args.modelStudioRunId);
+			if (!modelRun) {
+				throw new Error("Run not found.");
 			}
+			await ctx.db.patch(modelRun._id, {
+				attachedImageIds: uniqueIds([
+					...(modelRun.attachedImageIds ?? []),
+					imageId,
+				]),
+				firstFrameImageId: args.setAsFirstFrame
+					? imageId
+					: modelRun.firstFrameImageId,
+				warnings: args.warnings,
+				lastError: undefined,
+				updatedAt: Date.now(),
+			});
+		} else if (args.runId !== undefined && args.attachToRun !== false) {
+			const run = await ctx.db.get(args.runId);
+			if (!run) {
+				throw new Error("Run not found.");
+			}
+			await ctx.db.patch(run._id, {
+				status: "image_ready",
+				attachedImageIds: uniqueIds([
+					...(run.attachedImageIds ?? []),
+					imageId,
+				]),
+				firstFrameImageId: args.setAsFirstFrame
+					? imageId
+					: run.firstFrameImageId,
+				warnings: args.warnings,
+				lastError: undefined,
+				updatedAt: Date.now(),
+			});
 		}
 		return imageId;
 	},
