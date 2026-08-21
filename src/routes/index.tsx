@@ -66,6 +66,7 @@ import {
 import type { StudioBusyStage } from "#/lib/studio-run-status";
 import { notifyStudioError, notifyStudioSuccess } from "#/lib/studio-toast";
 import { uploadReferenceImage } from "#/lib/upload-reference-image";
+import { buildVideoPromptFromScenes } from "#/lib/video-plan-markdown";
 
 export const Route = createFileRoute("/")({
 	validateSearch: studioRunSearchSchema,
@@ -156,7 +157,7 @@ function ShlokaStudioPage() {
 		onError: (error) => notifyStudioError("Could not save draft", error),
 	});
 
-	const rawImages = (run?.referenceImages ?? []) as Array<{
+	const rawImages = (run?.images ?? []) as Array<{
 		id: string;
 		objectKey?: string;
 		source?: "generated" | "uploaded" | "terminal_frame";
@@ -816,9 +817,15 @@ function ShlokaStudioPage() {
 											/>
 										) : null}
 										<ShlokaPlanPreview
-											imagePrompt={run?.imagePrompt}
-											videoScenes={run?.videoScenes}
-											videoPrompt={run?.videoPrompt}
+											imagePrompt={run?.activePlan?.imagePrompt}
+											videoScenes={run?.activePlan?.videoScenes}
+											videoPrompt={
+												run?.activePlan
+													? buildVideoPromptFromScenes(
+															run.activePlan.videoScenes,
+														)
+													: undefined
+											}
 											summarizedVideoPrompt={run?.summarizedVideoPrompt}
 											compositionOverallDescription={
 												compositionJob?.overallDescription
@@ -995,7 +1002,10 @@ function ShlokaStudioPage() {
 											}}
 											onRemoveImage={async (id) => {
 												if (!runId) return;
-												await removeReferenceImage({ runId, imageId: id });
+												await removeReferenceImage({
+													runId,
+													imageId: id as Id<"galleryImages">,
+												});
 											}}
 										/>
 									</div>

@@ -26,8 +26,7 @@ import {
 	listShlokaPlansForRunCtx,
 	loadImagesByIds,
 	loadVideosByIds,
-	asGalleryImageId,
-	asGalleryVideoId,
+	uniqueIds,
 	videoReferencedOutsideRun,
 } from "./media";
 
@@ -74,10 +73,12 @@ async function compositionWithClips(
 		.take(6);
 	const hydrated = await Promise.all(
 		clips.map(async (clip) => {
-			const videoId = asGalleryVideoId(ctx, clip.galleryVideoId);
-			const frameId = asGalleryImageId(ctx, clip.terminalFrameImageId);
-			const videoDoc = videoId ? await ctx.db.get(videoId) : null;
-			const frameDoc = frameId ? await ctx.db.get(frameId) : null;
+			const videoDoc = clip.galleryVideoId
+				? await ctx.db.get(clip.galleryVideoId)
+				: null;
+			const frameDoc = clip.terminalFrameImageId
+				? await ctx.db.get(clip.terminalFrameImageId)
+				: null;
 			return {
 				...clip,
 				video: videoDoc ? galleryVideoToResult(videoDoc) : undefined,
@@ -91,34 +92,37 @@ async function compositionWithClips(
 	};
 }
 
+/**
+ * Resolve a run for clients: gallery-derived attachments under `images` /
+ * `videos` (roles included), plus the active shloka plan (scenes normalized).
+ */
 async function hydrateRun(ctx: QueryCtx, run: Doc<"generationRuns">) {
-	const attachedImageIds = (run.attachedImageIds ?? []).flatMap((id) => {
-		const ok = asGalleryImageId(ctx, id);
-		return ok ? [ok] : [];
-	});
-	const attachedVideoIds = (run.attachedVideoIds ?? []).flatMap((id) => {
-		const ok = asGalleryVideoId(ctx, id);
-		return ok ? [ok] : [];
-	});
-	const [referenceImages, videos] = await Promise.all([
-		loadImagesByIds(ctx, attachedImageIds),
-		loadVideosByIds(ctx, attachedVideoIds),
+	const firstFrameImageId = run.firstFrameImageId;
+	const lastFrameImageId = run.lastFrameImageId;
+	const extraReferenceImageIds = run.extraReferenceImageIds ?? [];
+	const imageIds = uniqueIds(
+		[
+			...(run.attachedImageIds ?? []),
+			firstFrameImageId,
+			lastFrameImageId,
+			...extraReferenceImageIds,
+		].filter((id): id is Id<"galleryImages"> => Boolean(id)),
+	);
+	const [images, videos, activePlan] = await Promise.all([
+		loadImagesByIds(ctx, imageIds),
+		loadVideosByIds(ctx, run.attachedVideoIds ?? []),
+		run.activePlanId ? ctx.db.get(run.activePlanId) : null,
 	]);
 	return {
 		...run,
-		videoScenes: run.videoScenes
-			? normalizeVideoScenes(run.videoScenes)
-			: run.videoScenes,
-		attachedImageIds,
-		attachedVideoIds,
-		firstFrameImageId: asGalleryImageId(ctx, run.firstFrameImageId),
-		lastFrameImageId: asGalleryImageId(ctx, run.lastFrameImageId),
-		extraReferenceImageIds: (run.extraReferenceImageIds ?? []).flatMap((id) => {
-			const ok = asGalleryImageId(ctx, id);
-			return ok ? [ok] : [];
-		}),
-		referenceImages,
+		images,
 		videos,
+		activePlan: activePlan
+			? {
+					...activePlan,
+					videoScenes: normalizeVideoScenes(activePlan.videoScenes),
+				}
+			: null,
 	};
 }
 
@@ -502,7 +506,7 @@ export const getRunMediaCounts = query({
 			return { images: 0, videos: 0 };
 		}
 		const clips = await listCompositionClipsForRunCtx(ctx, args.runId);
-		const { images, videos } = await collectRunMediaIds(ctx, run, clips);
+		const { images, videos } = await collectRunMediaIds(run, clips);
 
 		const allVideos = await ctx.db.query("galleryVideos").collect();
 		for (const video of allVideos) {
@@ -603,21 +607,5 @@ export const objectKeyInGallery = internalQuery({
 	handler: async (ctx, args) => {
 		const found = await findGalleryByObjectKey(ctx, args.objectKey);
 		return found !== null;
-	},
-});
-
-/** @deprecated Use objectKeyInGallery. Kept so existing callers/tests compile. */
-export const objectKeyBelongsToRun = internalQuery({
-	args: {
-		runId: v.id("generationRuns"),
-		objectKey: v.string(),
-	},
-	returns: v.boolean(),
-	handler: async (ctx, args) => {
-		const run = await ctx.db.get(args.runId);
-		if (!run) {
-			return false;
-		}
-		return (await findGalleryByObjectKey(ctx, args.objectKey)) !== null;
 	},
 });

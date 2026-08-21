@@ -74,7 +74,7 @@ describe("studio mutations", () => {
 		expect(run?.videoParams?.aspectRatio).toBe("9:16");
 		expect(run?.attachedImageIds).toEqual([]);
 		expect(run?.attachedVideoIds).toEqual([]);
-		expect(run?.referenceImages).toEqual([]);
+		expect(run?.images).toEqual([]);
 		expect(run?.videos).toEqual([]);
 	});
 
@@ -106,7 +106,7 @@ describe("studio mutations", () => {
 
 		const run = await t.query(api.studio.queries.getRun, { runId });
 		expect(run?.status).toBe("plan_ready");
-		expect(run?.imagePrompt).toContain("Portrait");
+		expect(run?.activePlan?.imagePrompt).toContain("Portrait");
 	});
 
 	it("deletes a run", async () => {
@@ -142,28 +142,19 @@ describe("studio mutations", () => {
 		const run = await t.query(api.studio.queries.getRun, { runId });
 		expect(run?.status).toBe("image_ready");
 		expect(run?.firstFrameImageId).toBeUndefined();
-		expect(run?.referenceImages).toHaveLength(1);
-		expect(run?.referenceImages?.[0]?.source).toBe("uploaded");
-		expect(run?.referenceImages?.[0]?.meta.mimeType).toBe("image/png");
-		expect(run?.referenceImages?.[0]?.objectKey).toBe(objectKey);
-		expect(run?.referenceImages?.[0]?.id).toBe(imageId);
+		expect(run?.images).toHaveLength(1);
+		expect(run?.images?.[0]?.source).toBe("uploaded");
+		expect(run?.images?.[0]?.meta.mimeType).toBe("image/png");
+		expect(run?.images?.[0]?.objectKey).toBe(objectKey);
+		expect(run?.images?.[0]?.id).toBe(imageId);
 
-		const belongs = await t.query(
-			internal.studio.queries.objectKeyBelongsToRun,
-			{ runId, objectKey },
-		);
-		expect(belongs).toBe(true);
 		const inGallery = await t.query(internal.studio.queries.objectKeyInGallery, {
 			objectKey,
 		});
 		expect(inGallery).toBe(true);
-		const foreign = await t.query(
-			internal.studio.queries.objectKeyBelongsToRun,
-			{
-				runId,
-				objectKey: "studio/gallery/images/other.png",
-			},
-		);
+		const foreign = await t.query(internal.studio.queries.objectKeyInGallery, {
+			objectKey: "studio/gallery/images/other.png",
+		});
 		expect(foreign).toBe(false);
 	});
 
@@ -185,7 +176,7 @@ describe("studio mutations", () => {
 			imageId,
 		});
 		const afterUnlink = await t.query(api.studio.queries.getRun, { runId });
-		expect(afterUnlink?.referenceImages).toEqual([]);
+		expect(afterUnlink?.images).toEqual([]);
 		const stillThere = await t.query(internal.studio.queries.objectKeyInGallery, {
 			objectKey,
 		});
@@ -196,7 +187,7 @@ describe("studio mutations", () => {
 			imageId,
 		});
 		const reattached = await t.query(api.studio.queries.getRun, { runId });
-		expect(reattached?.referenceImages).toHaveLength(1);
+		expect(reattached?.images).toHaveLength(1);
 
 		await t.mutation(api.studio.mutations.deleteRun, { runId });
 		expect(await t.query(api.studio.queries.getRun, { runId })).toBeNull();
@@ -242,7 +233,7 @@ describe("studio mutations", () => {
 		expect(plans).toHaveLength(2);
 		const run = await t.query(api.studio.queries.getRun, { runId });
 		expect(run?.activePlanId).toBe(secondPlanId);
-		expect(run?.imagePrompt).toContain("dusk");
+		expect(run?.activePlan?.imagePrompt).toContain("dusk");
 
 		await t.mutation(api.studio.mutations.selectShlokaPlan, {
 			runId,
@@ -250,7 +241,7 @@ describe("studio mutations", () => {
 		});
 		const selected = await t.query(api.studio.queries.getRun, { runId });
 		expect(selected?.activePlanId).toBe(firstPlanId);
-		expect(selected?.imagePrompt).toContain("Portrait");
+		expect(selected?.activePlan?.imagePrompt).toContain("Portrait");
 	});
 
 	it("forks a plan into a new attempt and renames plans", async () => {
@@ -890,8 +881,8 @@ describe("studio authorization", () => {
 			source: "uploaded",
 		});
 		const belongs = await backend.query(
-			internal.studio.queries.objectKeyBelongsToRun,
-			{ runId, objectKey },
+			internal.studio.queries.objectKeyInGallery,
+			{ objectKey },
 		);
 		expect(belongs).toBe(true);
 	});
@@ -944,105 +935,9 @@ describe("studio authorization", () => {
 			expect(allowed.status).toBe(200);
 			expect(await allowed.text()).toBe("fake-bytes");
 			expect(allowed.headers.get("Content-Type")).toBe("image/png");
-		} finally {
+			} finally {
 			globalThis.fetch = originalFetch;
 		}
 	});
 });
 
-describe("legacy studio media migration", () => {
-	it("lifts embedded images and videos into the gallery and remaps img_* ids", async () => {
-		const t = adminConvex();
-		const now = Date.now();
-		const runId = await t.run(async (ctx) => {
-			return await ctx.db.insert("generationRuns", {
-				provenance: "shloka",
-				status: "completed",
-				shlokaText: "legacy shloka",
-				createdAt: now,
-				updatedAt: now,
-				firstFrameImageId: "img_legacy_first",
-				extraReferenceImageIds: ["img_legacy_style"],
-				referenceImages: [
-					{
-						id: "img_legacy_first",
-						objectKey: "studio/runs/old/images/first.png",
-						meta: { mimeType: "image/png" },
-						source: "generated",
-						createdAt: now,
-					},
-					{
-						id: "img_legacy_style",
-						objectKey: "studio/runs/old/images/style.png",
-						meta: { mimeType: "image/png" },
-						source: "uploaded",
-						createdAt: now,
-					},
-				],
-				videos: [
-					{
-						id: "vid_legacy_1",
-						objectKey: "studio/runs/old/videos/clip.mp4",
-						meta: { mimeType: "video/mp4" },
-						openRouterJobId: "or-job",
-						videoParams: defaultVideoParams("bytedance/seedance-2.5"),
-						createdAt: now,
-					},
-				],
-			} as never);
-		});
-
-		const migrated = await t.mutation(
-			api.studio.mutations.migrateLegacyStudioMedia,
-			{},
-		);
-		expect(migrated.runsMigrated).toBe(1);
-		expect(migrated.imagesCreated).toBe(2);
-		expect(migrated.videosCreated).toBe(1);
-
-		const run = await t.query(api.studio.queries.getRun, { runId });
-		expect(run?.referenceImages).toHaveLength(2);
-		expect(run?.videos).toHaveLength(1);
-		expect(run?.firstFrameImageId).toBe(run?.referenceImages?.[0]?.id);
-		expect(run?.extraReferenceImageIds).toEqual([run?.referenceImages?.[1]?.id]);
-		expect(run?.referenceImages?.[0]?.objectKey).toBe(
-			"studio/runs/old/images/first.png",
-		);
-		expect(
-			await t.query(internal.studio.queries.objectKeyInGallery, {
-				objectKey: "studio/runs/old/videos/clip.mp4",
-			}),
-		).toBe(true);
-
-		const again = await t.mutation(
-			api.studio.mutations.migrateLegacyStudioMedia,
-			{},
-		);
-		expect(again.imagesCreated).toBe(0);
-		expect(again.videosCreated).toBe(0);
-		const after = await t.query(api.studio.queries.getRun, { runId });
-		expect(after?.referenceImages).toHaveLength(2);
-		expect(after?.firstFrameImageId).toBe(run?.firstFrameImageId);
-	});
-
-	it("drops leftover img_* role ids that have no matching media", async () => {
-		const t = adminConvex();
-		const now = Date.now();
-		const runId = await t.run(async (ctx) => {
-			return await ctx.db.insert("generationRuns", {
-				provenance: "model-studio",
-				status: "draft",
-				createdAt: now,
-				updatedAt: now,
-				firstFrameImageId: "img_orphan",
-				lastFrameImageId: "img_also_orphan",
-			} as never);
-		});
-
-		await t.mutation(api.studio.mutations.migrateLegacyStudioMedia, {});
-		const run = await t.query(api.studio.queries.getRun, { runId });
-		expect(run?.firstFrameImageId).toBeUndefined();
-		expect(run?.lastFrameImageId).toBeUndefined();
-		expect(run?.referenceImages).toEqual([]);
-	});
-});

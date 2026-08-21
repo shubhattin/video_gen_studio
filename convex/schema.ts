@@ -29,28 +29,6 @@ export const videoSceneValidator = v.object({
 	audio: v.string(),
 });
 
-/** Legacy 11-field scenes still present on older runs/plans. */
-export const legacyVideoSceneValidator = v.object({
-	sceneNumber: v.number(),
-	intent: v.string(),
-	subjects: v.string(),
-	locationTime: v.string(),
-	composition: v.string(),
-	lensCamera: v.string(),
-	lighting: v.string(),
-	paletteAesthetics: v.string(),
-	actionMotion: v.string(),
-	soundDirection: v.string(),
-	transition: v.string(),
-	negativeConstraints: v.string(),
-});
-
-/** Stored scenes may be new or legacy until rewritten. */
-export const storedVideoSceneValidator = v.union(
-	videoSceneValidator,
-	legacyVideoSceneValidator,
-);
-
 export const mediaMetaValidator = v.object({
 	mimeType: v.string(),
 	width: v.optional(v.number()),
@@ -75,30 +53,6 @@ export const galleryImageSourceValidator = v.union(
 	v.literal("uploaded"),
 	v.literal("terminal_frame"),
 );
-
-const referenceImageValidator = v.object({
-	id: v.string(),
-	objectKey: v.string(),
-	meta: mediaMetaValidator,
-	source: v.optional(
-		v.union(v.literal("generated"), v.literal("uploaded"), v.literal("terminal_frame")),
-	),
-	revisedImagePrompt: v.optional(v.string()),
-	createdAt: v.number(),
-});
-
-const generatedVideoValidator = v.object({
-	id: v.string(),
-	objectKey: v.string(),
-	meta: mediaMetaValidator,
-	openRouterJobId: v.string(),
-	openRouterGenerationId: v.optional(v.string()),
-	actualCostUsd: v.optional(v.number()),
-	videoParams: videoParamsValidator,
-	videoPrompt: v.optional(v.string()),
-	warnings: v.optional(v.array(v.string())),
-	createdAt: v.number(),
-});
 
 export const compositionModeValidator = v.union(
 	v.literal("continuation"),
@@ -158,13 +112,11 @@ export default defineSchema({
 		plannerPromptSelection: v.optional(plannerPromptSelectionValidator),
 		plannerModel: v.optional(v.string()),
 		plannerReasoning: v.optional(v.string()),
-		imagePrompt: v.optional(v.string()),
-		videoScenes: v.optional(v.array(storedVideoSceneValidator)),
 		imageSize: v.optional(v.string()),
 		imageQuality: v.optional(v.string()),
 		selectedModelId: v.optional(v.string()),
 		videoParams: v.optional(videoParamsValidator),
-		/** Canonical provider prompt built from scenes (may exceed model char limit). */
+		/** Canonical provider prompt (model-studio brief; shloka runs snapshot at generation). */
 		videoPrompt: v.optional(v.string()),
 		/** Luna-compressed prompt when videoPrompt exceeds the model limit. */
 		summarizedVideoPrompt: v.optional(v.string()),
@@ -175,15 +127,9 @@ export default defineSchema({
 		compositionClipCount: v.optional(v.number()),
 		attachedImageIds: v.optional(v.array(v.id("galleryImages"))),
 		attachedVideoIds: v.optional(v.array(v.id("galleryVideos"))),
-		/** Gallery document id, or a leftover client `img_*` id until migration. */
-		firstFrameImageId: v.optional(v.union(v.id("galleryImages"), v.string())),
-		lastFrameImageId: v.optional(v.union(v.id("galleryImages"), v.string())),
-		extraReferenceImageIds: v.optional(
-			v.array(v.union(v.id("galleryImages"), v.string())),
-		),
-		/** @deprecated Embedded media; migrateLegacyStudioMedia lifts these into gallery tables. */
-		referenceImages: v.optional(v.array(referenceImageValidator)),
-		videos: v.optional(v.array(generatedVideoValidator)),
+		firstFrameImageId: v.optional(v.id("galleryImages")),
+		lastFrameImageId: v.optional(v.id("galleryImages")),
+		extraReferenceImageIds: v.optional(v.array(v.id("galleryImages"))),
 		revisionNumber: v.optional(v.number()),
 		parentRunId: v.optional(v.id("generationRuns")),
 		warnings: v.optional(v.array(v.string())),
@@ -238,7 +184,7 @@ export default defineSchema({
 		plannerModel: v.optional(v.string()),
 		plannerReasoning: v.optional(v.string()),
 		imagePrompt: v.string(),
-		videoScenes: v.array(storedVideoSceneValidator),
+		videoScenes: v.array(videoSceneValidator),
 		planningKey: v.string(),
 		warnings: v.optional(v.array(v.string())),
 		lastError: v.optional(v.string()),
@@ -286,12 +232,9 @@ export default defineSchema({
 		scenePrompt: v.string(),
 		continuityInstructions: v.string(),
 		transition: v.string(),
-		referenceImageId: v.optional(v.union(v.id("galleryImages"), v.string())),
+		referenceImageId: v.optional(v.id("galleryImages")),
 		terminalFrameImageId: v.optional(v.id("galleryImages")),
 		galleryVideoId: v.optional(v.id("galleryVideos")),
-		/** @deprecated Embedded clip media; migrateLegacyStudioMedia lifts these into gallery tables. */
-		terminalFrameObjectKey: v.optional(v.string()),
-		video: v.optional(generatedVideoValidator),
 		attempts: v.number(),
 		lastError: v.optional(v.string()),
 		warnings: v.optional(v.array(v.string())),

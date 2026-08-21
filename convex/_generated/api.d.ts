@@ -21,7 +21,6 @@ import type * as lib_videoPlanMarkdown from "../lib/videoPlanMarkdown.js";
 import type * as studio_actions from "../studio/actions.js";
 import type * as studio_internal from "../studio/internal.js";
 import type * as studio_media from "../studio/media.js";
-import type * as studio_migrateLegacy from "../studio/migrateLegacy.js";
 import type * as studio_mutations from "../studio/mutations.js";
 import type * as studio_queries from "../studio/queries.js";
 import type * as studio_r2 from "../studio/r2.js";
@@ -46,7 +45,6 @@ declare const fullApi: ApiFromModules<{
   "studio/actions": typeof studio_actions;
   "studio/internal": typeof studio_internal;
   "studio/media": typeof studio_media;
-  "studio/migrateLegacy": typeof studio_migrateLegacy;
   "studio/mutations": typeof studio_mutations;
   "studio/queries": typeof studio_queries;
   "studio/r2": typeof studio_r2;

@@ -30,21 +30,18 @@ studio/gallery/frames/<id>.<ext>
 
 ## Wipe (dev / prod)
 
-Because this schema drop is breaking, wipe or migrate leftover rows **before** tightening `firstFrameImageId` / `lastFrameImageId` / `extraReferenceImageIds` back to `v.id("galleryImages")` only.
+All media lives in the `galleryImages` / `galleryVideos` tables and runs reference them with strict
+`v.id("galleryImages")` ids (`firstFrameImageId` / `lastFrameImageId` / `extraReferenceImageIds`).
+The old embedded-media fields, client-generated `img_*` id fallbacks, and the one-time
+`migrateLegacyStudioMedia` migration have been removed — the wipe below was run before that change.
 
-Existing runs may still store client-generated `img_*` strings in those fields (and embedded `referenceImages` / `videos`). Run admin mutation `studio.mutations.migrateLegacyStudioMedia` to:
-
-1. Insert gallery rows for embedded images/videos (same R2 object keys).
-2. Remap first/last/style tags onto gallery document ids.
-3. Rewrite run and clip documents so leftover `img_*` fields and embedded media arrays are gone.
-
-Then, if you still want a clean slate:
+To start over:
 
 1. Call admin mutation `studio.mutations.wipeAllStudioData` on **dev**.
 2. Deploy the new functions.
 3. Repeat on **prod**.
 
-Wipe clears runs, plans, composition rows, gallery tables, catalog cache, and the corresponding R2 objects. Migration keeps media files and re-attaches them to the shared gallery. `GET /studio/media` allows any `studio/…` key that exists in the gallery (including older `studio/runs/…` keys).
+Wipe clears runs, plans, composition rows, gallery tables, catalog cache, and the corresponding R2 objects. `GET /studio/media` allows any `studio/…` key that exists in the gallery.
 
 ## Checksums
 

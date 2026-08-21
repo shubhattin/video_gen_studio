@@ -229,7 +229,6 @@ async function resolveProviderVideoPrompt(
 		if (args.persist) {
 			await ctx.runMutation(internal.studio.internal.clearVideoPromptSummary, {
 				runId: args.runId,
-				videoPrompt: full,
 			});
 		}
 		return { prompt: full, usedSummary: false };
@@ -250,7 +249,6 @@ async function resolveProviderVideoPrompt(
 	if (args.persist) {
 		await ctx.runMutation(internal.studio.internal.setVideoPromptSummaryCache, {
 			runId: args.runId,
-			videoPrompt: full,
 			sourceHash,
 			summarizedVideoPrompt: summarized,
 		});
@@ -333,13 +331,7 @@ export const planShlokaRun = action({
 		);
 
 		const planningKey = `plan-${args.runId}-${Date.now().toString(36)}`;
-		if (
-			!args.force &&
-			run.activePlanId &&
-			run.status === "plan_ready" &&
-			run.imagePrompt &&
-			run.videoScenes
-		) {
+		if (!args.force && run.status === "plan_ready" && run.activePlanId) {
 			return null;
 		}
 
@@ -514,14 +506,14 @@ export const generateReferenceImage = action({
 		const run = await ctx.runQuery(internal.studio.queries.getRunDoc, {
 			runId: args.runId,
 		});
-		if (!run?.imagePrompt && !run?.videoPrompt && !run?.videoParams?.prompt) {
+		if (!run?.activePlan && !run?.videoPrompt && !run?.videoParams?.prompt) {
 			throw new Error(
 				"Plan an image prompt (or provide a video prompt) before generating a reference image.",
 			);
 		}
 
 		const imagePrompt =
-			run.imagePrompt?.trim() ||
+			run.activePlan?.imagePrompt?.trim() ||
 			run.videoPrompt?.trim() ||
 			run.videoParams?.prompt?.trim() ||
 			"";
@@ -614,7 +606,7 @@ export const generateVideoForRun = action({
 			id: string;
 			objectKey: string;
 		};
-		const images = (run.referenceImages ?? []) as RefImage[];
+		const images = (run.images ?? []) as RefImage[];
 		const first = images.find(
 			(image: RefImage) => image.id === run.firstFrameImageId,
 		);
@@ -639,12 +631,20 @@ export const generateVideoForRun = action({
 			modelId,
 		});
 
+		// Shloka runs derive the provider prompt from the active plan's scenes;
+		// model-studio runs use their stored video prompt.
 		const fullPrompt =
-			run.videoPrompt?.trim() ||
-			(run.videoScenes
-				? buildVideoPromptFromScenes(run.videoScenes)
-				: run.imagePrompt) ||
-			"Warm Indian cinematic motion portrait.";
+			run.provenance === "shloka"
+				? (run.activePlan
+					? buildVideoPromptFromScenes(run.activePlan.videoScenes)
+					: undefined)
+				: (run.videoPrompt?.trim() || run.videoParams?.prompt?.trim()) ||
+					"Warm Indian cinematic motion portrait.";
+		if (!fullPrompt?.trim()) {
+			throw new Error(
+				"Plan the run (or provide a video prompt) before generating.",
+			);
+		}
 
 		const resolved = await resolveProviderVideoPrompt(ctx, {
 			runId: args.runId,
@@ -757,11 +757,14 @@ export const refreshVideoPromptSummary = internalAction({
 		if (!run) {
 			return null;
 		}
+		// Shloka runs derive the provider prompt from the active plan's scenes;
+		// model-studio runs use their stored video prompt.
 		const fullPrompt =
-			run.videoPrompt?.trim() ||
-			(run.videoScenes
-				? buildVideoPromptFromScenes(run.videoScenes)
-				: undefined);
+			run.provenance === "shloka"
+				? (run.activePlan
+					? buildVideoPromptFromScenes(run.activePlan.videoScenes)
+					: undefined)
+				: run.videoPrompt?.trim();
 		if (!fullPrompt) {
 			return null;
 		}
@@ -832,7 +835,7 @@ export const generateNextCompositionClip = internalAction({
 
 			const explicitReferenceObjectKey =
 				clip.clipIndex === 0
-					? run.referenceImages?.find(
+					? (run.images ?? []).find(
 							(image: { id: string; objectKey: string }) =>
 								image.id === run.firstFrameImageId,
 						)?.objectKey
@@ -973,10 +976,11 @@ async function runTitleGeneration(
 	ctx: ActionCtx,
 	args: { runId: Id<"generationRuns">; force?: boolean },
 ): Promise<string> {
-	const run: Doc<"generationRuns"> | null = await ctx.runQuery(
-		internal.studio.queries.getRunDoc,
-		{ runId: args.runId },
-	);
+	const run: Doc<"generationRuns"> & {
+		activePlan?: { videoScenes?: Array<{ intent?: string }> } | null;
+	} | null = await ctx.runQuery(internal.studio.queries.getRunDoc, {
+		runId: args.runId,
+	});
 	if (!run) {
 		throw new Error("Run not found.");
 	}
@@ -997,7 +1001,7 @@ async function runTitleGeneration(
 		run.provenance === "model-studio" ? "Model Run" : "Shloka Run";
 	const fallback = modelLabel ?? provenanceLabel;
 
-	const sceneIntents = (run.videoScenes ?? [])
+	const sceneIntents = (run.activePlan?.videoScenes ?? [])
 		.map((scene) => scene.intent)
 		.filter(Boolean)
 		.slice(0, 4)

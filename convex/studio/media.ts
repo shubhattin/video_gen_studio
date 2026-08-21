@@ -3,26 +3,6 @@ import type { MutationCtx, QueryCtx } from "../_generated/server";
 
 type DbCtx = QueryCtx | MutationCtx;
 
-export function asGalleryImageId(
-	ctx: DbCtx,
-	value: string | undefined | null,
-): Id<"galleryImages"> | undefined {
-	if (!value) {
-		return undefined;
-	}
-	return ctx.db.normalizeId("galleryImages", value) ?? undefined;
-}
-
-export function asGalleryVideoId(
-	ctx: DbCtx,
-	value: string | undefined | null,
-): Id<"galleryVideos"> | undefined {
-	if (!value) {
-		return undefined;
-	}
-	return ctx.db.normalizeId("galleryVideos", value) ?? undefined;
-}
-
 export function galleryImageToRef(doc: Doc<"galleryImages">) {
 	return {
 		id: doc._id,
@@ -126,37 +106,29 @@ export async function listCompositionClipsForRunCtx(
 }
 
 export async function collectRunMediaIds(
-	ctx: DbCtx,
 	run: Doc<"generationRuns">,
 	clips: Array<Doc<"compositionClips">>,
 ) {
 	const images = new Set<Id<"galleryImages">>();
 	const videos = new Set<Id<"galleryVideos">>();
 	for (const id of run.attachedImageIds ?? []) {
-		const ok = asGalleryImageId(ctx, id);
-		if (ok) images.add(ok);
+		images.add(id);
 	}
 	for (const id of [run.firstFrameImageId, run.lastFrameImageId]) {
-		const ok = asGalleryImageId(ctx, id);
-		if (ok) images.add(ok);
+		if (id) images.add(id);
 	}
 	for (const id of run.extraReferenceImageIds ?? []) {
-		const ok = asGalleryImageId(ctx, id);
-		if (ok) images.add(ok);
+		images.add(id);
 	}
 	for (const clip of clips) {
-		const ref = asGalleryImageId(ctx, clip.referenceImageId);
-		if (ref) images.add(ref);
-		const frame = asGalleryImageId(ctx, clip.terminalFrameImageId);
-		if (frame) images.add(frame);
+		if (clip.referenceImageId) images.add(clip.referenceImageId);
+		if (clip.terminalFrameImageId) images.add(clip.terminalFrameImageId);
 	}
 	for (const id of run.attachedVideoIds ?? []) {
-		const ok = asGalleryVideoId(ctx, id);
-		if (ok) videos.add(ok);
+		videos.add(id);
 	}
 	for (const clip of clips) {
-		const ok = asGalleryVideoId(ctx, clip.galleryVideoId);
-		if (ok) videos.add(ok);
+		if (clip.galleryVideoId) videos.add(clip.galleryVideoId);
 	}
 	return { images, videos };
 }

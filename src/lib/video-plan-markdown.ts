@@ -2,7 +2,6 @@ export {
 	buildVideoPromptFromScenes,
 	hashVideoPromptSource,
 	markdownToVideoScenes,
-	normalizeVideoScene,
 	normalizeVideoScenes,
 	videoScenesToMarkdown,
 	type EditableVideoScene,

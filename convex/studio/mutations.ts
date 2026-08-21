@@ -5,7 +5,7 @@ import { mutation } from "../_generated/server";
 import { requireAdmin } from "../lib/auth";
 import { VIDEO_MODEL_IDS, type VideoModelId } from "../lib/modelCatalog";
 import { defaultImageConfig, defaultVideoParams } from "../lib/schemas";
-import { buildVideoPromptFromScenes, normalizeVideoScenes } from "../lib/videoPlanMarkdown";
+import { normalizeVideoScenes } from "../lib/videoPlanMarkdown";
 import {
 	compositionModeValidator,
 	plannerPromptSelectionValidator,
@@ -14,9 +14,7 @@ import {
 	videoSceneValidator,
 } from "../schema";
 import {
-	asGalleryImageId,
 	collectRunMediaIds,
-	findGalleryByObjectKey,
 	imageReferencedOutsideRun,
 	listShlokaPlansForRunCtx,
 	uniqueIds,
@@ -24,7 +22,6 @@ import {
 	unlinkGalleryVideoFromRuns,
 	videoReferencedOutsideRun,
 } from "./media";
-import { leftoverObjectKeys } from "./migrateLegacy";
 import {
 	listCompositionJobsForRunCtx,
 	resolveActiveCompositionJob,
@@ -32,7 +29,7 @@ import {
 } from "./queries";
 
 const galleryIdOrNull = v.optional(
-	v.union(v.id("galleryImages"), v.string(), v.null()),
+	v.union(v.id("galleryImages"), v.null()),
 );
 
 export const selectCompositionJob = mutation({
@@ -279,9 +276,7 @@ export const updateDraft = mutation({
 		compositionClipCount: v.optional(v.union(v.number(), v.null())),
 		firstFrameImageId: galleryIdOrNull,
 		lastFrameImageId: galleryIdOrNull,
-		extraReferenceImageIds: v.optional(
-			v.array(v.union(v.id("galleryImages"), v.string())),
-		),
+		extraReferenceImageIds: v.optional(v.array(v.id("galleryImages"))),
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
@@ -343,52 +338,56 @@ export const updateDraft = mutation({
 			shlokaText = trimmed;
 		}
 
-		let imagePrompt = run.imagePrompt;
-		if (args.imagePrompt !== undefined) {
-			const trimmed = args.imagePrompt.trim();
-			if (trimmed.length < 20) {
-				throw new Error("Image prompt must be at least 20 characters.");
+		// Plan content lives on the active shlokaPlans row — edits are applied
+		// there, never denormalized onto the run.
+		let scenesChanged = false;
+		if (args.imagePrompt !== undefined || args.videoScenes !== undefined) {
+			if (!run.activePlanId) {
+				throw new Error("Generate a plan before editing its prompts.");
 			}
-			imagePrompt = trimmed;
+			const activePlan = await ctx.db.get(run.activePlanId);
+			if (!activePlan || activePlan.runId !== args.runId) {
+				throw new Error("The active plan no longer exists for this run.");
+			}
+			let imagePrompt = activePlan.imagePrompt;
+			if (args.imagePrompt !== undefined) {
+				const trimmed = args.imagePrompt.trim();
+				if (trimmed.length < 20) {
+					throw new Error("Image prompt must be at least 20 characters.");
+				}
+				imagePrompt = trimmed;
+			}
+			let videoScenes = activePlan.videoScenes;
+			if (args.videoScenes !== undefined) {
+				if (args.videoScenes.length < 1 || args.videoScenes.length > 12) {
+					throw new Error("Video plan must include between 1 and 12 scenes.");
+				}
+				videoScenes = normalizeVideoScenes(args.videoScenes);
+				scenesChanged = true;
+			}
+			await ctx.db.patch(activePlan._id, {
+				imagePrompt,
+				videoScenes,
+				updatedAt: Date.now(),
+			});
 		}
 
-		let videoScenes = run.videoScenes;
-		let videoPrompt =
+		const videoPrompt =
 			args.videoPrompt !== undefined
 				? args.videoPrompt.trim() || undefined
 				: run.videoPrompt;
-		let scenesChanged = false;
-		if (args.videoScenes !== undefined) {
-			if (args.videoScenes.length < 1 || args.videoScenes.length > 12) {
-				throw new Error("Video plan must include between 1 and 12 scenes.");
-			}
-			videoScenes = normalizeVideoScenes(args.videoScenes);
-			scenesChanged = true;
-			if (args.videoPrompt === undefined) {
-				videoPrompt = buildVideoPromptFromScenes(videoScenes);
-			}
-		}
 
 		const firstFrameImageId =
 			args.firstFrameImageId === null
 				? undefined
-				: args.firstFrameImageId !== undefined
-					? asGalleryImageId(ctx, args.firstFrameImageId)
-					: asGalleryImageId(ctx, run.firstFrameImageId);
+				: (args.firstFrameImageId ?? run.firstFrameImageId);
 		const lastFrameImageId =
 			args.lastFrameImageId === null
 				? undefined
-				: args.lastFrameImageId !== undefined
-					? asGalleryImageId(ctx, args.lastFrameImageId)
-					: asGalleryImageId(ctx, run.lastFrameImageId);
-		const extraReferenceImageIds = (
-			args.extraReferenceImageIds ??
-			run.extraReferenceImageIds ??
-			[]
-		).flatMap((id) => {
-			const ok = asGalleryImageId(ctx, id);
-			return ok ? [ok] : [];
-		});
+				: (args.lastFrameImageId ?? run.lastFrameImageId);
+		const extraReferenceImageIds = uniqueIds([
+			...(args.extraReferenceImageIds ?? run.extraReferenceImageIds ?? []),
+		]);
 
 		const modelChanged =
 			args.selectedModelId !== undefined &&
@@ -402,13 +401,11 @@ export const updateDraft = mutation({
 					? args.customInstructions.trim() || undefined
 					: run.customInstructions,
 			plannerPromptSelection,
-			imagePrompt,
-			videoScenes,
+			videoPrompt,
 			imageSize: args.imageSize ?? run.imageSize,
 			imageQuality: args.imageQuality ?? run.imageQuality,
 			selectedModelId: args.selectedModelId ?? run.selectedModelId,
 			videoParams: args.videoParams ?? run.videoParams,
-			videoPrompt,
 			...(scenesChanged ||
 			(args.videoPrompt !== undefined &&
 				args.videoPrompt.trim() !== (run.videoPrompt ?? ""))
@@ -428,33 +425,25 @@ export const updateDraft = mutation({
 			extraReferenceImageIds,
 			updatedAt: Date.now(),
 		};
-		const first = patch.firstFrameImageId;
-		const last = patch.lastFrameImageId;
-		const extras = patch.extraReferenceImageIds ?? [];
-		if (first && last === first) patch.lastFrameImageId = undefined;
-		if (first && extras.includes(first)) {
-			patch.extraReferenceImageIds = extras.filter((id) => id !== first);
+		if (firstFrameImageId && lastFrameImageId === firstFrameImageId) {
+			patch.lastFrameImageId = undefined;
 		}
-		if (last && extras.includes(last)) {
-			patch.extraReferenceImageIds = (patch.extraReferenceImageIds ?? []).filter(
-				(id) => id !== last,
+		if (firstFrameImageId && extraReferenceImageIds.includes(firstFrameImageId)) {
+			patch.extraReferenceImageIds = extraReferenceImageIds.filter(
+				(id) => id !== firstFrameImageId,
 			);
 		}
-		await ctx.db.patch(args.runId, patch);
-
 		if (
-			run.activePlanId &&
-			(args.imagePrompt !== undefined || args.videoScenes !== undefined)
+			lastFrameImageId &&
+			(patch.extraReferenceImageIds ?? extraReferenceImageIds).includes(
+				lastFrameImageId,
+			)
 		) {
-			const activePlan = await ctx.db.get(run.activePlanId);
-			if (activePlan && activePlan.runId === args.runId) {
-				await ctx.db.patch(run.activePlanId, {
-					imagePrompt: imagePrompt ?? activePlan.imagePrompt,
-					videoScenes: videoScenes ?? activePlan.videoScenes,
-					updatedAt: Date.now(),
-				});
-			}
+			patch.extraReferenceImageIds = (
+				patch.extraReferenceImageIds ?? extraReferenceImageIds
+			).filter((id) => id !== lastFrameImageId);
 		}
+		await ctx.db.patch(args.runId, patch);
 
 		if (scenesChanged || modelChanged || paramsChanged) {
 			await ctx.scheduler.runAfter(
@@ -658,7 +647,7 @@ export const deleteRun = mutation({
 
 		if (deleteMedia) {
 			const { images: runImageIds, videos: runVideoIds } =
-				await collectRunMediaIds(ctx, run, compositionClips);
+			await collectRunMediaIds(run, compositionClips);
 
 			for (const imageId of runImageIds) {
 				if (await imageReferencedOutsideRun(ctx, imageId, args.runId)) {
@@ -692,18 +681,6 @@ export const deleteRun = mutation({
 				await unlinkGalleryVideoFromRuns(ctx, video._id);
 				await ctx.db.delete(video._id);
 				r2KeysToDelete.add(video.objectKey);
-			}
-
-			// Orphaned legacy embedded files that are not tracked in the gallery.
-			const orphanKeys = [
-				leftoverObjectKeys(run),
-				...compositionClips.map((clip) => leftoverObjectKeys(clip)),
-			].flat();
-			for (const key of orphanKeys) {
-				if (r2KeysToDelete.has(key)) continue;
-				if ((await findGalleryByObjectKey(ctx, key)) === null) {
-					r2KeysToDelete.add(key);
-				}
 			}
 		}
 
@@ -763,7 +740,7 @@ export const attachGalleryImageToRun = mutation({
 export const removeReferenceImage = mutation({
 	args: {
 		runId: v.id("generationRuns"),
-		imageId: v.string(),
+		imageId: v.id("galleryImages"),
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
@@ -772,7 +749,7 @@ export const removeReferenceImage = mutation({
 		if (!run) {
 			throw new Error("Run not found.");
 		}
-		const imageId = args.imageId as Id<"galleryImages">;
+		const imageId = args.imageId;
 		const attached = (run.attachedImageIds ?? []).filter((id) => id !== imageId);
 		await ctx.db.patch(args.runId, {
 			attachedImageIds: attached,
@@ -854,31 +831,6 @@ export const wipeAllStudioData = mutation({
 	}> => {
 		await requireAdmin(ctx);
 		return await ctx.runMutation(internal.studio.internal.wipeAllStudioData, {});
-	},
-});
-
-/** Lift embedded run/clip media into the gallery and drop leftover img_* ids. */
-export const migrateLegacyStudioMedia = mutation({
-	args: {},
-	returns: v.object({
-		runsMigrated: v.number(),
-		clipsMigrated: v.number(),
-		imagesCreated: v.number(),
-		videosCreated: v.number(),
-	}),
-	handler: async (
-		ctx,
-	): Promise<{
-		runsMigrated: number;
-		clipsMigrated: number;
-		imagesCreated: number;
-		videosCreated: number;
-	}> => {
-		await requireAdmin(ctx);
-		return await ctx.runMutation(
-			internal.studio.migrateLegacy.migrateLegacyStudioMedia,
-			{},
-		);
 	},
 });
 

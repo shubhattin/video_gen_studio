@@ -1,6 +1,6 @@
 /**
  * Seedance-oriented scene plan: six-part formula + intent heading.
- * Legacy 11-field scenes are normalized on read.
+ * Scenes are strictly the current eight-field shape.
  */
 
 export type EditableVideoScene = {
@@ -20,7 +20,7 @@ export type EditableVideoScene = {
 	audio: string;
 };
 
-/** Labels for markdown edit round-trip (new six-part shape). */
+/** Labels for markdown edit round-trip. */
 const FIELD_LABELS = [
 	["subject", "Subject"],
 	["action", "Action"],
@@ -40,85 +40,12 @@ const OPTIONAL_FIELDS = new Set<SceneField>([
 	"audio",
 ]);
 
-type LegacyVideoScene = {
-	sceneNumber: number;
-	intent: string;
-	subjects?: string;
-	locationTime?: string;
-	composition?: string;
-	lensCamera?: string;
-	lighting?: string;
-	paletteAesthetics?: string;
-	actionMotion?: string;
-	soundDirection?: string;
-	transition?: string;
-	negativeConstraints?: string;
-	subject?: string;
-	action?: string;
-	scene?: string;
-	style?: string;
-	camera?: string;
-	audio?: string;
-};
-
-function joinNonEmpty(parts: Array<string | undefined>, sep = "; "): string {
-	return parts
-		.map((p) => p?.trim())
-		.filter((p): p is string => Boolean(p))
-		.join(sep);
-}
-
-/** Map legacy or mixed scene docs into the six-part shape. */
-export function normalizeVideoScene(
-	raw: LegacyVideoScene,
-	fallbackNumber = 1,
-): EditableVideoScene {
-	const sceneNumber =
-		Number.isFinite(raw.sceneNumber) && raw.sceneNumber > 0
-			? raw.sceneNumber
-			: fallbackNumber;
-
-	const subject =
-		raw.subject?.trim() ||
-		raw.subjects?.trim() ||
-		"Untitled subject";
-	const action =
-		raw.action?.trim() ||
-		raw.actionMotion?.trim() ||
-		"Quiet motion";
-
-	const scene =
-		raw.scene?.trim() ||
-		joinNonEmpty([raw.locationTime, raw.composition]) ||
-		"";
-	const style =
-		raw.style?.trim() ||
-		joinNonEmpty([raw.paletteAesthetics, raw.lighting]) ||
-		"";
-	const camera = raw.camera?.trim() || raw.lensCamera?.trim() || "";
-	const audio =
-		raw.audio?.trim() ||
-		joinNonEmpty([raw.soundDirection, raw.transition]) ||
-		"";
-
-	return {
-		sceneNumber,
-		intent: raw.intent?.trim() || "Untitled beat",
-		subject,
-		action,
-		scene,
-		style,
-		camera,
-		audio,
-	};
-}
-
+/** Order by sceneNumber and renumber 1..n. */
 export function normalizeVideoScenes(
-	scenes: LegacyVideoScene[] | undefined | null,
+	scenes: EditableVideoScene[] | undefined | null,
 ): EditableVideoScene[] {
 	if (!scenes?.length) return [];
-	return scenes
-		.map((s, i) => normalizeVideoScene(s, i + 1))
+	return [...scenes]
 		.sort((a, b) => a.sceneNumber - b.sceneNumber)
 		.map((s, i) => ({ ...s, sceneNumber: i + 1 }));
 }
@@ -141,7 +68,7 @@ function compactSceneLine(scene: EditableVideoScene, index: number): string {
  * No scene-count truncation — full plan is included; summarization handles limits.
  */
 export function buildVideoPromptFromScenes(
-	scenes: Array<LegacyVideoScene | EditableVideoScene>,
+	scenes: EditableVideoScene[],
 ): string {
 	const normalized = normalizeVideoScenes(scenes);
 	if (normalized.length === 0) {
@@ -180,31 +107,17 @@ function emptyScene(sceneNumber: number): EditableVideoScene {
 	};
 }
 
-/** Accept new labels and common legacy aliases when parsing markdown. */
 function labelToField(label: string): SceneField | null {
 	const normalized = label.trim().toLowerCase();
-	const aliases: Record<string, SceneField> = {
+	const labels: Record<string, SceneField> = {
 		subject: "subject",
-		subjects: "subject",
 		action: "action",
-		"action / event": "action",
-		motion: "action",
 		scene: "scene",
-		"scene / environment": "scene",
-		"location / time": "scene",
-		location: "scene",
-		environment: "scene",
 		style: "style",
-		"visual style": "style",
-		palette: "style",
-		lighting: "style",
 		camera: "camera",
-		"camera movement / cut": "camera",
-		"lens / camera": "camera",
 		audio: "audio",
-		sound: "audio",
 	};
-	return aliases[normalized] ?? null;
+	return labels[normalized] ?? null;
 }
 
 export type MarkdownToVideoScenesResult = {
@@ -215,7 +128,7 @@ export type MarkdownToVideoScenesResult = {
 
 /**
  * Parse markdown produced by {@link videoScenesToMarkdown}.
- * Never throws. Also accepts legacy field labels where possible.
+ * Never throws.
  */
 export function markdownToVideoScenes(
 	markdown: string,

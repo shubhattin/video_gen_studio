@@ -114,7 +114,7 @@ export function ModelStudio({
 	);
 	const profile = MODEL_CAPABILITY_PROFILES[selectedModel];
 
-	const rawImages = (run?.referenceImages ?? []) as Array<{
+	const rawImages = (run?.images ?? []) as Array<{
 		id: string;
 		objectKey?: string;
 		source?: "generated" | "uploaded" | "terminal_frame";
@@ -352,8 +352,8 @@ export function ModelStudio({
 		compositionJob?.status === "awaiting_terminal_frame";
 
 	const hasPlan = Boolean(
-		run?.imagePrompt ||
-			run?.videoScenes?.length ||
+		run?.videoPrompt ||
+			run?.videoParams?.prompt ||
 			compositionJob ||
 			(compositionAttempts?.length ?? 0) > 0,
 	);
@@ -605,7 +605,10 @@ export function ModelStudio({
 				}}
 				onRemoveImage={async (id) => {
 					if (!activeRunId) return;
-					await removeReferenceImage({ runId: activeRunId, imageId: id });
+					await removeReferenceImage({
+						runId: activeRunId,
+						imageId: id as Id<"galleryImages">,
+					});
 				}}
 			/>
 
