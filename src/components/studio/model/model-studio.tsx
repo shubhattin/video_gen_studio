@@ -254,7 +254,7 @@ export function ModelStudio({ runId }: ModelStudioProps) {
 						onChange={(event) => onPromptChange(event.target.value)}
 						onBlur={commitPrompt}
 						placeholder="Describe the shot: subject, action, scene, style, camera, audio…"
-						className="min-h-40"
+						className="min-h-64"
 						disabled={anyBusy}
 					/>
 				</section>
