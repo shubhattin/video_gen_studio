@@ -35,7 +35,7 @@ const STUDIOS: Array<{
 		id: "shloka",
 		title: "Shloka Studio",
 		description:
-			"Assisted flow for devotional shorts — plan scenes from a verse, craft the reference still, then render the clip.",
+			"Assisted flow for shloka explainers — plan scenes from a verse, craft the reference still, then render the clip.",
 		icon: Sparkles,
 	},
 	{
@@ -97,13 +97,6 @@ export function StudioLauncher({ onShlokaRunCreated }: StudioLauncherProps) {
 
 	return (
 		<div className="flex flex-col gap-6">
-			<div className="flex flex-col gap-1.5">
-				<h2 className="font-heading text-lg font-semibold">Start a new run</h2>
-				<p className="text-sm text-muted-foreground">
-					Choose a studio, pick a model and settings, then start the run.
-				</p>
-			</div>
-
 			<div className="grid gap-3 sm:grid-cols-2">
 				{STUDIOS.map((entry) => {
 					const Icon = entry.icon;

@@ -434,16 +434,7 @@ export function ModelStudio({
 	return (
 		<div className="flex flex-col gap-6 rounded-2xl border border-border/80 bg-gradient-to-b from-card to-card/40 p-4 shadow-sm sm:p-6">
 			<section className="flex flex-col gap-3">
-				<div className="flex flex-wrap items-start justify-between gap-3">
-					<div className="flex flex-col gap-1.5">
-						<h1 className="font-heading text-xl font-semibold tracking-tight sm:text-2xl">
-							Model Studio
-						</h1>
-						<p className="text-sm text-muted-foreground">
-							Pick a video model and configure the clip. Each generate appends
-							another clip to the run.
-						</p>
-					</div>
+				<div className="flex items-start justify-end">
 					<AutosaveStatus
 						status={autosave.status}
 						hasPending={autosave.hasPending}

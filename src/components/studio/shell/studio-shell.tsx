@@ -34,12 +34,18 @@ type StudioShellProps = {
 	children: ReactNode;
 	history: ReactNode;
 	activePath?: "/" | "/studio" | "/gallery" | "/prompt-templates";
+	/** Override the page title shown in the top bar (else derived from activePath). */
+	title?: string;
+	/** Override the page subtitle shown in the top bar (else derived from activePath). */
+	subtitle?: string;
 };
 
 export function StudioShell({
 	children,
 	history,
 	activePath = "/",
+	title,
+	subtitle,
 }: StudioShellProps) {
 	const { isAuthenticated } = useConvexAuth();
 	const historyRuns = useQuery(
@@ -66,9 +72,6 @@ export function StudioShell({
 							<div className="flex min-w-0 flex-1 flex-col group-data-[collapsible=icon]:hidden">
 								<span className="truncate font-heading text-sm font-semibold tracking-tight text-sidebar-foreground">
 									Shloka Video Studio
-								</span>
-								<span className="truncate text-xs text-sidebar-foreground/70">
-									Devotional shorts workspace
 								</span>
 							</div>
 						</div>
@@ -143,24 +146,26 @@ export function StudioShell({
 						<SidebarTrigger />
 						<div className="min-w-0">
 							<p className="truncate font-heading text-base font-semibold tracking-tight sm:text-lg">
-								{activePath === "/studio"
-									? "Model Studio"
-									: activePath === "/gallery"
-										? "Gallery"
-										: activePath === "/prompt-templates"
-											? "System Prompt Templates"
-											: "New"}
+								{title ??
+									(activePath === "/studio"
+										? "Model Studio"
+										: activePath === "/gallery"
+											? "Gallery"
+											: activePath === "/prompt-templates"
+												? "System Prompt Templates"
+												: "New")}
 							</p>
 							<p className="truncate text-xs text-muted-foreground sm:text-sm">
 								{waitingForStudioData
 									? mainLabel
-									: activePath === "/studio"
-										? "Direct video model API access"
-										: activePath === "/gallery"
-											? "Browse and download generated clips and reference stills"
-											: activePath === "/prompt-templates"
-												? "Manage the prompts the planner uses for Shloka plans"
-												: "Pick a studio and start a new run"}
+									: (subtitle ??
+										(activePath === "/studio"
+											? "Direct video model API access"
+											: activePath === "/gallery"
+												? "Browse and download generated clips and reference stills"
+												: activePath === "/prompt-templates"
+													? "Manage the prompts the planner uses for Shloka plans"
+													: "Pick a studio and start a new run"))}
 							</p>
 						</div>
 					</header>

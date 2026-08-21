@@ -40,7 +40,6 @@ export function NewRunSetup({ provenance, onCreated }: NewRunSetupProps) {
 		multiplier: 2,
 	});
 	const [creating, setCreating] = useState(false);
-	const isShloka = provenance === "shloka";
 
 	const onCreate = async () => {
 		setCreating(true);
@@ -67,15 +66,6 @@ export function NewRunSetup({ provenance, onCreated }: NewRunSetupProps) {
 
 	return (
 		<div className="flex flex-col gap-6">
-			<div className="flex flex-col gap-1.5">
-				<h2 className="font-heading text-lg font-semibold">
-					{isShloka ? "Start a shloka run" : "Start a model run"}
-				</h2>
-				<p className="text-sm text-muted-foreground">
-					Pick a model and settings, then create the run to start working on it.
-				</p>
-			</div>
-
 			<div className="flex flex-wrap gap-3">
 				<Button
 					className="min-h-11"

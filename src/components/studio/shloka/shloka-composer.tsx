@@ -3,9 +3,19 @@ import {
 	clearTypingContextOnKeyDown,
 	handleTypingBeforeInputEvent,
 } from "lipilekhika/typing";
+import { Info } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { SystemPromptPicker } from "#/components/studio/system-prompts/system-prompt-picker";
+import { Button } from "#/components/ui/button";
 import { Label } from "#/components/ui/label";
+import {
+	Popover,
+	PopoverContent,
+	PopoverDescription,
+	PopoverHeader,
+	PopoverTitle,
+	PopoverTrigger,
+} from "#/components/ui/popover";
 import { Switch } from "#/components/ui/switch";
 import { Textarea } from "#/components/ui/textarea";
 import type {
@@ -74,7 +84,7 @@ export function ShlokaComposer({
 					<div>
 						<h2 className="font-heading text-lg font-semibold">Shloka</h2>
 					</div>
-					<div className="flex items-center gap-2 min-h-11">
+					<div className="flex items-center gap-1.5 min-h-11">
 						<Switch
 							id="lipi-toggle"
 							checked={lipiEnabled}
@@ -82,8 +92,32 @@ export function ShlokaComposer({
 							disabled={disabled}
 						/>
 						<Label htmlFor="lipi-toggle" className="text-sm">
-							Auto-transliterate
+							Devanagari Typing
 						</Label>
+						<Popover>
+							<PopoverTrigger
+								render={
+									<Button
+										type="button"
+										variant="ghost"
+										size="icon-xs"
+										aria-label="Devanagari typing help"
+										disabled={disabled}
+									/>
+								}
+							>
+								<Info />
+							</PopoverTrigger>
+							<PopoverContent align="end" className="w-72 gap-3 p-4">
+								<PopoverHeader>
+									<PopoverTitle>Devanagari Typing</PopoverTitle>
+									<PopoverDescription>
+										While the verse box is focused, press Alt+X to toggle
+										Devanagari transliteration on or off.
+									</PopoverDescription>
+								</PopoverHeader>
+							</PopoverContent>
+						</Popover>
 					</div>
 				</div>
 				<Textarea
@@ -104,12 +138,18 @@ export function ShlokaComposer({
 						typingContextRef.current.clearContext();
 						onPersist?.();
 					}}
-					onKeyDown={(event) =>
+					onKeyDown={(event) => {
+						// Alt+X toggles Devanagari transliteration while typing.
+						if (event.altKey && (event.key === "x" || event.key === "X")) {
+							event.preventDefault();
+							setLipiEnabled((previous) => !previous);
+							return;
+						}
 						clearTypingContextOnKeyDown(
 							event.nativeEvent,
 							typingContextRef.current,
-						)
-					}
+						);
+					}}
 					placeholder="Enter or paste a verse in Devanagari…"
 					className={cn("min-h-32 text-base leading-relaxed")}
 					disabled={disabled}

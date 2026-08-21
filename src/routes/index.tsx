@@ -551,6 +551,8 @@ function ShlokaStudioPage() {
 	return (
 		<StudioShell
 			activePath="/"
+			title={runId ? "Shloka Studio" : undefined}
+			subtitle={runId ? "Turn shlokas into explainer videos" : undefined}
 			history={
 				<HistoryPanel
 					selectedRunId={runId}
@@ -567,24 +569,16 @@ function ShlokaStudioPage() {
 			) : (
 				<>
 					<div className="space-y-6 rounded-2xl border border-border/80 bg-gradient-to-b from-card to-card/40 p-4 shadow-sm sm:p-6">
-						<section className="flex flex-wrap items-start justify-between gap-3">
-							<div className="space-y-1.5">
-								<h1 className="font-heading text-xl font-semibold tracking-tight sm:text-2xl">
-									Shloka Video Generator
-								</h1>
-								<p className="text-sm text-muted-foreground">
-									Turn a verse into a short video: plan the scenes, generate
-									reference stills, then render the clips. Defaults to 9:16
-									portrait.
-								</p>
+						{runId ? (
+							<div className="flex items-start justify-end">
+								<AutosaveStatus
+									status={autosave.status}
+									hasPending={autosave.hasPending}
+									onRetry={autosave.retry}
+									className="pt-1"
+								/>
 							</div>
-							<AutosaveStatus
-								status={autosave.status}
-								hasPending={autosave.hasPending}
-								onRetry={autosave.retry}
-								className="pt-1"
-							/>
-						</section>
+						) : null}
 
 						{!runId ? (
 							<StudioLauncher onShlokaRunCreated={(id) => setRunId(id)} />
