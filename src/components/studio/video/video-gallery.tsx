@@ -72,12 +72,12 @@ type GalleryVideo = {
 type RunConnection = {
 	runId: string;
 	title?: string;
-	provenance: "shloka" | "model-studio";
+	kind: "shloka" | "model-studio";
 	status: string;
 };
 
 function runLabel(run: RunConnection): string {
-	const typeLabel = run.provenance === "shloka" ? "Shloka run" : "Model run";
+	const typeLabel = run.kind === "shloka" ? "Shloka run" : "Model run";
 	return run.title?.trim()
 		? `${run.title} · ${typeLabel}`
 		: `${typeLabel} (${run.runId.slice(0, 8)}…)`;

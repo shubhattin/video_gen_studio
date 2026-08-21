@@ -74,40 +74,35 @@ export async function findGalleryByObjectKey(ctx: DbCtx, objectKey: string) {
 	return null;
 }
 
-export async function listShlokaPlansForRunCtx(
+export async function listPlansForRunCtx(
 	ctx: DbCtx,
 	runId: Id<"generationRuns">,
 ) {
 	return await ctx.db
 		.query("shlokaPlans")
 		.withIndex("by_runId_and_createdAt", (q) => q.eq("runId", runId))
-		.order("desc")
+		.order("asc")
 		.take(50);
 }
 
-export async function listCompositionClipsForRunCtx(
+/** All plans belonging to a run — used for media ownership scans. */
+export async function listAllPlansForRunCtx(
 	ctx: DbCtx,
 	runId: Id<"generationRuns">,
 ) {
-	const jobs = await ctx.db
-		.query("compositionJobs")
-		.withIndex("by_runId_and_createdAt", (q) => q.eq("runId", runId))
-		.order("desc")
-		.take(50);
-	const clips: Doc<"compositionClips">[] = [];
-	for (const job of jobs) {
-		const jobClips = await ctx.db
-			.query("compositionClips")
-			.withIndex("by_jobId_and_clipIndex", (q) => q.eq("jobId", job._id))
-			.take(6);
-		clips.push(...jobClips);
-	}
-	return clips;
+	return await ctx.db
+		.query("shlokaPlans")
+		.withIndex("by_runId", (q) => q.eq("runId", runId))
+		.take(200);
 }
 
+/**
+ * Media owned by a shloka run: its attached/role images plus every video
+ * produced by any of its plans.
+ */
 export async function collectRunMediaIds(
 	run: Doc<"generationRuns">,
-	clips: Array<Doc<"compositionClips">>,
+	plans: Array<Doc<"shlokaPlans">>,
 ) {
 	const images = new Set<Id<"galleryImages">>();
 	const videos = new Set<Id<"galleryVideos">>();
@@ -120,15 +115,10 @@ export async function collectRunMediaIds(
 	for (const id of run.extraReferenceImageIds ?? []) {
 		images.add(id);
 	}
-	for (const clip of clips) {
-		if (clip.referenceImageId) images.add(clip.referenceImageId);
-		if (clip.terminalFrameImageId) images.add(clip.terminalFrameImageId);
-	}
-	for (const id of run.attachedVideoIds ?? []) {
-		videos.add(id);
-	}
-	for (const clip of clips) {
-		if (clip.galleryVideoId) videos.add(clip.galleryVideoId);
+	for (const plan of plans) {
+		for (const id of plan.videoOutputIds ?? []) {
+			videos.add(id);
+		}
 	}
 	return { images, videos };
 }
@@ -146,11 +136,36 @@ export async function imageReferencedOutsideRun(
 		if (run.firstFrameImageId === imageId) return true;
 		if (run.lastFrameImageId === imageId) return true;
 	}
-	const clips = await ctx.db.query("compositionClips").collect();
-	for (const clip of clips) {
-		if (clip.runId === runId) continue;
-		if (clip.referenceImageId === imageId) return true;
-		if (clip.terminalFrameImageId === imageId) return true;
+	const modelRuns = await ctx.db.query("modelStudioRuns").collect();
+	for (const run of modelRuns) {
+		if ((run.attachedImageIds ?? []).includes(imageId)) return true;
+		if ((run.extraReferenceImageIds ?? []).includes(imageId)) return true;
+		if (run.firstFrameImageId === imageId) return true;
+		if (run.lastFrameImageId === imageId) return true;
+	}
+	return false;
+}
+
+/** Same check for a model-studio run owner. */
+export async function imageReferencedOutsideModelStudioRun(
+	ctx: DbCtx,
+	imageId: Id<"galleryImages">,
+	runId: Id<"modelStudioRuns">,
+): Promise<boolean> {
+	const modelRuns = await ctx.db.query("modelStudioRuns").collect();
+	for (const run of modelRuns) {
+		if (run._id === runId) continue;
+		if ((run.attachedImageIds ?? []).includes(imageId)) return true;
+		if ((run.extraReferenceImageIds ?? []).includes(imageId)) return true;
+		if (run.firstFrameImageId === imageId) return true;
+		if (run.lastFrameImageId === imageId) return true;
+	}
+	const runs = await ctx.db.query("generationRuns").collect();
+	for (const run of runs) {
+		if ((run.attachedImageIds ?? []).includes(imageId)) return true;
+		if ((run.extraReferenceImageIds ?? []).includes(imageId)) return true;
+		if (run.firstFrameImageId === imageId) return true;
+		if (run.lastFrameImageId === imageId) return true;
 	}
 	return false;
 }
@@ -160,15 +175,14 @@ export async function videoReferencedOutsideRun(
 	videoId: Id<"galleryVideos">,
 	runId: Id<"generationRuns">,
 ): Promise<boolean> {
-	const runs = await ctx.db.query("generationRuns").collect();
-	for (const run of runs) {
-		if (run._id === runId) continue;
-		if ((run.attachedVideoIds ?? []).includes(videoId)) return true;
+	const plans = await ctx.db.query("shlokaPlans").collect();
+	for (const plan of plans) {
+		if (plan.runId === runId) continue;
+		if ((plan.videoOutputIds ?? []).includes(videoId)) return true;
 	}
-	const clips = await ctx.db.query("compositionClips").collect();
-	for (const clip of clips) {
-		if (clip.runId === runId) continue;
-		if (clip.galleryVideoId === videoId) return true;
+	const modelRuns = await ctx.db.query("modelStudioRuns").collect();
+	for (const run of modelRuns) {
+		if ((run.videoOutputIds ?? []).includes(videoId)) return true;
 	}
 	return false;
 }
@@ -201,21 +215,22 @@ export async function unlinkGalleryImageFromRuns(
 		});
 	}
 
-	const clips = await ctx.db.query("compositionClips").collect();
-	for (const clip of clips) {
-		if (
-			clip.terminalFrameImageId !== imageId &&
-			clip.referenceImageId !== imageId
-		) {
+	const modelRuns = await ctx.db.query("modelStudioRuns").collect();
+	for (const run of modelRuns) {
+		const attached = run.attachedImageIds ?? [];
+		const extras = run.extraReferenceImageIds ?? [];
+		const attachedHit = attached.includes(imageId);
+		const extraHit = extras.includes(imageId);
+		const firstHit = run.firstFrameImageId === imageId;
+		const lastHit = run.lastFrameImageId === imageId;
+		if (!attachedHit && !extraHit && !firstHit && !lastHit) {
 			continue;
 		}
-		await ctx.db.patch(clip._id, {
-			terminalFrameImageId:
-				clip.terminalFrameImageId === imageId
-					? undefined
-					: clip.terminalFrameImageId,
-			referenceImageId:
-				clip.referenceImageId === imageId ? undefined : clip.referenceImageId,
+		await ctx.db.patch(run._id, {
+			attachedImageIds: attached.filter((id) => id !== imageId),
+			extraReferenceImageIds: extras.filter((id) => id !== imageId),
+			firstFrameImageId: firstHit ? undefined : run.firstFrameImageId,
+			lastFrameImageId: lastHit ? undefined : run.lastFrameImageId,
 			updatedAt: Date.now(),
 		});
 	}
@@ -225,25 +240,28 @@ export async function unlinkGalleryVideoFromRuns(
 	ctx: MutationCtx,
 	videoId: Id<"galleryVideos">,
 ) {
-	const runs = await ctx.db.query("generationRuns").collect();
-	for (const run of runs) {
-		const attached = run.attachedVideoIds ?? [];
-		if (!attached.includes(videoId)) {
+	const plans = await ctx.db.query("shlokaPlans").collect();
+	for (const plan of plans) {
+		if (!(plan.videoOutputIds ?? []).includes(videoId)) {
 			continue;
 		}
-		await ctx.db.patch(run._id, {
-			attachedVideoIds: attached.filter((id) => id !== videoId),
+		await ctx.db.patch(plan._id, {
+			videoOutputIds: (plan.videoOutputIds ?? []).filter(
+				(id) => id !== videoId,
+			),
 			updatedAt: Date.now(),
 		});
 	}
 
-	const clips = await ctx.db.query("compositionClips").collect();
-	for (const clip of clips) {
-		if (clip.galleryVideoId !== videoId) {
+	const modelRuns = await ctx.db.query("modelStudioRuns").collect();
+	for (const run of modelRuns) {
+		if (!(run.videoOutputIds ?? []).includes(videoId)) {
 			continue;
 		}
-		await ctx.db.patch(clip._id, {
-			galleryVideoId: undefined,
+		await ctx.db.patch(run._id, {
+			videoOutputIds: (run.videoOutputIds ?? []).filter(
+				(id) => id !== videoId,
+			),
 			updatedAt: Date.now(),
 		});
 	}

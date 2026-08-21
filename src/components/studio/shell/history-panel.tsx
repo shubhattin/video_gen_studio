@@ -57,41 +57,59 @@ import {
 import { cn } from "#/lib/utils";
 
 type HistoryRun = {
-	_id: Id<"generationRuns">;
+	_id: Id<"generationRuns"> | Id<"modelStudioRuns">;
 	provenance: "shloka" | "model-studio" | string;
 	status: string;
 	title?: string;
 	shlokaText?: string;
+	prompt?: string;
 	selectedModelId?: string;
 	createdAt: number;
-	videos?: Array<{ url?: string | null }>;
+	videoCount?: number;
 };
 
 type HistoryPanelProps = {
-	selectedRunId?: Id<"generationRuns"> | null;
-	onDeleted?: (runId: Id<"generationRuns">) => void;
+	provenance: "shloka" | "model-studio";
+	selectedRunId?: Id<"generationRuns"> | Id<"modelStudioRuns"> | null;
+	onDeleted?: (runId: Id<"generationRuns"> | Id<"modelStudioRuns">) => void;
 };
 
 function pathForProvenance(provenance: string): "/" | "/studio" {
 	return provenance === "model-studio" ? "/studio" : "/";
 }
 
-function isShlokaRun(provenance: string) {
-	return provenance !== "model-studio";
-}
-
-export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
-	const runs = useQuery(api.studio.queries.listRecentRuns, { limit: 24 });
+export function HistoryPanel({
+	provenance,
+	selectedRunId,
+	onDeleted,
+}: HistoryPanelProps) {
+	const shlokaRuns = useQuery(
+		api.studio.queries.listRecentRuns,
+		provenance === "shloka" ? { limit: 24 } : "skip",
+	);
+	const modelRuns = useQuery(
+		api.studio.queries.listRecentModelStudioRuns,
+		provenance === "model-studio" ? { limit: 24 } : "skip",
+	);
 	const deleteRun = useMutation(api.studio.mutations.deleteRun);
+	const deleteModelStudioRun = useMutation(
+		api.studio.mutations.deleteModelStudioRun,
+	);
 	const renameRun = useMutation(api.studio.mutations.renameRun);
+	const renameModelStudioRun = useMutation(
+		api.studio.mutations.renameModelStudioRun,
+	);
 	const generateRunTitle = useAction(api.studio.actions.generateRunTitle);
-	const [pendingDeleteId, setPendingDeleteId] =
-		useState<Id<"generationRuns"> | null>(null);
+	const [pendingDeleteId, setPendingDeleteId] = useState<
+		Id<"generationRuns"> | Id<"modelStudioRuns"> | null
+	>(null);
 	const [deleting, setDeleting] = useState(false);
 	const [deleteMedia, setDeleteMedia] = useState(false);
 	const deleteMediaCounts = useQuery(
 		api.studio.queries.getRunMediaCounts,
-		pendingDeleteId ? { runId: pendingDeleteId } : "skip",
+		pendingDeleteId && provenance === "shloka"
+			? { runId: pendingDeleteId as Id<"generationRuns"> }
+			: "skip",
 	);
 	const [renameTarget, setRenameTarget] = useState<HistoryRun | null>(null);
 	const [renameValue, setRenameValue] = useState("");
@@ -99,7 +117,13 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 	const [regeneratingId, setRegeneratingId] =
 		useState<Id<"generationRuns"> | null>(null);
 
-	const historyRuns = runs as HistoryRun[] | undefined;
+	const historyRuns: HistoryRun[] | undefined =
+		provenance === "shloka"
+			? (shlokaRuns as HistoryRun[] | undefined)
+			: (modelRuns as HistoryRun[] | undefined)?.map((run) => ({
+					...run,
+					provenance: "model-studio",
+				}));
 
 	const confirmDelete = async () => {
 		if (!pendingDeleteId) {
@@ -107,10 +131,17 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 		}
 		setDeleting(true);
 		try {
-			await deleteRun({
-				runId: pendingDeleteId,
-				deleteMedia,
-			});
+			if (provenance === "shloka") {
+				await deleteRun({
+					runId: pendingDeleteId as Id<"generationRuns">,
+					deleteMedia,
+				});
+			} else {
+				await deleteModelStudioRun({
+					runId: pendingDeleteId as Id<"modelStudioRuns">,
+					deleteMedia,
+				});
+			}
 			onDeleted?.(pendingDeleteId);
 			setPendingDeleteId(null);
 		} finally {
@@ -129,7 +160,17 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 		}
 		setRenaming(true);
 		try {
-			await renameRun({ runId: renameTarget._id, title: renameValue });
+			if (provenance === "shloka") {
+				await renameRun({
+					runId: renameTarget._id as Id<"generationRuns">,
+					title: renameValue,
+				});
+			} else {
+				await renameModelStudioRun({
+					runId: renameTarget._id as Id<"modelStudioRuns">,
+					title: renameValue,
+				});
+			}
 			setRenameTarget(null);
 		} finally {
 			setRenaming(false);
@@ -154,14 +195,17 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 			) : (
 				<SidebarMenu className="gap-1">
 					{historyRuns.map((run) => {
-						const shloka = isShlokaRun(run.provenance);
+						const shloka = provenance === "shloka";
 						const to = pathForProvenance(run.provenance);
 						const title =
-							run.title?.trim() || (shloka ? "Shloka Run" : "Model Run");
+							run.title?.trim() ||
+							(shloka
+								? "Shloka Run"
+								: (run.prompt?.slice(0, 40) ?? "Model Run"));
 						const meta = [
 							formatDistanceToNow(run.createdAt, { addSuffix: true }),
-							run.videos?.length
-								? `${run.videos.length} video${run.videos.length === 1 ? "" : "s"}`
+							run.videoCount
+								? `${run.videoCount} video${run.videoCount === 1 ? "" : "s"}`
 								: null,
 						]
 							.filter(Boolean)
@@ -237,20 +281,24 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 											<Pencil />
 											Rename title
 										</DropdownMenuItem>
-										<DropdownMenuItem
-											className="gap-2"
-											disabled={regeneratingId === run._id}
-											onClick={() => void regenerateTitle(run._id)}
-										>
-											<RefreshCw
-												className={
-													regeneratingId === run._id ? "animate-spin" : ""
+										{provenance === "shloka" ? (
+											<DropdownMenuItem
+												className="gap-2"
+												disabled={regeneratingId === run._id}
+												onClick={() =>
+													void regenerateTitle(run._id as Id<"generationRuns">)
 												}
-											/>
-											{regeneratingId === run._id
-												? "Generating…"
-												: "Regenerate title"}
-										</DropdownMenuItem>
+											>
+												<RefreshCw
+													className={
+														regeneratingId === run._id ? "animate-spin" : ""
+													}
+												/>
+												{regeneratingId === run._id
+													? "Generating…"
+													: "Regenerate title"}
+											</DropdownMenuItem>
+										) : null}
 										<DropdownMenuSeparator />
 										<DropdownMenuItem
 											variant="destructive"

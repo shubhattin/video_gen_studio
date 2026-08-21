@@ -2,15 +2,6 @@ import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { useEffect, useMemo, useState } from "react";
-import { CompositionAttemptControls } from "#/components/studio/composition/composition-attempt-controls";
-import {
-	type CompositionClipResult,
-	CompositionResult,
-} from "#/components/studio/composition/composition-result";
-import {
-	type CompositionSettings,
-	MultiClipCompositionControls,
-} from "#/components/studio/composition/multi-clip-composition-controls";
 import { AutosaveStatus } from "#/components/studio/shell/autosave-status";
 import { GenerationProgressDock } from "#/components/studio/video/generation-progress-dock";
 import { ReferenceImagePanel } from "#/components/studio/video/reference-image-panel";
@@ -21,12 +12,8 @@ import {
 import { VideoGenerateConfirm } from "#/components/studio/video/video-generate-confirm";
 import { VideoModelSelector } from "#/components/studio/video/video-model-selector";
 import { VideoResult } from "#/components/studio/video/video-result";
-import { Button } from "#/components/ui/button";
-import { useCompositionTerminalFrameHandoff } from "#/hooks/use-composition-terminal-frame-handoff";
-import {
-	isTextOnlyConfigChange,
-	useRunAutosave,
-} from "#/hooks/use-run-autosave";
+import { Label } from "#/components/ui/label";
+import { MarkdownTextarea } from "#/components/ui/markdown-textarea";
 import {
 	useSignedMediaUrls,
 	withSignedUrl,
@@ -42,125 +29,51 @@ import { notifyStudioError, notifyStudioSuccess } from "#/lib/studio-toast";
 import { uploadReferenceImage } from "#/lib/upload-reference-image";
 
 type ModelStudioProps = {
-	runId?: Id<"generationRuns"> | null;
-	onRunIdChange?: (runId: Id<"generationRuns"> | null) => void;
+	runId: Id<"modelStudioRuns">;
+	onRunIdChange?: (runId: Id<"modelStudioRuns">) => void;
 };
 
-export function ModelStudio({
-	runId: controlledRunId = null,
-	onRunIdChange,
-}: ModelStudioProps) {
+/**
+ * Direct-to-API video generation: a raw prompt, model settings, reference
+ * images, and an append-only list of generated clips. No planner involved.
+ */
+export function ModelStudio({ runId }: ModelStudioProps) {
+	const run = useQuery(api.studio.queries.getModelStudioRun, { runId });
 	const catalog = useQuery(api.studio.queries.getCachedOpenRouterCatalog);
 	const refreshCatalog = useAction(api.studio.actions.refreshModelCatalog);
-	const createDraft = useMutation(api.studio.mutations.createModelStudioDraft);
-	const updateDraft = useMutation(api.studio.mutations.updateDraft);
+
+	const updateDraft = useMutation(api.studio.mutations.updateModelStudioDraft);
 	const removeReferenceImage = useMutation(
-		api.studio.mutations.removeReferenceImage,
+		api.studio.mutations.removeModelStudioReferenceImage,
 	);
-	const attachGalleryImageToRun = useMutation(
-		api.studio.mutations.attachGalleryImageToRun,
+	const attachImage = useMutation(
+		api.studio.mutations.attachImageToModelStudioRun,
 	);
-	const prepareReferenceImageUpload = useAction(
-		api.studio.r2.prepareReferenceImageUpload,
+	const prepareUpload = useAction(
+		api.studio.r2.prepareModelStudioReferenceImageUpload,
 	);
-	const finalizeReferenceImageUpload = useAction(
-		api.studio.r2.finalizeReferenceImageUpload,
+	const finalizeUpload = useAction(
+		api.studio.r2.finalizeModelStudioReferenceImageUpload,
 	);
-	const generateImage = useAction(api.studio.actions.generateReferenceImage);
-	const generateVideo = useAction(api.studio.actions.generateVideoForRun);
-	const planComposition = useAction(
-		api.studio.actions.planModelStudioComposition,
+	const generateImageAction = useAction(
+		api.studio.actions.generateModelStudioImage,
 	);
-	const startComposition = useMutation(api.studio.mutations.startComposition);
-	const cancelComposition = useMutation(api.studio.mutations.cancelComposition);
-	const selectCompositionJob = useMutation(
-		api.studio.mutations.selectCompositionJob,
+	const generateVideoAction = useAction(
+		api.studio.actions.generateModelStudioVideo,
 	);
 
+	const [prompt, setPrompt] = useState("");
 	const [selectedModel, setSelectedModel] = useState<VideoModelId>(
-		"bytedance/seedance-2.0-fast",
+		"bytedance/seedance-2.5",
 	);
-	const [videoConfig, setVideoConfig] = useState<VideoConfigState>(() => ({
-		...defaultVideoParams("bytedance/seedance-2.0-fast"),
-		prompt: "",
-	}));
+	const [videoConfig, setVideoConfig] = useState<VideoConfigState>(() =>
+		defaultVideoParams("bytedance/seedance-2.5"),
+	);
 	const [imageSize, setImageSize] = useState("1024x1536");
 	const [imageQuality, setImageQuality] = useState("medium");
 	const [busyStage, setBusyStage] = useState<StudioBusyStage>(null);
-	const [refreshingCatalog, setRefreshingCatalog] = useState(false);
-	const [composition, setComposition] = useState<CompositionSettings>({
-		enabled: false,
-		mode: "continuation",
-		multiplier: 2,
-	});
 
-	const activeRunId = controlledRunId;
-	const run = useQuery(
-		api.studio.queries.getRun,
-		activeRunId ? { runId: activeRunId } : "skip",
-	);
-	const autosave = useRunAutosave({
-		runId: activeRunId,
-		runStatus: run?.status ?? null,
-		onError: (error) => notifyStudioError("Could not save draft", error),
-	});
-	const compositionJob = useQuery(
-		api.studio.queries.getCompositionForRun,
-		activeRunId ? { runId: activeRunId } : "skip",
-	);
-	const compositionAttempts = useQuery(
-		api.studio.queries.listCompositionJobsForRun,
-		activeRunId ? { runId: activeRunId } : "skip",
-	);
 	const profile = MODEL_CAPABILITY_PROFILES[selectedModel];
-
-	const rawImages = (run?.images ?? []) as Array<{
-		id: string;
-		objectKey?: string;
-		source?: "generated" | "uploaded" | "terminal_frame";
-		revisedImagePrompt?: string;
-		createdAt: number;
-	}>;
-	const rawVideos = (run?.videos ?? []) as Array<{
-		id: string;
-		objectKey?: string;
-		createdAt: number;
-	}>;
-	const mediaObjectKeys = [
-		...rawImages.map((image) => image.objectKey),
-		...rawVideos.map((video) => video.objectKey),
-		...(compositionJob?.clips ?? []).flatMap(
-			(clip: {
-				video?: { objectKey?: string };
-				terminalFrameObjectKey?: string;
-			}) => [clip.video?.objectKey, clip.terminalFrameObjectKey],
-		),
-	];
-	const urlsByKey = useSignedMediaUrls(activeRunId, mediaObjectKeys);
-	const images = rawImages.map((image) => withSignedUrl(image, urlsByKey));
-	const videos = rawVideos.map((video) => withSignedUrl(video, urlsByKey));
-	const compositionJobWithUrls = compositionJob
-		? {
-				...compositionJob,
-				clips: (compositionJob.clips ?? []).map(
-					(
-						clip: CompositionClipResult & { terminalFrameObjectKey?: string },
-					) => ({
-						...clip,
-						video: clip.video
-							? withSignedUrl(clip.video, urlsByKey)
-							: undefined,
-					}),
-				),
-			}
-		: compositionJob;
-
-	useCompositionTerminalFrameHandoff({
-		runId: activeRunId,
-		compositionJob: compositionJobWithUrls,
-		onError: (error) =>
-			notifyStudioError("Continuity frame capture failed", error),
-	});
 
 	useEffect(() => {
 		if (!catalog) {
@@ -168,44 +81,24 @@ export function ModelStudio({
 		}
 	}, [catalog, refreshCatalog]);
 
-	// biome-ignore lint/correctness/useExhaustiveDependencies: Hydrate the local draft only when the selected run changes.
+	// Hydrate local state when the selected run changes.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: Hydrate only when run changes.
 	useEffect(() => {
-		if (!controlledRunId) {
-			setSelectedModel("bytedance/seedance-2.0-fast");
-			setVideoConfig({
-				...defaultVideoParams("bytedance/seedance-2.0-fast"),
-				prompt: "",
-			});
-			setImageSize("1024x1536");
-			setImageQuality("medium");
-			setComposition({
-				enabled: false,
-				mode: "continuation",
-				multiplier: 2,
-			});
-			return;
-		}
-		if (!run || run._id !== controlledRunId) {
-			return;
-		}
+		if (!run) return;
 		const modelId = isVideoModelId(run.selectedModelId ?? "")
 			? (run.selectedModelId as VideoModelId)
-			: "bytedance/seedance-2.0-fast";
+			: "bytedance/seedance-2.5";
 		setSelectedModel(modelId);
+		setPrompt(run.prompt ?? "");
 		setImageSize(run.imageSize ?? "1024x1536");
 		setImageQuality(run.imageQuality ?? "medium");
 		setVideoConfig({
 			...defaultVideoParams(modelId),
 			...(run.videoParams ?? {}),
 			modelId,
-			prompt: run.videoPrompt ?? run.videoParams?.prompt ?? "",
-		});
-		setComposition({
-			enabled: Boolean(run.compositionMode),
-			mode: run.compositionMode ?? "continuation",
-			multiplier: run.compositionMultiplier ?? 2,
-		});
-	}, [controlledRunId, run?._id]);
+			prompt: undefined,
+		} as VideoConfigState);
+	}, [run?._id]);
 
 	const { gatewayById, pricingSkusById } = useMemo(() => {
 		const gateway = new Map<string, { input?: string; output?: string }>();
@@ -226,92 +119,65 @@ export function ModelStudio({
 		return { gatewayById: gateway, pricingSkusById: skus };
 	}, [catalog]);
 
-	const ensureDraft = async () => {
-		if (activeRunId) {
-			await updateDraft({
-				runId: activeRunId,
-				videoParams: { ...videoConfig, modelId: selectedModel },
-				videoPrompt: videoConfig.prompt,
-				selectedModelId: selectedModel,
-				imageSize,
-				imageQuality,
-				compositionMode: composition.enabled ? composition.mode : null,
-				compositionMultiplier: composition.enabled
-					? composition.multiplier
-					: null,
-				compositionClipCount: composition.enabled
-					? composition.multiplier
-					: null,
-			});
-			return activeRunId;
-		}
-		const runId = await createDraft({
-			modelId: selectedModel,
-			prompt: videoConfig.prompt,
-		});
-		onRunIdChange?.(runId);
-		await updateDraft({
+	const rawImages = (run?.images ?? []) as Array<{
+		id: string;
+		objectKey?: string;
+		source?: "generated" | "uploaded" | "terminal_frame";
+		revisedImagePrompt?: string;
+		createdAt: number;
+	}>;
+	const rawVideos = (run?.videos ?? []) as Array<{
+		id: string;
+		objectKey?: string;
+		createdAt: number;
+	}>;
+	const mediaObjectKeys = [
+		...rawImages.map((image) => image.objectKey),
+		...rawVideos.map((video) => video.objectKey),
+	];
+	const urlsByKey = useSignedMediaUrls(null, mediaObjectKeys);
+	const images = rawImages.map((image) => withSignedUrl(image, urlsByKey));
+	const videos = rawVideos.map((video) => withSignedUrl(video, urlsByKey));
+
+	const extraIds = (run?.extraReferenceImageIds ?? []) as Id<"galleryImages">[];
+
+	const persistPrompt = (value: string) => {
+		void updateDraft({ runId, prompt: value }).catch((error) =>
+			notifyStudioError("Could not save prompt", error),
+		);
+	};
+
+	const onPromptChange = (value: string) => {
+		setPrompt(value);
+	};
+
+	const commitPrompt = () => {
+		persistPrompt(prompt);
+	};
+
+	const onModelChange = (modelId: VideoModelId) => {
+		const next = defaultVideoParams(modelId);
+		setSelectedModel(modelId);
+		setVideoConfig(next);
+		void updateDraft({
 			runId,
-			videoParams: { ...videoConfig, modelId: selectedModel },
-			videoPrompt: videoConfig.prompt,
-			imageSize,
-			imageQuality,
-			compositionMode: composition.enabled ? composition.mode : null,
-			compositionMultiplier: composition.enabled
-				? composition.multiplier
-				: null,
-			compositionClipCount: composition.enabled ? composition.multiplier : null,
-		});
-		return runId;
+			selectedModelId: modelId,
+			videoParams: { ...next, modelId },
+		}).catch((error) => notifyStudioError("Could not save settings", error));
 	};
 
-	const startVideo = async () => {
-		setBusyStage("video");
-		try {
-			const runId = await ensureDraft();
-			await generateVideo({ runId });
-			notifyStudioSuccess("Video clip saved", "Added to this run.");
-		} catch (error) {
-			notifyStudioError("Video generation failed", error);
-		} finally {
-			setBusyStage(null);
-		}
-	};
-
-	const onPlanComposition = async () => {
-		setBusyStage("planning");
-		try {
-			const runId = await ensureDraft();
-			await planComposition({ runId, force: true });
-			notifyStudioSuccess("Composition plan ready");
-		} catch (error) {
-			notifyStudioError("Composition planning failed", error);
-		} finally {
-			setBusyStage(null);
-		}
-	};
-
-	const onStartComposition = async () => {
-		setBusyStage("video");
-		try {
-			const runId = await ensureDraft();
-			await startComposition({ runId });
-			notifyStudioSuccess(
-				"Composition started",
-				"Clips will generate sequentially and can be resumed if one fails.",
-			);
-		} catch (error) {
-			notifyStudioError("Composition could not start", error);
-		} finally {
-			setBusyStage(null);
-		}
+	const onVideoConfigChange = (next: VideoConfigState) => {
+		setVideoConfig(next);
+		void updateDraft({
+			runId,
+			videoParams: { ...next, modelId: selectedModel },
+		}).catch((error) => notifyStudioError("Could not save settings", error));
 	};
 
 	const onGenerateImage = async () => {
 		setBusyStage("image");
 		try {
-			const runId = await ensureDraft();
-			await generateImage({ runId });
+			await generateImageAction({ runId });
 			notifyStudioSuccess("Reference image ready");
 		} catch (error) {
 			notifyStudioError("Image generation failed", error);
@@ -323,12 +189,11 @@ export function ModelStudio({
 	const onUploadImage = async (file: File) => {
 		setBusyStage("upload");
 		try {
-			const runId = await ensureDraft();
 			await uploadReferenceImage({
 				runId,
 				file,
-				prepareUpload: prepareReferenceImageUpload,
-				finalizeUpload: finalizeReferenceImageUpload,
+				prepareUpload,
+				finalizeUpload,
 			});
 			notifyStudioSuccess("Reference image uploaded");
 		} catch (error) {
@@ -338,218 +203,127 @@ export function ModelStudio({
 		}
 	};
 
-	const extraIds = (run?.extraReferenceImageIds ?? []) as Id<"galleryImages">[];
-	const isBusy = busyStage !== null;
-	const isModelLocked =
-		Boolean(run?.videos?.length) ||
-		run?.status === "video_generating" ||
-		compositionJob?.status === "generating" ||
-		compositionJob?.status === "awaiting_terminal_frame";
-
-	const compositionSwitchDisabled =
-		isBusy ||
-		compositionJob?.status === "generating" ||
-		compositionJob?.status === "awaiting_terminal_frame";
-
-	const hasPlan = Boolean(
-		run?.videoPrompt ||
-			run?.videoParams?.prompt ||
-			compositionJob ||
-			(compositionAttempts?.length ?? 0) > 0,
-	);
-
-	const isPlanningNextComposition =
-		composition.enabled &&
-		(busyStage === "planning" || run?.status === "planning") &&
-		(compositionAttempts?.length ?? 0) > 0;
-
-	const onSelectCompositionAttempt = (jobId: string) => {
-		if (!activeRunId) return;
-		void selectCompositionJob({
-			runId: activeRunId,
-			jobId: jobId as Id<"compositionJobs">,
-		}).catch((error) =>
-			notifyStudioError("Could not switch composition plan", error),
-		);
-	};
-
-	const onModelChange = (modelId: VideoModelId) => {
-		const next = {
-			...defaultVideoParams(modelId),
-			prompt: videoConfig.prompt,
-		};
-		setSelectedModel(modelId);
-		setVideoConfig(next);
-		autosave.save(
-			{
-				selectedModelId: modelId,
-				videoParams: next,
-				videoPrompt: next.prompt ?? "",
-			},
-			"immediate",
-		);
-	};
-
-	const onVideoConfigChange = (next: VideoConfigState) => {
-		const previous = { ...videoConfig, modelId: selectedModel };
-		const mode = isTextOnlyConfigChange(previous, next)
-			? "debounced"
-			: "immediate";
-		if (isVideoModelId(next.modelId)) {
-			setSelectedModel(next.modelId);
+	const onGenerateVideo = async () => {
+		setBusyStage("video");
+		try {
+			await updateDraft({
+				runId,
+				prompt,
+				selectedModelId: selectedModel,
+				videoParams: { ...videoConfig, modelId: selectedModel },
+			});
+			await generateVideoAction({ runId });
+			notifyStudioSuccess("Video clip saved", "Added to this run.");
+		} catch (error) {
+			notifyStudioError("Video generation failed", error);
+		} finally {
+			setBusyStage(null);
 		}
-		setVideoConfig(next);
-		autosave.save(
-			{
-				videoParams: next,
-				videoPrompt: next.prompt ?? "",
-				selectedModelId: next.modelId,
-			},
-			mode,
-		);
 	};
 
-	const onCompositionChange = (next: CompositionSettings) => {
-		setComposition(next);
-		autosave.save(
-			{
-				compositionMode: next.enabled ? next.mode : null,
-				compositionMultiplier: next.enabled ? next.multiplier : null,
-				compositionClipCount: next.enabled ? next.multiplier : null,
-			},
-			"immediate",
-		);
-	};
-
-	const onImageSizeChange = (value: string) => {
-		setImageSize(value);
-		autosave.save({ imageSize: value }, "immediate");
-	};
-
-	const onImageQualityChange = (value: string) => {
-		setImageQuality(value);
-		autosave.save({ imageQuality: value }, "immediate");
-	};
+	const anyBusy = busyStage !== null;
 
 	return (
-		<div className="flex flex-col gap-6 rounded-2xl border border-border/80 bg-gradient-to-b from-card to-card/40 p-4 shadow-sm sm:p-6">
-			<section className="flex flex-col gap-3">
+		<>
+			<div className="space-y-6">
 				<div className="flex items-start justify-end">
 					<AutosaveStatus
-						status={autosave.status}
-						hasPending={autosave.hasPending}
-						onRetry={autosave.retry}
+						status={anyBusy ? "saving" : "idle"}
+						hasPending={false}
+						onRetry={() => undefined}
 						className="pt-1"
 					/>
 				</div>
-				<div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-					<div className="min-w-0 flex-1 sm:max-w-xl">
-						<p className="mb-2 text-sm font-medium">Video model</p>
-						<VideoModelSelector
-							value={selectedModel}
-							gatewayPricingById={gatewayById}
-							pricingSkusById={pricingSkusById}
-							disabled={
-								busyStage === "planning" ||
-								busyStage === "video" ||
-								isModelLocked
-							}
-							onValueChange={onModelChange}
-						/>
-						{isModelLocked ? (
-							<p className="mt-2 text-xs text-muted-foreground">
-								{run?.videos?.length
-									? "The video model is fixed after single-clip generation begins for this run."
-									: "Model is locked while this composition attempt is generating."}
-							</p>
-						) : null}
-					</div>
-					<div className="flex flex-col gap-1">
-						<Button
-							variant="outline"
-							size="sm"
-							className="min-h-11 w-fit"
-							disabled={refreshingCatalog}
-							onClick={async () => {
-								setRefreshingCatalog(true);
-								try {
-									await refreshCatalog({});
-								} finally {
-									setRefreshingCatalog(false);
-								}
-							}}
+
+				<section className="flex flex-col gap-2">
+					<div className="flex items-center justify-between">
+						<Label
+							htmlFor="model-studio-prompt"
+							className="text-sm font-medium"
 						>
-							{refreshingCatalog ? "Refreshing models…" : "Refresh models"}
-						</Button>
-						{catalog?.fetchedAt ? (
-							<p className="text-xs text-muted-foreground">
-								Models updated {new Date(catalog.fetchedAt).toLocaleString()}
-							</p>
-						) : null}
+							Video prompt
+						</Label>
+						<span className="text-xs text-muted-foreground">
+							Sent directly to the provider
+						</span>
 					</div>
+					<MarkdownTextarea
+						id="model-studio-prompt"
+						value={prompt}
+						onChange={(event) => onPromptChange(event.target.value)}
+						onBlur={commitPrompt}
+						placeholder="Describe the shot: subject, action, scene, style, camera, audio…"
+						className="min-h-40"
+						disabled={anyBusy}
+					/>
+				</section>
+
+				<div className="flex flex-col gap-3 border-t border-border/80 pt-5">
+					<div className="flex flex-col gap-1.5">
+						<h2 className="font-heading text-lg font-semibold">
+							Video model &amp; settings
+						</h2>
+						<p className="text-sm text-muted-foreground">
+							Pick a model and tune the generation settings.
+						</p>
+					</div>
+					<VideoModelSelector
+						value={selectedModel}
+						gatewayPricingById={gatewayById}
+						pricingSkusById={pricingSkusById}
+						disabled={anyBusy}
+						onValueChange={onModelChange}
+					/>
+					<VideoConfiguration
+						value={videoConfig}
+						onChange={onVideoConfigChange}
+						disabled={anyBusy}
+					/>
 				</div>
-			</section>
 
-			<VideoConfiguration
-				value={{ ...videoConfig, modelId: selectedModel }}
-				onChange={onVideoConfigChange}
-				showPrompt
-				disabled={busyStage === "planning" || busyStage === "video"}
-			/>
-
-			<MultiClipCompositionControls
-				value={composition}
-				modelId={selectedModel}
-				durationSeconds={videoConfig.durationSeconds}
-				onChange={onCompositionChange}
-				hasPlan={hasPlan}
-				disabled={
-					busyStage === "planning" ||
-					busyStage === "video" ||
-					compositionJob?.status === "generating" ||
-					compositionJob?.status === "awaiting_terminal_frame"
-				}
-			/>
-
-			<ReferenceImagePanel
-				runId={activeRunId}
-				imageSize={imageSize}
-				imageQuality={imageQuality}
-				onSizeChange={onImageSizeChange}
-				onQualityChange={onImageQualityChange}
-				onGenerate={onGenerateImage}
-				onUpload={onUploadImage}
-				onReuseImage={
-					activeRunId
-						? async (imageId) => {
-								await attachGalleryImageToRun({
-									runId: activeRunId,
-									imageId: imageId as Id<"galleryImages">,
-								});
-								notifyStudioSuccess(
-									"Image attached",
-									"Reused from the shared gallery.",
-								);
-							}
-						: undefined
-				}
-				generating={busyStage === "image"}
-				uploading={busyStage === "upload"}
-				images={images}
-				firstFrameImageId={run?.firstFrameImageId}
-				lastFrameImageId={run?.lastFrameImageId}
-				extraReferenceImageIds={extraIds}
-				supportsFirstFrame={profile.supportsFirstFrame}
-				supportsLastFrame={profile.supportsLastFrame}
-				supportsInputReferences={profile.supportsInputReferences}
-				maxInputReferences={profile.maxInputReferences}
-				disabled={!activeRunId}
-				globalBusy={isBusy}
-				onSelectFirstFrame={(id) => {
-					if (!activeRunId) return;
-					const imageId = id as Id<"galleryImages"> | null;
-					autosave.save(
-						{
+				<ReferenceImagePanel
+					runId={null}
+					imageSize={imageSize}
+					imageQuality={imageQuality}
+					onSizeChange={(value) => {
+						setImageSize(value);
+						void updateDraft({ runId, imageSize: value }).catch(
+							() => undefined,
+						);
+					}}
+					onQualityChange={(value) => {
+						setImageQuality(value);
+						void updateDraft({ runId, imageQuality: value }).catch(
+							() => undefined,
+						);
+					}}
+					onGenerate={() => void onGenerateImage()}
+					onUpload={(file) => onUploadImage(file)}
+					onReuseImage={async (imageId) => {
+						await attachImage({
+							runId,
+							imageId: imageId as Id<"galleryImages">,
+						});
+						notifyStudioSuccess(
+							"Image attached",
+							"Reused from the shared gallery.",
+						);
+					}}
+					generating={busyStage === "image"}
+					uploading={busyStage === "upload"}
+					images={images}
+					firstFrameImageId={run?.firstFrameImageId}
+					lastFrameImageId={run?.lastFrameImageId}
+					extraReferenceImageIds={extraIds}
+					supportsFirstFrame={profile?.supportsFirstFrame}
+					supportsLastFrame={profile?.supportsLastFrame}
+					supportsInputReferences={profile?.supportsInputReferences}
+					maxInputReferences={profile?.maxInputReferences}
+					globalBusy={anyBusy}
+					onSelectFirstFrame={(id) => {
+						const imageId = id as Id<"galleryImages"> | null;
+						void updateDraft({
+							runId,
 							firstFrameImageId: imageId,
 							lastFrameImageId:
 								imageId && run?.lastFrameImageId === imageId
@@ -559,15 +333,14 @@ export function ModelStudio({
 								imageId && extraIds.includes(imageId)
 									? extraIds.filter((item) => item !== imageId)
 									: extraIds,
-						},
-						"immediate",
-					);
-				}}
-				onSelectLastFrame={(id) => {
-					if (!activeRunId) return;
-					const imageId = id as Id<"galleryImages"> | null;
-					autosave.save(
-						{
+						}).catch((error) =>
+							notifyStudioError("Could not save selection", error),
+						);
+					}}
+					onSelectLastFrame={(id) => {
+						const imageId = id as Id<"galleryImages"> | null;
+						void updateDraft({
+							runId,
 							lastFrameImageId: imageId,
 							firstFrameImageId:
 								imageId && run?.firstFrameImageId === imageId
@@ -577,19 +350,18 @@ export function ModelStudio({
 								imageId && extraIds.includes(imageId)
 									? extraIds.filter((item) => item !== imageId)
 									: extraIds,
-						},
-						"immediate",
-					);
-				}}
-				onToggleExtraReference={(id) => {
-					if (!activeRunId) return;
-					const imageId = id as Id<"galleryImages">;
-					const adding = !extraIds.includes(imageId);
-					const next = adding
-						? [...extraIds, imageId]
-						: extraIds.filter((item) => item !== imageId);
-					autosave.save(
-						{
+						}).catch((error) =>
+							notifyStudioError("Could not save selection", error),
+						);
+					}}
+					onToggleExtraReference={(id) => {
+						const imageId = id as Id<"galleryImages">;
+						const adding = !extraIds.includes(imageId);
+						const next = adding
+							? [...extraIds, imageId]
+							: extraIds.filter((item) => item !== imageId);
+						void updateDraft({
+							runId,
 							extraReferenceImageIds: next,
 							firstFrameImageId:
 								adding && run?.firstFrameImageId === imageId
@@ -599,153 +371,45 @@ export function ModelStudio({
 								adding && run?.lastFrameImageId === imageId
 									? null
 									: (run?.lastFrameImageId ?? null),
-						},
-						"immediate",
-					);
-				}}
-				onRemoveImage={async (id) => {
-					if (!activeRunId) return;
-					await removeReferenceImage({
-						runId: activeRunId,
-						imageId: id as Id<"galleryImages">,
-					});
-				}}
-			/>
-
-			<div className="flex flex-wrap gap-3">
-				{composition.enabled ? (
-					<>
-						<Button
-							className="min-h-11"
-							disabled={isBusy || !videoConfig.prompt?.trim()}
-							onClick={onPlanComposition}
-						>
-							{busyStage === "planning"
-								? "Planning composition…"
-								: (compositionAttempts?.length ?? 0) > 0
-									? "Plan another attempt"
-									: "Generate composition plan"}
-						</Button>
-						{compositionJob?.status === "planned" ||
-						compositionJob?.status === "failed" ? (
-							<Button
-								className="min-h-11"
-								disabled={isBusy}
-								onClick={onStartComposition}
-							>
-								{busyStage === "video"
-									? "Starting composition…"
-									: `Generate ${composition.multiplier} clips`}
-							</Button>
-						) : null}
-						{compositionJob?.status === "generating" ||
-						compositionJob?.status === "awaiting_terminal_frame" ? (
-							<Button
-								className="min-h-11"
-								variant="outline"
-								disabled={isBusy}
-								onClick={() =>
-									activeRunId && cancelComposition({ runId: activeRunId })
-								}
-							>
-								Cancel composition
-							</Button>
-						) : null}
-					</>
-				) : (
-					<VideoGenerateConfirm
-						config={{ ...videoConfig, modelId: selectedModel }}
-						className="min-h-11"
-						disabled={isBusy}
-						generating={busyStage === "video"}
-						triggerLabel="Generate video clip"
-						onConfirm={startVideo}
-					/>
-				)}
-			</div>
-
-			{composition.enabled && (compositionJob || isPlanningNextComposition) ? (
-				<CompositionAttemptControls
-					attempts={compositionAttempts ?? []}
-					activeJobId={compositionJob?._id}
-					activeConfig={
-						compositionJob
-							? {
-									_id: compositionJob._id,
-									attemptNumber: compositionJob.attemptNumber ?? 1,
-									status: compositionJob.status,
-									mode: compositionJob.mode,
-									clipCount: compositionJob.clipCount,
-									videoParams: compositionJob.videoParams,
-									overallDescription: compositionJob.overallDescription,
-									plannerModel: compositionJob.plannerModel,
-									plannerReasoning: compositionJob.plannerReasoning,
-									estimatedCostUsd: compositionJob.estimatedCostUsd,
-									actualCostUsd: compositionJob.actualCostUsd,
-									createdAt: compositionJob.createdAt,
-								}
-							: null
-					}
-					disabled={compositionSwitchDisabled}
-					isPlanningNext={isPlanningNextComposition}
-					onSelectAttempt={onSelectCompositionAttempt}
-					scenes={(compositionJob?.clips ?? []).map(
-						(clip: {
-							clipIndex: number;
-							scenePrompt: string;
-							continuityInstructions?: string;
-							transition?: string;
-						}) => ({
-							clipIndex: clip.clipIndex,
-							scenePrompt: clip.scenePrompt,
-							continuityInstructions: clip.continuityInstructions,
-							transition: clip.transition,
-						}),
-					)}
+						}).catch((error) =>
+							notifyStudioError("Could not save selection", error),
+						);
+					}}
+					onRemoveImage={async (id) => {
+						await removeReferenceImage({
+							runId,
+							imageId: id as Id<"galleryImages">,
+						});
+					}}
 				/>
-			) : null}
 
-			{compositionJobWithUrls ? (
-				<div
-					className={
-						isPlanningNextComposition
-							? "opacity-70 transition-opacity"
-							: undefined
-					}
-				>
-					{isPlanningNextComposition ? (
-						<p className="mb-2 text-xs text-amber-800 dark:text-amber-200">
-							Showing previous plan clips while the next plan is generated.
-						</p>
-					) : null}
-					<CompositionResult
-						status={compositionJobWithUrls.status}
-						clips={compositionJobWithUrls.clips as CompositionClipResult[]}
-						totalDurationSeconds={compositionJobWithUrls.totalDurationSeconds}
-						aspectRatio={compositionJobWithUrls.videoParams?.aspectRatio}
-						mergeSources={(compositionJobWithUrls.clips ?? []).map(
-							(clip: {
-								video?: { url?: string | null; objectKey?: string | null };
-							}) => ({
-								url: clip.video?.url,
-								objectKey: clip.video?.objectKey,
-								runId: activeRunId,
-							}),
-						)}
+				<div className="flex flex-col gap-3 border-t border-border/80 pt-5">
+					<h2 className="font-heading text-lg font-semibold">Generate video</h2>
+					<VideoGenerateConfirm
+						config={videoConfig}
+						className="min-h-11"
+						disabled={anyBusy || !prompt.trim()}
+						generating={busyStage === "video"}
+						triggerLabel="Generate video"
+						onConfirm={() => void onGenerateVideo()}
 					/>
+					<VideoResult runId={null} videos={videos} />
 				</div>
-			) : null}
-
-			{run ? <VideoResult runId={activeRunId} videos={videos} /> : null}
-
+			</div>
 			<GenerationProgressDock
-				status={run?.status}
+				status={
+					run?.status === "generating"
+						? (busyStage ?? "video_generating")
+						: run?.status === "completed"
+							? "completed"
+							: run?.status === "failed"
+								? "failed"
+								: "draft"
+				}
 				busyStage={busyStage}
 				warnings={run?.warnings}
-				contextLabel={
-					MODEL_CAPABILITY_PROFILES[selectedModel]?.displayName ?? null
-				}
+				contextLabel={profile?.displayName ?? null}
 			/>
-		</div>
+		</>
 	);
 }

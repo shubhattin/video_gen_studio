@@ -26,7 +26,8 @@ type VideoGenerateConfirmProps = {
 	generating?: boolean;
 	triggerLabel: string;
 	generatingLabel?: string;
-	planLabel?: string;
+	/** Brief amber warning shown inside the dialog (e.g. settings divergence). */
+	warning?: string;
 	className?: string;
 	onConfirm: () => void;
 };
@@ -51,7 +52,7 @@ export function VideoGenerateConfirm({
 	generating,
 	triggerLabel,
 	generatingLabel = "Generating video…",
-	planLabel,
+	warning,
 	className,
 	onConfirm,
 }: VideoGenerateConfirmProps) {
@@ -60,12 +61,6 @@ export function VideoGenerateConfirm({
 
 	return (
 		<div className="flex flex-col gap-1.5">
-			{planLabel ? (
-				<p className="text-xs text-muted-foreground">
-					Using plan:{" "}
-					<span className="font-medium text-foreground">{planLabel}</span>
-				</p>
-			) : null}
 			<AlertDialog open={open} onOpenChange={setOpen}>
 				<AlertDialogTrigger
 					render={
@@ -90,7 +85,11 @@ export function VideoGenerateConfirm({
 					</AlertDialogHeader>
 
 					<div className="grid gap-2">
-						{planLabel ? <DetailRow label="Plan" value={planLabel} /> : null}
+						{warning ? (
+							<p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-700 dark:text-amber-300">
+								{warning}
+							</p>
+						) : null}
 						<DetailRow
 							label="Model"
 							value={profile?.displayName ?? config.modelId}

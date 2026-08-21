@@ -18,109 +18,61 @@ import {
 import { normalizeVideoScenes } from "../lib/videoPlanMarkdown";
 import { plannerPromptSelectionValidator } from "../schema";
 import {
-	collectRunMediaIds,
 	findGalleryByObjectKey,
 	galleryVideoToResult,
 	imageReferencedOutsideRun,
-	listCompositionClipsForRunCtx,
-	listShlokaPlansForRunCtx,
+	listAllPlansForRunCtx,
+	listPlansForRunCtx,
 	loadImagesByIds,
 	loadVideosByIds,
-	uniqueIds,
 	videoReferencedOutsideRun,
 } from "./media";
 
 type DbCtx = QueryCtx | MutationCtx;
 
-export async function listCompositionJobsForRunCtx(
-	ctx: DbCtx,
-	runId: Id<"generationRuns">,
-) {
-	const jobs = await ctx.db
-		.query("compositionJobs")
-		.withIndex("by_runId_and_createdAt", (q) => q.eq("runId", runId))
-		.order("desc")
-		.take(50);
-	return jobs;
-}
-
-export async function resolveActiveCompositionJob(
-	ctx: DbCtx,
-	runId: Id<"generationRuns">,
-): Promise<Doc<"compositionJobs"> | null> {
-	const run = await ctx.db.get(runId);
-	if (!run) {
-		return null;
-	}
-	if (run.activeCompositionJobId) {
-		const selected = await ctx.db.get(run.activeCompositionJobId);
-		if (selected && selected.runId === runId) {
-			return selected;
-		}
-	}
-	const jobs = await listCompositionJobsForRunCtx(ctx, runId);
-	return jobs[0] ?? null;
-}
-
-async function compositionWithClips(
+/** Hydrate a plan for clients: normalized scenes + resolved output videos. */
+export async function hydratePlan(
 	ctx: QueryCtx,
-	job: Doc<"compositionJobs">,
-) {
-	const clips = await ctx.db
-		.query("compositionClips")
-		.withIndex("by_jobId_and_clipIndex", (q) => q.eq("jobId", job._id))
-		.order("asc")
-		.take(6);
-	const hydrated = await Promise.all(
-		clips.map(async (clip) => {
-			const videoDoc = clip.galleryVideoId
-				? await ctx.db.get(clip.galleryVideoId)
-				: null;
-			const frameDoc = clip.terminalFrameImageId
-				? await ctx.db.get(clip.terminalFrameImageId)
-				: null;
-			return {
-				...clip,
-				video: videoDoc ? galleryVideoToResult(videoDoc) : undefined,
-				terminalFrameObjectKey: frameDoc?.objectKey,
-			};
-		}),
-	);
+	plan: Doc<"shlokaPlans">,
+): Promise<Doc<"shlokaPlans"> & { videos: ReturnType<typeof galleryVideoToResult>[] }> {
+	const videos = await loadVideosByIds(ctx, plan.videoOutputIds ?? []);
 	return {
-		...job,
-		clips: hydrated,
+		...plan,
+		videoScenes: plan.videoScenes
+			? normalizeVideoScenes(plan.videoScenes)
+			: plan.videoScenes,
+		videos,
 	};
 }
 
 /**
- * Resolve a run for clients: gallery-derived attachments under `images` /
- * `videos` (roles included), plus the active shloka plan (scenes normalized).
+ * Resolve a run for clients: gallery-derived images (roles included) plus the
+ * active shloka plan. Videos are plan-scoped and hydrate with each plan.
  */
 async function hydrateRun(ctx: QueryCtx, run: Doc<"generationRuns">) {
 	const firstFrameImageId = run.firstFrameImageId;
 	const lastFrameImageId = run.lastFrameImageId;
 	const extraReferenceImageIds = run.extraReferenceImageIds ?? [];
-	const imageIds = uniqueIds(
-		[
-			...(run.attachedImageIds ?? []),
-			firstFrameImageId,
-			lastFrameImageId,
-			...extraReferenceImageIds,
-		].filter((id): id is Id<"galleryImages"> => Boolean(id)),
-	);
-	const [images, videos, activePlan] = await Promise.all([
-		loadImagesByIds(ctx, imageIds),
-		loadVideosByIds(ctx, run.attachedVideoIds ?? []),
+	const imageIds = [
+		...(run.attachedImageIds ?? []),
+		firstFrameImageId,
+		lastFrameImageId,
+		...extraReferenceImageIds,
+	].filter((id): id is Id<"galleryImages"> => Boolean(id));
+	const uniqueImageIds = [...new Set(imageIds)];
+	const [images, activePlan] = await Promise.all([
+		loadImagesByIds(ctx, uniqueImageIds),
 		run.activePlanId ? ctx.db.get(run.activePlanId) : null,
 	]);
 	return {
 		...run,
 		images,
-		videos,
 		activePlan: activePlan
 			? {
 					...activePlan,
-					videoScenes: normalizeVideoScenes(activePlan.videoScenes),
+					videoScenes: activePlan.videoScenes
+						? normalizeVideoScenes(activePlan.videoScenes)
+						: activePlan.videoScenes,
 				}
 			: null,
 	};
@@ -141,85 +93,195 @@ export const getRun = query({
 	},
 });
 
-export const getCompositionForRun = query({
+export const getRunDoc = internalQuery({
 	args: {
 		runId: v.id("generationRuns"),
-		jobId: v.optional(v.id("compositionJobs")),
+	},
+	returns: v.union(v.null(), v.any()),
+	handler: async (ctx, args) => {
+		const run = await ctx.db.get(args.runId);
+		if (!run) {
+			return null;
+		}
+		return await hydrateRun(ctx, run);
+	},
+});
+
+export const getPlan = query({
+	args: {
+		runId: v.id("generationRuns"),
+		planId: v.id("shlokaPlans"),
 	},
 	returns: v.union(v.null(), v.any()),
 	handler: async (ctx, args) => {
 		await requireAdmin(ctx);
-		let job = null;
-		if (args.jobId) {
-			const selected = await ctx.db.get(args.jobId);
-			if (selected && selected.runId === args.runId) {
-				job = selected;
-			}
-		}
-		if (!job) {
-			job = await resolveActiveCompositionJob(ctx, args.runId);
-		}
-		if (!job) {
+		const plan = await ctx.db.get(args.planId);
+		if (!plan || plan.runId !== args.runId) {
 			return null;
 		}
-		return await compositionWithClips(ctx, job);
+		return await hydratePlan(ctx, plan);
 	},
 });
 
-export const listCompositionJobsForRun = query({
+export const getPlanDoc = internalQuery({
+	args: {
+		planId: v.id("shlokaPlans"),
+	},
+	returns: v.union(v.null(), v.any()),
+	handler: async (ctx, args) => {
+		return await ctx.db.get(args.planId);
+	},
+});
+
+export const listPlansForRun = query({
 	args: {
 		runId: v.id("generationRuns"),
 	},
 	returns: v.array(v.any()),
 	handler: async (ctx, args) => {
 		await requireAdmin(ctx);
-		const jobs = await listCompositionJobsForRunCtx(ctx, args.runId);
-		return jobs.map((job) => ({
-			_id: job._id,
-			attemptNumber: job.attemptNumber ?? 1,
-			status: job.status,
-			mode: job.mode,
-			clipCount: job.clipCount,
-			videoParams: job.videoParams,
-			overallDescription: job.overallDescription,
-			plannerModel: job.plannerModel,
-			plannerReasoning: job.plannerReasoning,
-			estimatedCostUsd: job.estimatedCostUsd,
-			actualCostUsd: job.actualCostUsd,
-			createdAt: job.createdAt,
-			updatedAt: job.updatedAt,
-			lastError: job.lastError,
-		}));
+		const plans = await listPlansForRunCtx(ctx, args.runId);
+		return await Promise.all(plans.map((plan) => hydratePlan(ctx, plan)));
 	},
 });
 
-export const listShlokaPlansForRun = query({
+async function countShlokaRunVideos(
+	ctx: QueryCtx,
+	runId: Id<"generationRuns">,
+): Promise<number> {
+	const plans = await ctx.db
+		.query("shlokaPlans")
+		.withIndex("by_runId", (q) => q.eq("runId", runId))
+		.take(50);
+	let count = 0;
+	for (const plan of plans) {
+		count += plan.videoOutputIds?.length ?? 0;
+	}
+	return count;
+}
+
+export const listRecentRuns = query({
 	args: {
-		runId: v.id("generationRuns"),
+		limit: v.optional(v.number()),
 	},
 	returns: v.array(v.any()),
 	handler: async (ctx, args) => {
 		await requireAdmin(ctx);
-		const plans = await listShlokaPlansForRunCtx(ctx, args.runId);
-		return plans.map((plan) => ({
-			_id: plan._id,
-			attemptNumber: plan.attemptNumber,
-			status: plan.status,
-			title: plan.title,
-			plannerSystemPrompt: plan.plannerSystemPrompt,
-			plannerSystemPromptTemplateId: plan.plannerSystemPromptTemplateId,
-			plannerModel: plan.plannerModel,
-			plannerReasoning: plan.plannerReasoning,
-			imagePrompt: plan.imagePrompt,
-			videoScenes: normalizeVideoScenes(plan.videoScenes),
-			planningKey: plan.planningKey,
-			warnings: plan.warnings,
-			lastError: plan.lastError,
-			createdAt: plan.createdAt,
-			updatedAt: plan.updatedAt,
+		const limit = Math.min(args.limit ?? 20, 50);
+		const runs = await ctx.db
+			.query("generationRuns")
+			.withIndex("by_createdAt")
+			.order("desc")
+			.take(limit);
+		return await Promise.all(
+			runs.map(async (run) => ({
+				_id: run._id,
+				provenance: run.provenance,
+				status: run.status,
+				title: run.title,
+				shlokaText: run.shlokaText,
+				selectedModelId: undefined,
+				createdAt: run.createdAt,
+				videoCount: await countShlokaRunVideos(ctx, run._id),
+			})),
+		);
+	},
+});
+
+export const listRecentModelStudioRuns = query({
+	args: {
+		limit: v.optional(v.number()),
+	},
+	returns: v.array(v.any()),
+	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
+		const limit = Math.min(args.limit ?? 20, 50);
+		const runs = await ctx.db
+			.query("modelStudioRuns")
+			.withIndex("by_createdAt")
+			.order("desc")
+			.take(limit);
+		return runs.map((run) => ({
+			_id: run._id,
+			status: run.status,
+			title: run.title,
+			prompt: run.prompt,
+			selectedModelId: run.selectedModelId,
+			createdAt: run.createdAt,
+			videoCount: run.videoOutputIds?.length ?? 0,
 		}));
 	},
 });
+
+export const getModelStudioRun = query({
+	args: {
+		runId: v.id("modelStudioRuns"),
+	},
+	returns: v.union(v.null(), v.any()),
+	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
+		const run = await ctx.db.get(args.runId);
+		if (!run) {
+			return null;
+		}
+		const imageIds = [
+			...(run.attachedImageIds ?? []),
+			run.firstFrameImageId,
+			run.lastFrameImageId,
+			...(run.extraReferenceImageIds ?? []),
+		].filter((id): id is Id<"galleryImages"> => Boolean(id));
+		const [images, videos] = await Promise.all([
+			loadImagesByIds(ctx, [...new Set(imageIds)]),
+			loadVideosByIds(ctx, run.videoOutputIds ?? []),
+		]);
+		return { ...run, images, videos };
+	},
+});
+
+export const getModelStudioRunDoc = internalQuery({
+	args: {
+		runId: v.id("modelStudioRuns"),
+	},
+	returns: v.union(v.null(), v.any()),
+	handler: async (ctx, args) => {
+		return await ctx.db.get(args.runId);
+	},
+});
+
+/** Internal: hydrated image refs (id + objectKey) for a model-studio run. */
+export const listModelStudioRunImages = internalQuery({
+	args: {
+		runId: v.id("modelStudioRuns"),
+	},
+	returns: v.array(
+		v.object({
+			id: v.id("galleryImages"),
+			objectKey: v.string(),
+		}),
+	),
+	handler: async (ctx, args) => {
+		const run = await ctx.db.get(args.runId);
+		if (!run) {
+			return [];
+		}
+		const ids = [
+			...(run.attachedImageIds ?? []),
+			run.firstFrameImageId,
+			run.lastFrameImageId,
+			...(run.extraReferenceImageIds ?? []),
+		].filter((id): id is Id<"galleryImages"> => Boolean(id));
+		const out: Array<{ id: Id<"galleryImages">; objectKey: string }> = [];
+		for (const id of [...new Set(ids)]) {
+			const doc = await ctx.db.get(id);
+			if (doc) {
+				out.push({ id: doc._id, objectKey: doc.objectKey });
+			}
+		}
+		return out;
+	},
+});
+
+// ── System prompt templates ─────────────────────────────────────────────
 
 export async function listSystemPromptTemplatesCtx(ctx: DbCtx) {
 	return await ctx.db.query("systemPromptTemplates").order("desc").take(200);
@@ -310,25 +372,7 @@ export const resolvePlannerPromptSelectionForRun = internalQuery({
 	},
 });
 
-export const listRecentRuns = query({
-	args: {
-		limit: v.optional(v.number()),
-	},
-	returns: v.array(v.any()),
-	handler: async (ctx, args) => {
-		await requireAdmin(ctx);
-		const limit = Math.min(args.limit ?? 20, 50);
-		const runs = await ctx.db
-			.query("generationRuns")
-			.withIndex("by_createdAt")
-			.order("desc")
-			.take(limit);
-		return runs.map((run) => ({
-			...run,
-			videos: (run.attachedVideoIds ?? []).map((id) => ({ id })),
-		}));
-	},
-});
+// ── Gallery ─────────────────────────────────────────────────────────────
 
 export const listGalleryImages = query({
 	args: {
@@ -372,56 +416,58 @@ export const listGalleryVideos = query({
 });
 
 /**
- * Resolve the single run a gallery video is connected to (if any): a run that
- * attaches it, a composition clip that uses it, or the run that generated it
- * (via sourceRunId). Returns null when the video is abandoned.
+ * Resolve the single owner of a gallery video (if any): a shloka plan that
+ * produced it, a model-studio run that produced it, or the generating run via
+ * sourceRunId. Returns null when the video is abandoned.
  */
 export async function resolveGalleryVideoRunConnection(
 	ctx: DbCtx,
 	videoId: Id<"galleryVideos">,
 ): Promise<{
-	runId: Id<"generationRuns">;
+	runId: Id<"generationRuns"> | Id<"modelStudioRuns">;
+	kind: "shloka" | "model-studio";
 	title?: string;
-	provenance: "shloka" | "model-studio";
 	status: string;
 } | null> {
 	const video = await ctx.db.get(videoId);
 	if (!video) {
 		return null;
 	}
-	const runs = await ctx.db.query("generationRuns").collect();
-	const attached = runs.find((run) =>
-		(run.attachedVideoIds ?? []).includes(videoId),
+	const plans = await ctx.db.query("shlokaPlans").collect();
+	const plan = plans.find((item) =>
+		(item.videoOutputIds ?? []).includes(videoId),
 	);
-	if (attached) {
-		return {
-			runId: attached._id,
-			title: attached.title,
-			provenance: attached.provenance,
-			status: attached.status,
-		};
-	}
-	const clips = await ctx.db.query("compositionClips").collect();
-	const clip = clips.find((item) => item.galleryVideoId === videoId);
-	if (clip) {
-		const run = await ctx.db.get(clip.runId);
+	if (plan) {
+		const run = await ctx.db.get(plan.runId);
 		if (run) {
 			return {
 				runId: run._id,
+				kind: "shloka",
 				title: run.title,
-				provenance: run.provenance,
 				status: run.status,
 			};
 		}
 	}
+	const modelRuns = await ctx.db.query("modelStudioRuns").collect();
+	const modelRun = modelRuns.find((item) =>
+		(item.videoOutputIds ?? []).includes(videoId),
+	);
+	if (modelRun) {
+		return {
+			runId: modelRun._id,
+			kind: "model-studio",
+			title: modelRun.title,
+			status: modelRun.status,
+		};
+	}
 	if (video.sourceRunId) {
-		const run = await ctx.db.get(video.sourceRunId);
-		if (run) {
+		const shlokaRun = await ctx.db.get(video.sourceRunId);
+		if (shlokaRun) {
 			return {
-				runId: run._id,
-				title: run.title,
-				provenance: run.provenance,
-				status: run.status,
+				runId: shlokaRun._id,
+				kind: "shloka",
+				title: shlokaRun.title,
+				status: shlokaRun.status,
 			};
 		}
 	}
@@ -439,7 +485,7 @@ export const getGalleryVideoRunConnection = query({
 	},
 });
 
-/** Runs that reference a gallery image (attached, role, or clip frame). */
+/** Runs that reference a gallery image (attached, role). */
 export const listRunsReferencingImage = query({
 	args: {
 		imageId: v.id("galleryImages"),
@@ -448,7 +494,12 @@ export const listRunsReferencingImage = query({
 	handler: async (ctx, args) => {
 		await requireAdmin(ctx);
 		const imageId = args.imageId;
-		const runIds = new Set<Id<"generationRuns">>();
+		const results: Array<{
+			runId: Id<"generationRuns"> | Id<"modelStudioRuns">;
+			kind: "shloka" | "model-studio";
+			title?: string;
+			status: string;
+		}> = [];
 		const runs = await ctx.db.query("generationRuns").collect();
 		for (const run of runs) {
 			if (
@@ -457,35 +508,29 @@ export const listRunsReferencingImage = query({
 				run.lastFrameImageId === imageId ||
 				(run.extraReferenceImageIds ?? []).includes(imageId)
 			) {
-				runIds.add(run._id);
+				results.push({
+					runId: run._id,
+					kind: "shloka",
+					title: run.title,
+					status: run.status,
+				});
 			}
 		}
-		const clips = await ctx.db.query("compositionClips").collect();
-		for (const clip of clips) {
+		const modelRuns = await ctx.db.query("modelStudioRuns").collect();
+		for (const run of modelRuns) {
 			if (
-				clip.terminalFrameImageId === imageId ||
-				clip.referenceImageId === imageId
+				(run.attachedImageIds ?? []).includes(imageId) ||
+				run.firstFrameImageId === imageId ||
+				run.lastFrameImageId === imageId ||
+				(run.extraReferenceImageIds ?? []).includes(imageId)
 			) {
-				runIds.add(clip.runId);
+				results.push({
+					runId: run._id,
+					kind: "model-studio",
+					title: run.title,
+					status: run.status,
+				});
 			}
-		}
-		const results: Array<{
-			runId: Id<"generationRuns">;
-			title?: string;
-			provenance: "shloka" | "model-studio";
-			status: string;
-		}> = [];
-		for (const runId of runIds) {
-			const run = await ctx.db.get(runId);
-			if (!run) {
-				continue;
-			}
-			results.push({
-				runId: run._id,
-				title: run.title,
-				provenance: run.provenance,
-				status: run.status,
-			});
 		}
 		return results;
 	},
@@ -505,8 +550,8 @@ export const getRunMediaCounts = query({
 		if (!run) {
 			return { images: 0, videos: 0 };
 		}
-		const clips = await listCompositionClipsForRunCtx(ctx, args.runId);
-		const { images, videos } = await collectRunMediaIds(run, clips);
+		const plans = await listAllPlansForRunCtx(ctx, args.runId);
+		const { images, videos } = await collectRunMediaIdsLocal(run, plans);
 
 		const allVideos = await ctx.db.query("galleryVideos").collect();
 		for (const video of allVideos) {
@@ -532,6 +577,29 @@ export const getRunMediaCounts = query({
 		return { images: imageCount, videos: videoCount };
 	},
 });
+
+function collectRunMediaIdsLocal(
+	run: Doc<"generationRuns">,
+	plans: Array<Doc<"shlokaPlans">>,
+) {
+	const images = new Set<Id<"galleryImages">>();
+	const videos = new Set<Id<"galleryVideos">>();
+	for (const id of run.attachedImageIds ?? []) {
+		images.add(id);
+	}
+	for (const id of [run.firstFrameImageId, run.lastFrameImageId]) {
+		if (id) images.add(id);
+	}
+	for (const id of run.extraReferenceImageIds ?? []) {
+		images.add(id);
+	}
+	for (const plan of plans) {
+		for (const id of plan.videoOutputIds ?? []) {
+			videos.add(id);
+		}
+	}
+	return { images, videos };
+}
 
 export const getStaticModelCatalog = query({
 	args: {},
@@ -562,40 +630,6 @@ export const getCachedOpenRouterCatalog = query({
 		} catch {
 			return null;
 		}
-	},
-});
-
-export const getRunDoc = internalQuery({
-	args: {
-		runId: v.id("generationRuns"),
-	},
-	returns: v.union(v.null(), v.any()),
-	handler: async (ctx, args) => {
-		const run = await ctx.db.get(args.runId);
-		if (!run) {
-			return null;
-		}
-		return await hydrateRun(ctx, run);
-	},
-});
-
-export const getCompositionJobByRun = internalQuery({
-	args: {
-		runId: v.id("generationRuns"),
-	},
-	returns: v.union(v.null(), v.any()),
-	handler: async (ctx, args) => {
-		return await resolveActiveCompositionJob(ctx, args.runId);
-	},
-});
-
-export const getCompositionClip = internalQuery({
-	args: {
-		clipId: v.id("compositionClips"),
-	},
-	returns: v.union(v.null(), v.any()),
-	handler: async (ctx, args) => {
-		return await ctx.db.get(args.clipId);
 	},
 });
 
