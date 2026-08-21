@@ -4,35 +4,27 @@ import {
 	handleTypingBeforeInputEvent,
 } from "lipilekhika/typing";
 import { useEffect, useRef, useState } from "react";
-import { MessageResponse } from "#/components/ai-elements/message";
-import { Button } from "#/components/ui/button";
+import { SystemPromptPicker } from "#/components/studio/system-prompts/system-prompt-picker";
 import { Label } from "#/components/ui/label";
-import {
-	Popover,
-	PopoverContent,
-	PopoverDescription,
-	PopoverHeader,
-	PopoverTitle,
-	PopoverTrigger,
-} from "#/components/ui/popover";
 import { Switch } from "#/components/ui/switch";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs";
 import { Textarea } from "#/components/ui/textarea";
-import { MarkdownTextarea } from "#/components/ui/markdown-textarea";
-import {
-	DEFAULT_PLANNER_SYSTEM_PROMPT,
-	normalizePlannerSystemPromptForStorage,
+import type {
+	PlannerPromptSelection,
+	SystemPromptTemplate,
 } from "#/lib/planner-prompt";
 import { cn } from "#/lib/utils";
 
 type ShlokaComposerProps = {
 	shlokaText: string;
 	customInstructions: string;
-	plannerSystemPrompt: string;
+	plannerPromptSelection: PlannerPromptSelection | null;
+	templates: SystemPromptTemplate[] | undefined;
 	onShlokaChange: (value: string) => void;
 	onInstructionsChange: (value: string) => void;
-	/** Persist the planner instructions editor when the user presses Save. */
-	onSavePlannerSystemPrompt: (value: string) => void;
+	/** Persist the selected system prompt template (immediate autosave). */
+	onPlannerPromptSelectionChange: (
+		selection: PlannerPromptSelection | null,
+	) => void;
 	/** Persist shloka / instructions (typically on blur). */
 	onPersist?: () => void;
 	disabled?: boolean;
@@ -41,23 +33,18 @@ type ShlokaComposerProps = {
 export function ShlokaComposer({
 	shlokaText,
 	customInstructions,
-	plannerSystemPrompt,
+	plannerPromptSelection,
+	templates,
 	onShlokaChange,
 	onInstructionsChange,
-	onSavePlannerSystemPrompt,
+	onPlannerPromptSelectionChange,
 	onPersist,
 	disabled,
 }: ShlokaComposerProps) {
 	const [lipiEnabled, setLipiEnabled] = useState(true);
-	const [promptTab, setPromptTab] = useState<"view" | "edit">("view");
-	const [plannerDraft, setPlannerDraft] = useState(plannerSystemPrompt);
 	const typingContextRef = useRef(
 		createTypingContext("Devanagari", { useNativeNumerals: true }),
 	);
-	const isCustomSystemPrompt = Boolean(
-		normalizePlannerSystemPromptForStorage(plannerSystemPrompt),
-	);
-	const plannerDirty = plannerDraft !== plannerSystemPrompt;
 
 	useEffect(() => {
 		typingContextRef.current = createTypingContext("Devanagari", {
@@ -67,127 +54,25 @@ export function ShlokaComposer({
 
 	return (
 		<section className="space-y-5">
-			<div className="space-y-1.5">
-				<div className="flex flex-wrap items-center justify-between gap-2">
-					<div>
-						<p className="text-sm font-medium">Planner instructions</p>
-						<p className="text-sm text-muted-foreground">
-							How the planner should approach image and video prompts.
-							{isCustomSystemPrompt
-								? " Customized."
-								: " Using built-in default."}
-						</p>
-					</div>
-					<Popover
-						onOpenChange={(open) => {
-							if (open) {
-								setPromptTab("view");
-								setPlannerDraft(plannerSystemPrompt);
-							}
-						}}
-					>
-						<PopoverTrigger
-							render={
-								<Button
-									type="button"
-									variant="outline"
-									size="sm"
-									disabled={disabled}
-								/>
-							}
-						>
-							{isCustomSystemPrompt ? "View custom" : "View default"}
-						</PopoverTrigger>
-						<PopoverContent
-							align="end"
-							className="w-[min(36rem,calc(100vw-2rem))] gap-3 p-4"
-						>
-							<PopoverHeader>
-								<PopoverTitle>Planner instructions</PopoverTitle>
-								<PopoverDescription>
-									Only saved when it differs from the built-in default. The
-									output format is chosen automatically — keep this focused on
-									creative direction.
-								</PopoverDescription>
-							</PopoverHeader>
-							<Tabs
-								value={promptTab}
-								onValueChange={(value) => {
-									if (value === "view" || value === "edit") {
-										setPromptTab(value);
-									}
-								}}
-								className="gap-3"
-							>
-								<TabsList>
-									<TabsTrigger value="view">View</TabsTrigger>
-									<TabsTrigger value="edit" disabled={disabled}>
-										Edit
-									</TabsTrigger>
-								</TabsList>
-								<TabsContent value="view" className="mt-0">
-									<div className="max-h-[50vh] overflow-y-auto rounded-lg border border-border/80 bg-muted/20 p-4">
-										<MessageResponse className="text-sm leading-relaxed [&_strong]:font-semibold [&_em]:italic [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-xs [&_h2]:mt-4 [&_h2]:mb-2 [&_h2]:font-heading [&_h2]:text-base [&_h2]:font-semibold [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_li]:my-1 [&_p]:my-2 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-											{plannerSystemPrompt}
-										</MessageResponse>
-									</div>
-								</TabsContent>
-								<TabsContent value="edit" className="mt-0 space-y-3">
-									<MarkdownTextarea
-										value={plannerDraft}
-										onChange={(event) => setPlannerDraft(event.target.value)}
-										className="min-h-96 max-h-[70vh] resize-y"
-										disabled={disabled}
-										aria-label="Planner instructions"
-									/>
-									<div className="flex flex-wrap justify-end gap-2">
-										<Button
-											type="button"
-											variant="ghost"
-											size="sm"
-											disabled={disabled}
-											onClick={() =>
-												setPlannerDraft(DEFAULT_PLANNER_SYSTEM_PROMPT)
-											}
-										>
-											Reset to default
-										</Button>
-										<Button
-											type="button"
-											variant="outline"
-											size="sm"
-											disabled={disabled || !plannerDirty}
-											onClick={() => setPlannerDraft(plannerSystemPrompt)}
-										>
-											Discard
-										</Button>
-										<Button
-											type="button"
-											size="sm"
-											disabled={disabled || !plannerDirty}
-											onClick={() => {
-												onSavePlannerSystemPrompt(plannerDraft);
-												setPromptTab("view");
-											}}
-										>
-											Save
-										</Button>
-									</div>
-								</TabsContent>
-							</Tabs>
-						</PopoverContent>
-					</Popover>
+			<div className="space-y-2">
+				<div>
+					<p className="text-sm font-medium">System prompt template</p>
+					<p className="text-sm text-muted-foreground">
+						Required before the planner runs.
+					</p>
 				</div>
+				<SystemPromptPicker
+					selection={plannerPromptSelection}
+					templates={templates}
+					onChange={onPlannerPromptSelectionChange}
+					disabled={disabled}
+				/>
 			</div>
 
 			<div className="space-y-2">
 				<div className="flex items-center justify-between gap-3">
 					<div>
 						<h2 className="font-heading text-lg font-semibold">Shloka</h2>
-						<p className="text-sm text-muted-foreground">
-							Enter the verse in Devanagari. Type in English and it
-							transliterates automatically.
-						</p>
 					</div>
 					<div className="flex items-center gap-2 min-h-11">
 						<Switch

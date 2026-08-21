@@ -127,10 +127,7 @@ function PlanEditor({
 							setError(null);
 							setWarning(null);
 						}}
-						className={cn(
-							"min-h-96 max-h-[70vh] resize-y",
-							editorClassName,
-						)}
+						className={cn("min-h-96 max-h-[70vh] resize-y", editorClassName)}
 						disabled={disabled || saving}
 						aria-label={ariaLabel}
 					/>

@@ -154,6 +154,15 @@ export const planShlokaRun = action({
 		if (!run.shlokaText?.trim()) {
 			throw new Error("Shloka text is required before planning.");
 		}
+		if (!run.plannerPromptSelection) {
+			throw new Error(
+				"Select a system prompt template before planning.",
+			);
+		}
+		const resolvedPrompt = await ctx.runQuery(
+			internal.studio.queries.resolvePlannerPromptSelectionForRun,
+			{ selection: run.plannerPromptSelection },
+		);
 
 		const planningKey = `plan-${args.runId}-${Date.now().toString(36)}`;
 		if (
@@ -179,7 +188,7 @@ export const planShlokaRun = action({
 					model: openrouter(PLANNER_MODEL_ID),
 					reasoning: "medium",
 					system: buildShlokaPlannerSystemPrompt({
-						stored: run.plannerSystemPrompt,
+						stored: resolvedPrompt.content,
 						composition,
 					}),
 					prompt: buildPlannerPrompt(
@@ -206,7 +215,7 @@ export const planShlokaRun = action({
 					model: openrouter(PLANNER_MODEL_ID),
 					reasoning: "medium",
 					system: buildShlokaPlannerSystemPrompt({
-						stored: run.plannerSystemPrompt,
+						stored: resolvedPrompt.content,
 						composition: null,
 					}),
 					prompt: buildPlannerPrompt(
@@ -226,6 +235,11 @@ export const planShlokaRun = action({
 					videoScenes: plan.videoScenes,
 					warnings: warnings.length > 0 ? warnings : undefined,
 					planningKey,
+					plannerSystemPrompt: resolvedPrompt.content,
+					plannerSystemPromptTemplateId:
+						resolvedPrompt.source === "template"
+							? resolvedPrompt.templateId
+							: undefined,
 				});
 			}
 		} catch (error) {

@@ -3,6 +3,7 @@ import type { Id } from "@convex/_generated/dataModel";
 import { useMutation } from "convex/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { VideoConfigState } from "#/components/studio/video/video-configuration";
+import type { PlannerPromptSelection } from "#/lib/planner-prompt";
 
 export type RunAutosaveStatus = "idle" | "saving" | "saved" | "error";
 
@@ -10,7 +11,7 @@ export type RunAutosaveStatus = "idle" | "saving" | "saved" | "error";
 export type DraftPatch = {
 	shlokaText?: string;
 	customInstructions?: string;
-	plannerSystemPrompt?: string | null;
+	plannerPromptSelection?: PlannerPromptSelection | null;
 	imageSize?: string;
 	imageQuality?: string;
 	selectedModelId?: string;

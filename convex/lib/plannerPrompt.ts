@@ -1,3 +1,18 @@
+import type { Id } from "../_generated/dataModel";
+
+/** Display label used in pickers for the built-in default planner prompt. */
+export const DEFAULT_PLANNER_SYSTEM_PROMPT_TITLE = "Default (built-in)";
+
+/**
+ * The planner prompt selection attached to a Shloka run.
+ * - Absent (undefined) = the user has not chosen yet (planning is blocked).
+ * - `{ kind: "default" }` = use the built-in DEFAULT_PLANNER_SYSTEM_PROMPT.
+ * - `{ kind: "template", templateId }` = use a stored system prompt template.
+ */
+export type PlannerPromptSelection =
+	| { kind: "default" }
+	| { kind: "template"; templateId: Id<"systemPromptTemplates"> };
+
 /** Built-in planner system prompt for Shloka Studio video plan generation. */
 export const DEFAULT_PLANNER_SYSTEM_PROMPT = `
 You are a sanskrit teacher, and a creative director with expertise in conveying meanings of sanskrit shlokas through short-form videos (default 9:16 portrait).

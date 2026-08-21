@@ -8,6 +8,7 @@ import {
 	defaultVideoParams,
 	validateVideoParams,
 } from "../lib/schemas";
+import { DEFAULT_PLANNER_SYSTEM_PROMPT } from "../lib/plannerPrompt";
 
 vi.mock("../lib/r2", () => ({
 	buildStudioObjectKey: ({
@@ -423,6 +424,210 @@ describe("studio mutations", () => {
 		const selected = await t.query(api.studio.queries.getCompositionForRun, { runId });
 		expect(selected?._id).toBe(composition?._id);
 		expect(selected?.attemptNumber).toBe(1);
+	});
+});
+
+describe("system prompt templates", () => {
+	it("creates, lists, updates, and deletes templates", async () => {
+		const t = adminConvex();
+		const id = await t.mutation(api.studio.mutations.createSystemPromptTemplate, {
+			title: "Concise devotional",
+		});
+
+		let list = await t.query(api.studio.queries.listSystemPromptTemplates, {});
+		expect(list).toHaveLength(1);
+		expect(list[0]._id).toBe(id);
+		expect(list[0].title).toBe("Concise devotional");
+		expect(list[0].content).toBe("");
+
+		await t.mutation(api.studio.mutations.updateSystemPromptTemplate, {
+			templateId: id,
+			title: "Concise",
+			content: "You are a concise creative director.",
+		});
+
+		list = await t.query(api.studio.queries.listSystemPromptTemplates, {});
+		expect(list[0].title).toBe("Concise");
+		expect(list[0].content).toBe("You are a concise creative director.");
+
+		const single = await t.query(api.studio.queries.getSystemPromptTemplate, {
+			templateId: id,
+		});
+		expect(single?.title).toBe("Concise");
+
+		await t.mutation(api.studio.mutations.deleteSystemPromptTemplate, {
+			templateId: id,
+		});
+		list = await t.query(api.studio.queries.listSystemPromptTemplates, {});
+		expect(list).toHaveLength(0);
+		expect(
+			await t.query(api.studio.queries.getSystemPromptTemplate, { templateId: id }),
+		).toBeNull();
+	});
+
+	it("requires a non-empty title and trims it", async () => {
+		const t = adminConvex();
+		await expect(
+			t.mutation(api.studio.mutations.createSystemPromptTemplate, { title: "   " }),
+		).rejects.toThrow("Title is required.");
+		const id = await t.mutation(api.studio.mutations.createSystemPromptTemplate, {
+			title: "  Padded title  ",
+		});
+		const list = await t.query(api.studio.queries.listSystemPromptTemplates, {});
+		expect(list[0].title).toBe("Padded title");
+	});
+
+	it("blocks planning without a selected system prompt", async () => {
+		const t = adminConvex();
+		const runId = await t.mutation(api.studio.mutations.createShlokaDraft, {
+			shlokaText: "No selection yet",
+		});
+		await expect(
+			t.action(api.studio.actions.planShlokaRun, { runId }),
+		).rejects.toThrow("Select a system prompt template before planning.");
+	});
+
+	it("resolves default and template selections to prompt content", async () => {
+		const t = adminConvex();
+		const resolvedDefault = await t.query(
+			internal.studio.queries.resolvePlannerPromptSelectionForRun,
+			{ selection: { kind: "default" } },
+		);
+		expect(resolvedDefault.source).toBe("default");
+		expect(resolvedDefault.content).toBe(DEFAULT_PLANNER_SYSTEM_PROMPT);
+
+		const id = await t.mutation(api.studio.mutations.createSystemPromptTemplate, {
+			title: "Custom",
+		});
+		await t.mutation(api.studio.mutations.updateSystemPromptTemplate, {
+			templateId: id,
+			content: "Custom planner instructions.",
+		});
+
+		const resolvedTemplate = await t.query(
+			internal.studio.queries.resolvePlannerPromptSelectionForRun,
+			{ selection: { kind: "template", templateId: id } },
+		);
+		expect(resolvedTemplate.source).toBe("template");
+		expect(resolvedTemplate.content).toBe("Custom planner instructions.");
+		expect(resolvedTemplate.templateId).toBe(id);
+	});
+
+	it("throws when a selected template was deleted", async () => {
+		const t = adminConvex();
+		const id = await t.mutation(api.studio.mutations.createSystemPromptTemplate, {
+			title: "Temporary",
+		});
+		await t.mutation(api.studio.mutations.deleteSystemPromptTemplate, {
+			templateId: id,
+		});
+		await expect(
+			t.query(internal.studio.queries.resolvePlannerPromptSelectionForRun, {
+				selection: { kind: "template", templateId: id },
+			}),
+		).rejects.toThrow("no longer exists");
+	});
+
+	it("persists planner prompt selection on runs and clears it with null", async () => {
+		const t = adminConvex();
+		const id = await t.mutation(api.studio.mutations.createSystemPromptTemplate, {
+			title: "Draft selection",
+		});
+
+		const runId = await t.mutation(api.studio.mutations.createShlokaDraft, {
+			shlokaText: "Selection run",
+			plannerPromptSelection: { kind: "default" },
+		});
+		let run = await t.query(api.studio.queries.getRun, { runId });
+		expect(run?.plannerPromptSelection).toEqual({ kind: "default" });
+
+		await t.mutation(api.studio.mutations.updateDraft, {
+			runId,
+			plannerPromptSelection: { kind: "template", templateId: id },
+		});
+		run = await t.query(api.studio.queries.getRun, { runId });
+		expect(run?.plannerPromptSelection).toEqual({
+			kind: "template",
+			templateId: id,
+		});
+
+		await t.mutation(api.studio.mutations.updateDraft, {
+			runId,
+			plannerPromptSelection: null,
+		});
+		run = await t.query(api.studio.queries.getRun, { runId });
+		expect(run?.plannerPromptSelection).toBeUndefined();
+	});
+
+	it("commits a snapshot of the resolved prompt content onto the plan", async () => {
+		const t = adminConvex();
+		const id = await t.mutation(api.studio.mutations.createSystemPromptTemplate, {
+			title: "Snapshot source",
+		});
+		await t.mutation(api.studio.mutations.updateSystemPromptTemplate, {
+			templateId: id,
+			content: "Snapshot planner content.",
+		});
+
+		const runId = await t.mutation(api.studio.mutations.createShlokaDraft, {
+			shlokaText: "Snapshot run",
+			plannerPromptSelection: { kind: "template", templateId: id },
+		});
+		await t.mutation(internal.studio.internal.commitPlan, {
+			runId,
+			plannerModel: "openai/gpt-5.6-terra",
+			plannerReasoning: "medium",
+			imagePrompt: "A warm illustrated temple courtyard",
+			videoScenes: [
+				{
+					sceneNumber: 1,
+					intent: "Opening",
+					subjects: "Temple path",
+					locationTime: "Twilight",
+					composition: "Centered portrait",
+					lensCamera: "Slow push-in",
+					lighting: "Soft gold",
+					paletteAesthetics: "Warm marigold and sandalwood",
+					actionMotion: "Gentle drift",
+					soundDirection: "Quiet ambience",
+					transition: "Fade",
+					negativeConstraints: "No text overlays",
+				},
+			],
+			planningKey: "plan-snapshot",
+		});
+
+		const plans = await t.query(api.studio.queries.listShlokaPlansForRun, {
+			runId,
+		});
+		expect(plans[0].plannerSystemPrompt).toBe("Snapshot planner content.");
+		expect(plans[0].plannerSystemPromptTemplateId).toBe(id);
+
+		// Editing the template later does NOT change the historical snapshot.
+		await t.mutation(api.studio.mutations.updateSystemPromptTemplate, {
+			templateId: id,
+			content: "Changed later.",
+		});
+		const plansAfter = await t.query(api.studio.queries.listShlokaPlansForRun, {
+			runId,
+		});
+		expect(plansAfter[0].plannerSystemPrompt).toBe("Snapshot planner content.");
+	});
+
+	it("clears run selections when a template is deleted", async () => {
+		const t = adminConvex();
+		const id = await t.mutation(api.studio.mutations.createSystemPromptTemplate, {
+			title: "To delete",
+		});
+		const runId = await t.mutation(api.studio.mutations.createShlokaDraft, {
+			shlokaText: "Deletion run",
+			plannerPromptSelection: { kind: "template", templateId: id },
+		});
+		await t.mutation(api.studio.mutations.deleteSystemPromptTemplate, {
+			templateId: id,
+		});
+		const run = await t.query(api.studio.queries.getRun, { runId });
+		expect(run?.plannerPromptSelection).toBeUndefined();
 	});
 });
 

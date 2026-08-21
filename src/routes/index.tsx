@@ -55,10 +55,9 @@ import {
 	MODEL_CAPABILITY_PROFILES,
 	type VideoModelId,
 } from "#/lib/model-catalog";
-import {
-	DEFAULT_PLANNER_SYSTEM_PROMPT,
-	normalizePlannerSystemPromptForStorage,
-	resolvePlannerSystemPrompt,
+import type {
+	PlannerPromptSelection,
+	SystemPromptTemplate,
 } from "#/lib/planner-prompt";
 import {
 	type StudioRunSearch,
@@ -92,9 +91,8 @@ function ShlokaStudioPage() {
 
 	const [shlokaText, setShlokaText] = useState("");
 	const [customInstructions, setCustomInstructions] = useState("");
-	const [plannerSystemPrompt, setPlannerSystemPrompt] = useState(
-		DEFAULT_PLANNER_SYSTEM_PROMPT,
-	);
+	const [plannerPromptSelection, setPlannerPromptSelection] =
+		useState<PlannerPromptSelection | null>(null);
 	const [imageSize, setImageSize] = useState("1024x1536");
 	const [imageQuality, setImageQuality] = useState("medium");
 	const [videoConfig, setVideoConfig] = useState<VideoConfigState>(
@@ -120,6 +118,8 @@ function ShlokaStudioPage() {
 		api.studio.queries.listShlokaPlansForRun,
 		runId ? { runId } : "skip",
 	);
+	const templateDocs = useQuery(api.studio.queries.listSystemPromptTemplates);
+	const templates: SystemPromptTemplate[] | undefined = templateDocs;
 	const catalog = useQuery(api.studio.queries.getCachedOpenRouterCatalog);
 	const refreshCatalog = useAction(api.studio.actions.refreshModelCatalog);
 
@@ -243,12 +243,19 @@ function ShlokaStudioPage() {
 		return { gatewayById: gateway, pricingSkusById: skus };
 	}, [catalog]);
 
+	const templateTitleById = useMemo(() => {
+		const map: Record<string, string> = {};
+		for (const template of templates ?? []) {
+			map[template._id] = template.title;
+		}
+		return map;
+	}, [templates]);
+
 	// biome-ignore lint/correctness/useExhaustiveDependencies: Hydrate the local draft only when the selected run changes.
 	useEffect(() => {
 		if (!runId) {
 			setShlokaText("");
 			setCustomInstructions("");
-			setPlannerSystemPrompt(DEFAULT_PLANNER_SYSTEM_PROMPT);
 			setImageSize("1024x1536");
 			setImageQuality("medium");
 			setVideoConfig(defaultVideoParams("bytedance/seedance-2.0-fast"));
@@ -277,7 +284,6 @@ function ShlokaStudioPage() {
 		}
 		setShlokaText(run.shlokaText ?? "");
 		setCustomInstructions(run.customInstructions ?? "");
-		setPlannerSystemPrompt(resolvePlannerSystemPrompt(run.plannerSystemPrompt));
 		setImageSize(run.imageSize ?? "1024x1536");
 		setImageQuality(run.imageQuality ?? "medium");
 		if (run.videoParams) {
@@ -301,15 +307,31 @@ function ShlokaStudioPage() {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [runId, run?._id, run === null]);
 
+	// Keep the prompt selection in sync with the run — this fires on attempt
+	// switches and template deletions as well as run changes. A dangling
+	// template id (template deleted elsewhere) clears the selection.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: Runs grouped by runId; selection is the sync source.
+	useEffect(() => {
+		if (!runId || !run) {
+			setPlannerPromptSelection(null);
+			return;
+		}
+		const selected = run.plannerPromptSelection ?? null;
+		const dangling =
+			selected &&
+			selected.kind === "template" &&
+			templates !== undefined &&
+			!templates.some((template) => template._id === selected.templateId);
+		setPlannerPromptSelection(dangling ? null : selected);
+	}, [runId, run?.plannerPromptSelection, templates, run === null]);
+
 	const ensureRun = async () => {
-		const storedPlannerSystemPrompt =
-			normalizePlannerSystemPromptForStorage(plannerSystemPrompt) ?? null;
 		if (runId) {
 			await updateDraft({
 				runId,
 				shlokaText,
 				customInstructions,
-				plannerSystemPrompt: storedPlannerSystemPrompt,
+				plannerPromptSelection,
 				imageSize,
 				imageQuality,
 				selectedModelId: videoConfig.modelId,
@@ -327,15 +349,13 @@ function ShlokaStudioPage() {
 		const id = await createDraft({
 			shlokaText,
 			customInstructions,
-			...(storedPlannerSystemPrompt
-				? { plannerSystemPrompt: storedPlannerSystemPrompt }
-				: {}),
+			...(plannerPromptSelection ? { plannerPromptSelection } : {}),
 		});
 		setRunId(id);
 		await updateDraft({
 			runId: id,
 			shlokaText,
-			plannerSystemPrompt: storedPlannerSystemPrompt,
+			plannerPromptSelection,
 			imageSize,
 			imageQuality,
 			selectedModelId: videoConfig.modelId,
@@ -362,15 +382,11 @@ function ShlokaStudioPage() {
 		autosave.save({ customInstructions: value }, "debounced");
 	};
 
-	const onSavePlannerSystemPrompt = (value: string) => {
-		setPlannerSystemPrompt(value);
-		autosave.save(
-			{
-				plannerSystemPrompt:
-					normalizePlannerSystemPromptForStorage(value) ?? null,
-			},
-			"immediate",
-		);
+	const onPlannerPromptSelectionChange = (
+		selection: PlannerPromptSelection | null,
+	) => {
+		setPlannerPromptSelection(selection);
+		autosave.save({ plannerPromptSelection: selection }, "immediate");
 	};
 
 	const onVideoConfigChange = (next: VideoConfigState) => {
@@ -410,6 +426,13 @@ function ShlokaStudioPage() {
 	};
 
 	const onPlan = async () => {
+		if (!plannerPromptSelection) {
+			notifyStudioError(
+				"Planning blocked",
+				new Error("Select a system prompt template before planning."),
+			);
+			return;
+		}
 		setBusyStage("planning");
 		try {
 			const id = await ensureRun();
@@ -573,10 +596,13 @@ function ShlokaStudioPage() {
 								<ShlokaComposer
 									shlokaText={shlokaText}
 									customInstructions={customInstructions}
-									plannerSystemPrompt={plannerSystemPrompt}
+									plannerPromptSelection={plannerPromptSelection}
+									templates={templates}
 									onShlokaChange={onShlokaChange}
 									onInstructionsChange={onInstructionsChange}
-									onSavePlannerSystemPrompt={onSavePlannerSystemPrompt}
+									onPlannerPromptSelectionChange={
+										onPlannerPromptSelectionChange
+									}
 									onPersist={() => void autosave.flush()}
 									disabled={planningBusy}
 								/>
@@ -638,7 +664,11 @@ function ShlokaStudioPage() {
 													render={
 														<Button
 															className="min-h-11"
-															disabled={!shlokaText.trim() || anyBusy}
+															disabled={
+																!shlokaText.trim() ||
+																!plannerPromptSelection ||
+																anyBusy
+															}
 														/>
 													}
 												>
@@ -666,7 +696,11 @@ function ShlokaStudioPage() {
 										) : (
 											<Button
 												className="min-h-11"
-												disabled={!shlokaText.trim() || anyBusy}
+												disabled={
+													!shlokaText.trim() ||
+													!plannerPromptSelection ||
+													anyBusy
+												}
 												onClick={onPlan}
 											>
 												Generate multi-clip plan
@@ -678,7 +712,11 @@ function ShlokaStudioPage() {
 												render={
 													<Button
 														className="min-h-11"
-														disabled={!shlokaText.trim() || anyBusy}
+														disabled={
+															!shlokaText.trim() ||
+															!plannerPromptSelection ||
+															anyBusy
+														}
 													/>
 												}
 											>
@@ -704,7 +742,9 @@ function ShlokaStudioPage() {
 									) : (
 										<Button
 											className="min-h-11"
-											disabled={!shlokaText.trim() || anyBusy}
+											disabled={
+												!shlokaText.trim() || !plannerPromptSelection || anyBusy
+											}
 											onClick={onPlan}
 										>
 											Generate creative plan
@@ -762,6 +802,7 @@ function ShlokaStudioPage() {
 											<ShlokaPlanAttemptControls
 												attempts={shlokaPlans ?? []}
 												activePlanId={run?.activePlanId}
+												templateTitleById={templateTitleById}
 												disabled={planningBusy}
 												isPlanningNext={isPlanningNextShloka}
 												onSelectAttempt={(planId) => {

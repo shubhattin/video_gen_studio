@@ -4,11 +4,11 @@ import type { Doc, Id } from "../_generated/dataModel";
 import { mutation } from "../_generated/server";
 import { requireAdmin } from "../lib/auth";
 import { VIDEO_MODEL_IDS, type VideoModelId } from "../lib/modelCatalog";
-import { normalizePlannerSystemPromptForStorage } from "../lib/plannerPrompt";
 import { defaultImageConfig, defaultVideoParams } from "../lib/schemas";
 import { buildVideoPromptFromScenes } from "../lib/videoPlanMarkdown";
 import {
 	compositionModeValidator,
+	plannerPromptSelectionValidator,
 	provenanceValidator,
 	videoParamsValidator,
 	videoSceneValidator,
@@ -147,6 +147,7 @@ export const forkShlokaPlan = mutation({
 			status: "ready",
 			title,
 			plannerSystemPrompt: plan.plannerSystemPrompt,
+			plannerSystemPromptTemplateId: plan.plannerSystemPromptTemplateId,
 			plannerModel: plan.plannerModel,
 			plannerReasoning: plan.plannerReasoning,
 			imagePrompt: plan.imagePrompt,
@@ -197,7 +198,7 @@ export const createShlokaDraft = mutation({
 	args: {
 		shlokaText: v.string(),
 		customInstructions: v.optional(v.string()),
-		plannerSystemPrompt: v.optional(v.string()),
+		plannerPromptSelection: v.optional(plannerPromptSelectionValidator),
 	},
 	returns: v.id("generationRuns"),
 	handler: async (ctx, args) => {
@@ -209,15 +210,14 @@ export const createShlokaDraft = mutation({
 		const now = Date.now();
 		const imageConfig = defaultImageConfig();
 		const defaultModel: VideoModelId = "bytedance/seedance-2.5";
-		const plannerSystemPrompt = normalizePlannerSystemPromptForStorage(
-			args.plannerSystemPrompt,
-		);
 		return await ctx.db.insert("generationRuns", {
 			provenance: "shloka",
 			status: "draft",
 			shlokaText,
 			customInstructions: args.customInstructions?.trim() || undefined,
-			...(plannerSystemPrompt ? { plannerSystemPrompt } : {}),
+			...(args.plannerPromptSelection
+				? { plannerPromptSelection: args.plannerPromptSelection }
+				: {}),
 			selectedModelId: defaultModel,
 			imageSize: imageConfig.size,
 			imageQuality: imageConfig.quality,
@@ -263,7 +263,9 @@ export const updateDraft = mutation({
 		runId: v.id("generationRuns"),
 		shlokaText: v.optional(v.string()),
 		customInstructions: v.optional(v.string()),
-		plannerSystemPrompt: v.optional(v.union(v.string(), v.null())),
+		plannerPromptSelection: v.optional(
+			v.union(plannerPromptSelectionValidator, v.null()),
+		),
 		imagePrompt: v.optional(v.string()),
 		videoScenes: v.optional(v.array(videoSceneValidator)),
 		imageSize: v.optional(v.string()),
@@ -302,10 +304,10 @@ export const updateDraft = mutation({
 				"The video model is fixed after generation begins for this run.",
 			);
 		}
-		const plannerSystemPrompt =
-			args.plannerSystemPrompt === undefined
-				? run.plannerSystemPrompt
-				: normalizePlannerSystemPromptForStorage(args.plannerSystemPrompt);
+		const plannerPromptSelection =
+			args.plannerPromptSelection === undefined
+				? run.plannerPromptSelection
+				: (args.plannerPromptSelection ?? undefined);
 		const compositionMultiplier =
 			args.compositionMultiplier === null
 				? undefined
@@ -391,7 +393,7 @@ export const updateDraft = mutation({
 				args.customInstructions !== undefined
 					? args.customInstructions.trim() || undefined
 					: run.customInstructions,
-			plannerSystemPrompt,
+			plannerPromptSelection,
 			imagePrompt,
 			videoScenes,
 			imageSize: args.imageSize ?? run.imageSize,
@@ -426,16 +428,13 @@ export const updateDraft = mutation({
 
 		if (
 			run.activePlanId &&
-			(args.imagePrompt !== undefined ||
-				args.videoScenes !== undefined ||
-				args.plannerSystemPrompt !== undefined)
+			(args.imagePrompt !== undefined || args.videoScenes !== undefined)
 		) {
 			const activePlan = await ctx.db.get(run.activePlanId);
 			if (activePlan && activePlan.runId === args.runId) {
 				await ctx.db.patch(run.activePlanId, {
 					imagePrompt: imagePrompt ?? activePlan.imagePrompt,
 					videoScenes: videoScenes ?? activePlan.videoScenes,
-					plannerSystemPrompt,
 					updatedAt: Date.now(),
 				});
 			}
@@ -847,5 +846,105 @@ export const migrateLegacyStudioMedia = mutation({
 			internal.studio.migrateLegacy.migrateLegacyStudioMedia,
 			{},
 		);
+	},
+});
+
+const TEMPLATE_TITLE_MAX_LENGTH = 120;
+
+function validateTemplateTitle(title: string): string {
+	const trimmed = title.trim();
+	if (!trimmed) {
+		throw new Error("Title is required.");
+	}
+	if (trimmed.length > TEMPLATE_TITLE_MAX_LENGTH) {
+		throw new Error(
+			`Title must be ${TEMPLATE_TITLE_MAX_LENGTH} characters or fewer.`,
+		);
+	}
+	return trimmed;
+}
+
+/** Create a new system prompt template with an empty body. */
+export const createSystemPromptTemplate = mutation({
+	args: {
+		title: v.string(),
+	},
+	returns: v.id("systemPromptTemplates"),
+	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
+		const title = validateTemplateTitle(args.title);
+		const now = Date.now();
+		return await ctx.db.insert("systemPromptTemplates", {
+			title,
+			content: "",
+			updatedAt: now,
+		});
+	},
+});
+
+/** Rename and/or edit the body of a system prompt template. */
+export const updateSystemPromptTemplate = mutation({
+	args: {
+		templateId: v.id("systemPromptTemplates"),
+		title: v.optional(v.string()),
+		content: v.optional(v.string()),
+	},
+	returns: v.null(),
+	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
+		const template = await ctx.db.get(args.templateId);
+		if (!template) {
+			throw new Error("Template not found.");
+		}
+		const title =
+			args.title === undefined ? template.title : validateTemplateTitle(args.title);
+		const content = args.content ?? template.content;
+		await ctx.db.patch(args.templateId, {
+			title,
+			content,
+			updatedAt: Date.now(),
+		});
+		return null;
+	},
+});
+
+/** Delete a template and drop references to it from runs and plan snapshots. */
+export const deleteSystemPromptTemplate = mutation({
+	args: {
+		templateId: v.id("systemPromptTemplates"),
+	},
+	returns: v.null(),
+	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
+		const template = await ctx.db.get(args.templateId);
+		if (!template) {
+			return null;
+		}
+		const runs = await ctx.db.query("generationRuns").collect();
+		for (const run of runs) {
+			const selection = run.plannerPromptSelection;
+			if (
+				selection &&
+				selection.kind === "template" &&
+				selection.templateId === args.templateId
+			) {
+				await ctx.db.patch(run._id, {
+					plannerPromptSelection: undefined,
+					updatedAt: Date.now(),
+				});
+			}
+		}
+		const plans = await ctx.db.query("shlokaPlans").collect();
+		for (const plan of plans) {
+			if (plan.plannerSystemPromptTemplateId !== args.templateId) {
+				continue;
+			}
+			await ctx.db.patch(plan._id, {
+				plannerSystemPromptTemplateId: undefined,
+				updatedAt: Date.now(),
+			});
+		}
+		await ctx.db.delete(args.templateId);
+		return null;
 	},
 });

@@ -12,6 +12,11 @@ import {
 	VIDEO_MODEL_IDS,
 } from "../lib/modelCatalog";
 import {
+	DEFAULT_PLANNER_SYSTEM_PROMPT,
+	type PlannerPromptSelection,
+} from "../lib/plannerPrompt";
+import { plannerPromptSelectionValidator } from "../schema";
+import {
 	collectRunMediaIds,
 	findGalleryByObjectKey,
 	galleryVideoToResult,
@@ -194,6 +199,7 @@ export const listShlokaPlansForRun = query({
 			status: plan.status,
 			title: plan.title,
 			plannerSystemPrompt: plan.plannerSystemPrompt,
+			plannerSystemPromptTemplateId: plan.plannerSystemPromptTemplateId,
 			plannerModel: plan.plannerModel,
 			plannerReasoning: plan.plannerReasoning,
 			imagePrompt: plan.imagePrompt,
@@ -204,6 +210,95 @@ export const listShlokaPlansForRun = query({
 			createdAt: plan.createdAt,
 			updatedAt: plan.updatedAt,
 		}));
+	},
+});
+
+export async function listSystemPromptTemplatesCtx(ctx: DbCtx) {
+	return await ctx.db.query("systemPromptTemplates").order("desc").take(200);
+}
+
+/**
+ * Resolve the actual planner prompt text for a run selection. Absent or
+ * "default" selections resolve to the built-in default prompt; template
+ * selections resolve to the template body (throws if the template is gone).
+ */
+export async function resolvePlannerPromptSnapshot(
+	ctx: DbCtx,
+	selection: PlannerPromptSelection | undefined,
+): Promise<{ content: string; templateId?: Id<"systemPromptTemplates"> }> {
+	if (!selection || selection.kind === "default") {
+		return { content: DEFAULT_PLANNER_SYSTEM_PROMPT };
+	}
+	const template = await ctx.db.get(
+		"systemPromptTemplates",
+		selection.templateId,
+	);
+	if (!template) {
+		throw new Error("The selected system prompt template no longer exists.");
+	}
+	return { content: template.content, templateId: template._id };
+}
+
+export const listSystemPromptTemplates = query({
+	args: {},
+	returns: v.array(v.any()),
+	handler: async (ctx) => {
+		await requireAdmin(ctx);
+		const templates = await listSystemPromptTemplatesCtx(ctx);
+		return templates.map((template) => ({
+			_id: template._id,
+			title: template.title,
+			content: template.content,
+			updatedAt: template.updatedAt,
+			createdAt: template._creationTime,
+		}));
+	},
+});
+
+export const getSystemPromptTemplate = query({
+	args: {
+		templateId: v.id("systemPromptTemplates"),
+	},
+	returns: v.union(v.null(), v.any()),
+	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
+		const template = await ctx.db.get(args.templateId);
+		if (!template) {
+			return null;
+		}
+		return {
+			_id: template._id,
+			title: template.title,
+			content: template.content,
+			updatedAt: template.updatedAt,
+			createdAt: template._creationTime,
+		};
+	},
+});
+
+/** Internal: resolve a selection to prompt text inside an action runtime. */
+export const resolvePlannerPromptSelectionForRun = internalQuery({
+	args: {
+		selection: v.optional(plannerPromptSelectionValidator),
+	},
+	returns: v.union(
+		v.object({ source: v.literal("default"), content: v.string() }),
+		v.object({
+			source: v.literal("template"),
+			content: v.string(),
+			templateId: v.id("systemPromptTemplates"),
+		}),
+	),
+	handler: async (ctx, args) => {
+		const resolved = await resolvePlannerPromptSnapshot(ctx, args.selection);
+		if (resolved.templateId) {
+			return {
+				source: "template" as const,
+				content: resolved.content,
+				templateId: resolved.templateId,
+			};
+		}
+		return { source: "default" as const, content: resolved.content };
 	},
 });
 

@@ -104,7 +104,8 @@ export function VideoGenerateConfirm({
 								value={config.generateAudio ? "On" : "Off"}
 							/>
 						) : null}
-						{profile?.supportsNegativePrompt && config.negativePrompt?.trim() ? (
+						{profile?.supportsNegativePrompt &&
+						config.negativePrompt?.trim() ? (
 							<DetailRow label="Negative prompt" value="Set" />
 						) : null}
 					</div>

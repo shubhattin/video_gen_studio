@@ -27,6 +27,7 @@ export type ShlokaPlanAttemptSummary = {
 	status: string;
 	title?: string;
 	plannerSystemPrompt?: string;
+	plannerSystemPromptTemplateId?: string;
 	plannerModel?: string;
 	createdAt?: number;
 };
@@ -34,6 +35,8 @@ export type ShlokaPlanAttemptSummary = {
 type ShlokaPlanAttemptControlsProps = {
 	attempts: ShlokaPlanAttemptSummary[];
 	activePlanId?: string | null;
+	/** Map of template id → title for labeling which prompt an attempt used. */
+	templateTitleById?: Record<string, string>;
 	onSelectAttempt?: (planId: string) => void;
 	onRenameAttempt?: (planId: string, title: string) => Promise<void> | void;
 	disabled?: boolean;
@@ -43,9 +46,23 @@ type ShlokaPlanAttemptControlsProps = {
 
 const PLANNING_TAB_ID = "__planning_next__";
 
-function promptLabel(prompt?: string) {
-	const trimmed = prompt?.trim();
-	if (!trimmed) return "Default prompt";
+function promptLabel(
+	attempt: ShlokaPlanAttemptSummary,
+	templateTitleById?: Record<string, string>,
+) {
+	const templateTitle = attempt.plannerSystemPromptTemplateId
+		? templateTitleById?.[attempt.plannerSystemPromptTemplateId]
+		: undefined;
+	if (templateTitle) {
+		return templateTitle;
+	}
+	if (attempt.plannerSystemPromptTemplateId) {
+		return "Deleted template";
+	}
+	const trimmed = attempt.plannerSystemPrompt?.trim();
+	if (!trimmed) {
+		return "Default prompt";
+	}
 	return trimmed.length > 42 ? `${trimmed.slice(0, 42)}…` : trimmed;
 }
 
@@ -56,6 +73,7 @@ function planName(attempt: ShlokaPlanAttemptSummary) {
 export function ShlokaPlanAttemptControls({
 	attempts,
 	activePlanId,
+	templateTitleById,
 	onSelectAttempt,
 	onRenameAttempt,
 	disabled,
@@ -140,95 +158,97 @@ export function ShlokaPlanAttemptControls({
 						}}
 						className="min-w-0 flex-1 gap-3"
 					>
-					<TabsList
-						variant="line"
-						className={cn(
-							"h-auto max-w-full flex-wrap justify-start gap-1",
-							switchLocked && "pointer-events-none",
-						)}
-					>
-						{ordered.map((attempt) => (
-							<TabsTrigger
-								key={attempt._id}
-								value={attempt._id}
-								disabled={switchLocked}
-								className={cn(
-									"flex-none flex-col items-start gap-0.5 px-3 py-2",
-									isPlanningNext && "opacity-60",
-								)}
-							>
-								<span className="flex min-w-0 items-center gap-1.5">
-									{attempt.title ? (
-										<Tooltip>
-											<TooltipTrigger
-												render={<span className="min-w-0 font-medium" />}
-											>
-												<span className="block max-w-48 truncate">
-													{planName(attempt)}
-												</span>
-											</TooltipTrigger>
-											<TooltipContent side="bottom">
-												{attempt.title}
-											</TooltipContent>
-										</Tooltip>
-									) : (
-										<span className="font-medium">{planName(attempt)}</span>
+						<TabsList
+							variant="line"
+							className={cn(
+								"h-auto max-w-full flex-wrap justify-start gap-1",
+								switchLocked && "pointer-events-none",
+							)}
+						>
+							{ordered.map((attempt) => (
+								<TabsTrigger
+									key={attempt._id}
+									value={attempt._id}
+									disabled={switchLocked}
+									className={cn(
+										"flex-none flex-col items-start gap-0.5 px-3 py-2",
+										isPlanningNext && "opacity-60",
 									)}
-									<Badge
-										variant={
-											attempt.status === "failed" ? "destructive" : "outline"
-										}
-										className="h-5 px-1.5 text-[10px] font-normal capitalize"
-									>
-										{attempt.status}
-									</Badge>
-								</span>
-								<span className="text-[11px] font-normal text-muted-foreground">
-									{[
-										promptLabel(attempt.plannerSystemPrompt),
-										attempt.createdAt
-											? formatDistanceToNow(attempt.createdAt, {
-													addSuffix: true,
-												})
-											: null,
-									]
-										.filter(Boolean)
-										.join(" · ")}
-								</span>
-							</TabsTrigger>
-						))}
-						{isPlanningNext ? (
-							<TabsTrigger
-								value={PLANNING_TAB_ID}
-								disabled
-								className="flex-none flex-col items-start gap-0.5 border-amber-500/30 px-3 py-2 text-amber-800 data-active:bg-amber-500/10 dark:text-amber-200"
-							>
-								<span className="flex items-center gap-1.5">
-									<span className="font-medium">Plan {nextAttemptNumber}</span>
-									<Badge className="h-5 border-amber-500/40 bg-amber-500/15 px-1.5 text-[10px] font-normal text-amber-800 capitalize dark:text-amber-200">
-										planning
-									</Badge>
-								</span>
-								<span className="text-[11px] font-normal text-amber-800/80 dark:text-amber-200/80">
-									Generating scripts…
-								</span>
-							</TabsTrigger>
-						) : null}
-					</TabsList>
-				</Tabs>
-				{canRename && onRenameAttempt ? (
-					<Button
-						type="button"
-						variant="ghost"
-						size="icon-sm"
-						disabled={switchLocked}
-						aria-label="Name this plan"
-						onClick={openRename}
-						className="shrink-0"
-					>
-						<Pencil />
-					</Button>
-				) : null}
+								>
+									<span className="flex min-w-0 items-center gap-1.5">
+										{attempt.title ? (
+											<Tooltip>
+												<TooltipTrigger
+													render={<span className="min-w-0 font-medium" />}
+												>
+													<span className="block max-w-48 truncate">
+														{planName(attempt)}
+													</span>
+												</TooltipTrigger>
+												<TooltipContent side="bottom">
+													{attempt.title}
+												</TooltipContent>
+											</Tooltip>
+										) : (
+											<span className="font-medium">{planName(attempt)}</span>
+										)}
+										<Badge
+											variant={
+												attempt.status === "failed" ? "destructive" : "outline"
+											}
+											className="h-5 px-1.5 text-[10px] font-normal capitalize"
+										>
+											{attempt.status}
+										</Badge>
+									</span>
+									<span className="text-[11px] font-normal text-muted-foreground">
+										{[
+											promptLabel(attempt, templateTitleById),
+											attempt.createdAt
+												? formatDistanceToNow(attempt.createdAt, {
+														addSuffix: true,
+													})
+												: null,
+										]
+											.filter(Boolean)
+											.join(" · ")}
+									</span>
+								</TabsTrigger>
+							))}
+							{isPlanningNext ? (
+								<TabsTrigger
+									value={PLANNING_TAB_ID}
+									disabled
+									className="flex-none flex-col items-start gap-0.5 border-amber-500/30 px-3 py-2 text-amber-800 data-active:bg-amber-500/10 dark:text-amber-200"
+								>
+									<span className="flex items-center gap-1.5">
+										<span className="font-medium">
+											Plan {nextAttemptNumber}
+										</span>
+										<Badge className="h-5 border-amber-500/40 bg-amber-500/15 px-1.5 text-[10px] font-normal text-amber-800 capitalize dark:text-amber-200">
+											planning
+										</Badge>
+									</span>
+									<span className="text-[11px] font-normal text-amber-800/80 dark:text-amber-200/80">
+										Generating scripts…
+									</span>
+								</TabsTrigger>
+							) : null}
+						</TabsList>
+					</Tabs>
+					{canRename && onRenameAttempt ? (
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon-sm"
+							disabled={switchLocked}
+							aria-label="Name this plan"
+							onClick={openRename}
+							className="shrink-0"
+						>
+							<Pencil />
+						</Button>
+					) : null}
 				</div>
 			) : active?.attemptNumber ? (
 				<div className="flex flex-wrap items-center gap-2">
@@ -238,9 +258,7 @@ export function ShlokaPlanAttemptControls({
 					>
 						{active.title ? (
 							<Tooltip>
-								<TooltipTrigger
-									render={<span className="min-w-0 truncate" />}
-								>
+								<TooltipTrigger render={<span className="min-w-0 truncate" />}>
 									{planName(active)}
 								</TooltipTrigger>
 								<TooltipContent>{active.title}</TooltipContent>

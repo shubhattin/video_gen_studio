@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as StudioRouteImport } from './routes/studio'
+import { Route as SystemPromptsRouteImport } from './routes/system-prompts'
 import { Route as GalleryIndexRouteImport } from './routes/gallery/index'
 import { Route as GalleryImagesRouteImport } from './routes/gallery/images'
 
@@ -24,10 +25,15 @@ const StudioRoute = StudioRouteImport.update({
   path: '/studio',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SystemPromptsRoute = SystemPromptsRouteImport.update({
+  id: '/system-prompts',
+  path: '/system-prompts',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const GalleryIndexRoute = GalleryIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => GalleryRoute,
+  id: '/gallery/',
+  path: '/gallery/',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const GalleryImagesRoute = GalleryImagesRouteImport.update({
   id: '/gallery/images',
@@ -38,12 +44,14 @@ const GalleryImagesRoute = GalleryImagesRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/studio': typeof StudioRoute
+  '/system-prompts': typeof SystemPromptsRoute
   '/gallery/images': typeof GalleryImagesRoute
   '/gallery/': typeof GalleryIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/studio': typeof StudioRoute
+  '/system-prompts': typeof SystemPromptsRoute
   '/gallery/images': typeof GalleryImagesRoute
   '/gallery': typeof GalleryIndexRoute
 }
@@ -51,21 +59,31 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/studio': typeof StudioRoute
+  '/system-prompts': typeof SystemPromptsRoute
   '/gallery/images': typeof GalleryImagesRoute
   '/gallery/': typeof GalleryIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/studio' | '/gallery/images' | '/gallery/'
+  fullPaths:
+    '/' | '/studio' | '/system-prompts' | '/gallery/images' | '/gallery/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/studio' | '/gallery/images' | '/gallery'
-  id: '__root__' | '/' | '/studio' | '/gallery/images' | '/gallery/'
+  to: '/' | '/studio' | '/system-prompts' | '/gallery/images' | '/gallery'
+  id:
+    | '__root__'
+    | '/'
+    | '/studio'
+    | '/system-prompts'
+    | '/gallery/images'
+    | '/gallery/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   StudioRoute: typeof StudioRoute
+  SystemPromptsRoute: typeof SystemPromptsRoute
   GalleryImagesRoute: typeof GalleryImagesRoute
+  GalleryIndexRoute: typeof GalleryIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -84,12 +102,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StudioRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/system-prompts': {
+      id: '/system-prompts'
+      path: '/system-prompts'
+      fullPath: '/system-prompts'
+      preLoaderRoute: typeof SystemPromptsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/gallery/': {
       id: '/gallery/'
-      path: '/'
+      path: '/gallery'
       fullPath: '/gallery/'
       preLoaderRoute: typeof GalleryIndexRouteImport
-      parentRoute: typeof GalleryRoute
+      parentRoute: typeof rootRouteImport
     }
     '/gallery/images': {
       id: '/gallery/images'
@@ -104,7 +129,9 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   StudioRoute: StudioRoute,
+  SystemPromptsRoute: SystemPromptsRoute,
   GalleryImagesRoute: GalleryImagesRoute,
+  GalleryIndexRoute: GalleryIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

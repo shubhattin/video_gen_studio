@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { useConvexAuth, useQuery } from "convex/react";
 import {
 	Clapperboard,
+	FileText,
 	Image as ImageIcon,
 	Images,
 	Sparkles,
@@ -38,7 +39,12 @@ const emptyStudioSearch = {} as const;
 type StudioShellProps = {
 	children: ReactNode;
 	history: ReactNode;
-	activePath?: "/" | "/studio" | "/gallery" | "/gallery/images";
+	activePath?:
+		| "/"
+		| "/studio"
+		| "/gallery"
+		| "/gallery/images"
+		| "/system-prompts";
 };
 
 export function StudioShell({
@@ -124,6 +130,16 @@ export function StudioShell({
 											<span>Image gallery</span>
 										</SidebarMenuButton>
 									</SidebarMenuItem>
+									<SidebarMenuItem>
+										<SidebarMenuButton
+											isActive={activePath === "/system-prompts"}
+											tooltip="System prompt templates"
+											render={<Link to="/system-prompts" />}
+										>
+											<FileText />
+											<span>System prompts</span>
+										</SidebarMenuButton>
+									</SidebarMenuItem>
 								</SidebarMenu>
 							</SidebarGroupContent>
 						</SidebarGroup>
@@ -164,7 +180,9 @@ export function StudioShell({
 										? "Video gallery"
 										: activePath === "/gallery/images"
 											? "Image gallery"
-											: "Shloka Studio"}
+											: activePath === "/system-prompts"
+												? "System prompts"
+												: "Shloka Studio"}
 							</p>
 							<p className="truncate text-xs text-muted-foreground sm:text-sm">
 								{waitingForStudioData
@@ -175,7 +193,9 @@ export function StudioShell({
 											? "Browse and download generated clips"
 											: activePath === "/gallery/images"
 												? "Browse and download reference stills"
-												: "Plan scenes → reference stills → render video"}
+												: activePath === "/system-prompts"
+													? "Manage the prompts the planner uses for Shloka plans"
+													: "Plan scenes → reference stills → render video"}
 							</p>
 						</div>
 					</header>

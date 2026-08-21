@@ -117,6 +117,15 @@ export const shlokaPlanStatusValidator = v.union(
 	v.literal("failed"),
 );
 
+/** System prompt selection for a Shloka run; absent means "not chosen yet". */
+export const plannerPromptSelectionValidator = v.union(
+	v.object({ kind: v.literal("default") }),
+	v.object({
+		kind: v.literal("template"),
+		templateId: v.id("systemPromptTemplates"),
+	}),
+);
+
 export default defineSchema({
 	generationRuns: defineTable({
 		provenance: provenanceValidator,
@@ -126,6 +135,8 @@ export default defineSchema({
 		customInstructions: v.optional(v.string()),
 		/** Custom planner system prompt; omit to use the built-in default. */
 		plannerSystemPrompt: v.optional(v.string()),
+		/** Selected system prompt template / default. Absent = not chosen yet. */
+		plannerPromptSelection: v.optional(plannerPromptSelectionValidator),
 		plannerModel: v.optional(v.string()),
 		plannerReasoning: v.optional(v.string()),
 		imagePrompt: v.optional(v.string()),
@@ -198,6 +209,8 @@ export default defineSchema({
 		status: shlokaPlanStatusValidator,
 		title: v.optional(v.string()),
 		plannerSystemPrompt: v.optional(v.string()),
+		/** Template used at plan time; snapshot stays in plannerSystemPrompt. */
+		plannerSystemPromptTemplateId: v.optional(v.id("systemPromptTemplates")),
 		plannerModel: v.optional(v.string()),
 		plannerReasoning: v.optional(v.string()),
 		imagePrompt: v.string(),
@@ -263,4 +276,10 @@ export default defineSchema({
 	})
 		.index("by_jobId_and_clipIndex", ["jobId", "clipIndex"])
 		.index("by_jobId_and_status", ["jobId", "status"]),
+
+	systemPromptTemplates: defineTable({
+		title: v.string(),
+		content: v.string(),
+		updatedAt: v.number(),
+	}),
 });

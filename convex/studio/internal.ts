@@ -12,6 +12,7 @@ import {
 import { estimateVideoCostUsd } from "../lib/videoAdapters";
 import { leftoverObjectKeys } from "./migrateLegacy";
 import { uniqueIds } from "./media";
+import { resolvePlannerPromptSnapshot } from "./queries";
 
 async function scheduleObjectDeletes(
 	ctx: MutationCtx,
@@ -93,12 +94,25 @@ export const commitPlan = internalMutation({
 		videoScenes: v.array(videoSceneValidator),
 		warnings: v.optional(v.array(v.string())),
 		planningKey: v.string(),
+		/** Resolved prompt text actually sent to the planner. */
+		plannerSystemPrompt: v.optional(v.string()),
+		plannerSystemPromptTemplateId: v.optional(v.id("systemPromptTemplates")),
 	},
 	returns: v.id("shlokaPlans"),
 	handler: async (ctx, args) => {
 		const run = await ctx.db.get(args.runId);
 		if (!run) {
 			throw new Error("Run not found.");
+		}
+		let snapshot = args.plannerSystemPrompt;
+		let templateId = args.plannerSystemPromptTemplateId;
+		if (snapshot === undefined) {
+			const resolved = await resolvePlannerPromptSnapshot(
+				ctx,
+				run.plannerPromptSelection,
+			);
+			snapshot = resolved.content;
+			templateId = resolved.templateId;
 		}
 		const existing = await ctx.db
 			.query("shlokaPlans")
@@ -111,7 +125,8 @@ export const commitPlan = internalMutation({
 			runId: args.runId,
 			attemptNumber,
 			status: "ready",
-			plannerSystemPrompt: run.plannerSystemPrompt,
+			plannerSystemPrompt: snapshot,
+			plannerSystemPromptTemplateId: templateId,
 			plannerModel: args.plannerModel,
 			plannerReasoning: args.plannerReasoning,
 			imagePrompt: args.imagePrompt,
@@ -696,6 +711,11 @@ export const wipeAllStudioData = internalMutation({
 			await ctx.db.delete(cache._id);
 		}
 
+		const templates = await ctx.db.query("systemPromptTemplates").collect();
+		for (const template of templates) {
+			await ctx.db.delete(template._id);
+		}
+
 		return {
 			runsDeleted: runs.length,
 			filesDeleted: keysToDelete.length,
@@ -718,9 +738,28 @@ export const applyActiveShlokaPlan = internalMutation({
 		if (!run || !plan || plan.runId !== args.runId) {
 			throw new Error("Plan not found for this run.");
 		}
+		// Restore the attempt's prompt context so a following "Plan another"
+		// continues to use the same default/template. Falls back to the run's
+		// current selection when the attempt's template has been deleted.
+		let plannerPromptSelection = run.plannerPromptSelection;
+		if (plan.plannerSystemPromptTemplateId) {
+			const template = await ctx.db.get(
+				"systemPromptTemplates",
+				plan.plannerSystemPromptTemplateId,
+			);
+			if (template) {
+				plannerPromptSelection = {
+					kind: "template",
+					templateId: template._id,
+				};
+			}
+		} else {
+			plannerPromptSelection = { kind: "default" };
+		}
 		await ctx.db.patch(args.runId, {
 			activePlanId: plan._id,
 			plannerSystemPrompt: plan.plannerSystemPrompt,
+			plannerPromptSelection,
 			plannerModel: plan.plannerModel,
 			plannerReasoning: plan.plannerReasoning,
 			imagePrompt: plan.imagePrompt,
