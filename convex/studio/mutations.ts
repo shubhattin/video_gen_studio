@@ -5,7 +5,7 @@ import { mutation } from "../_generated/server";
 import { requireAdmin } from "../lib/auth";
 import { VIDEO_MODEL_IDS, type VideoModelId } from "../lib/modelCatalog";
 import { defaultImageConfig, defaultVideoParams } from "../lib/schemas";
-import { buildVideoPromptFromScenes } from "../lib/videoPlanMarkdown";
+import { buildVideoPromptFromScenes, normalizeVideoScenes } from "../lib/videoPlanMarkdown";
 import {
 	compositionModeValidator,
 	plannerPromptSelectionValidator,
@@ -152,7 +152,7 @@ export const forkShlokaPlan = mutation({
 			plannerModel: plan.plannerModel,
 			plannerReasoning: plan.plannerReasoning,
 			imagePrompt: plan.imagePrompt,
-			videoScenes: plan.videoScenes,
+			videoScenes: normalizeVideoScenes(plan.videoScenes),
 			planningKey: plan.planningKey,
 			warnings: plan.warnings,
 			createdAt: now,
@@ -357,13 +357,15 @@ export const updateDraft = mutation({
 			args.videoPrompt !== undefined
 				? args.videoPrompt.trim() || undefined
 				: run.videoPrompt;
+		let scenesChanged = false;
 		if (args.videoScenes !== undefined) {
 			if (args.videoScenes.length < 1 || args.videoScenes.length > 12) {
 				throw new Error("Video plan must include between 1 and 12 scenes.");
 			}
-			videoScenes = args.videoScenes;
+			videoScenes = normalizeVideoScenes(args.videoScenes);
+			scenesChanged = true;
 			if (args.videoPrompt === undefined) {
-				videoPrompt = buildVideoPromptFromScenes(args.videoScenes);
+				videoPrompt = buildVideoPromptFromScenes(videoScenes);
 			}
 		}
 
@@ -388,6 +390,11 @@ export const updateDraft = mutation({
 			return ok ? [ok] : [];
 		});
 
+		const modelChanged =
+			args.selectedModelId !== undefined &&
+			args.selectedModelId !== run.selectedModelId;
+		const paramsChanged = args.videoParams !== undefined;
+
 		const patch = {
 			shlokaText,
 			customInstructions:
@@ -402,6 +409,14 @@ export const updateDraft = mutation({
 			selectedModelId: args.selectedModelId ?? run.selectedModelId,
 			videoParams: args.videoParams ?? run.videoParams,
 			videoPrompt,
+			...(scenesChanged ||
+			(args.videoPrompt !== undefined &&
+				args.videoPrompt.trim() !== (run.videoPrompt ?? ""))
+				? {
+						summarizedVideoPrompt: undefined,
+						videoPromptSourceHash: undefined,
+					}
+				: {}),
 			compositionMode:
 				args.compositionMode === null
 					? undefined
@@ -439,6 +454,14 @@ export const updateDraft = mutation({
 					updatedAt: Date.now(),
 				});
 			}
+		}
+
+		if (scenesChanged || modelChanged || paramsChanged) {
+			await ctx.scheduler.runAfter(
+				0,
+				internal.studio.actions.refreshVideoPromptSummary,
+				{ runId: args.runId },
+			);
 		}
 
 		const hasContent = Boolean(shlokaText?.trim() || videoPrompt?.trim());

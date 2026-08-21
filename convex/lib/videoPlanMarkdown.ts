@@ -1,85 +1,210 @@
+/**
+ * Seedance-oriented scene plan: six-part formula + intent heading.
+ * Legacy 11-field scenes are normalized on read.
+ */
+
 export type EditableVideoScene = {
 	sceneNumber: number;
 	intent: string;
-	subjects: string;
-	locationTime: string;
-	composition: string;
-	lensCamera: string;
-	lighting: string;
-	paletteAesthetics: string;
-	actionMotion: string;
-	soundDirection: string;
-	transition: string;
-	negativeConstraints: string;
+	/** Who/what appears — required for Seedance. */
+	subject: string;
+	/** What happens — required for Seedance. */
+	action: string;
+	/** Scene / environment (optional). */
+	scene: string;
+	/** Visual style (optional). */
+	style: string;
+	/** Camera movement / cut (optional). */
+	camera: string;
+	/** Audio direction (optional). */
+	audio: string;
 };
 
+/** Labels for markdown edit round-trip (new six-part shape). */
 const FIELD_LABELS = [
-	["subjects", "Subjects"],
-	["locationTime", "Location / time"],
-	["composition", "Composition"],
-	["lensCamera", "Lens / camera"],
-	["lighting", "Lighting"],
-	["paletteAesthetics", "Palette"],
-	["actionMotion", "Motion"],
-	["soundDirection", "Sound"],
-	["transition", "Transition"],
-	["negativeConstraints", "Avoid"],
+	["subject", "Subject"],
+	["action", "Action"],
+	["scene", "Scene"],
+	["style", "Style"],
+	["camera", "Camera"],
+	["audio", "Audio"],
 ] as const;
 
 type SceneField = (typeof FIELD_LABELS)[number][0];
 
-/** Compact provider prompt derived from structured scenes (shared with generation). */
-export function buildVideoPromptFromScenes(
-	scenes: Array<{ intent: string; actionMotion: string }>,
-) {
-	const compact = scenes
-		.slice(0, 6)
-		.map(
-			(scene, index) => `${index + 1}. ${scene.intent}: ${scene.actionMotion}`,
-		)
-		.join(" | ");
-	return `${compact} | stylized illustrated characters, not photoreal people`;
+/** Optional slots omitted from markdown/provider text when blank. */
+const OPTIONAL_FIELDS = new Set<SceneField>([
+	"scene",
+	"style",
+	"camera",
+	"audio",
+]);
+
+type LegacyVideoScene = {
+	sceneNumber: number;
+	intent: string;
+	subjects?: string;
+	locationTime?: string;
+	composition?: string;
+	lensCamera?: string;
+	lighting?: string;
+	paletteAesthetics?: string;
+	actionMotion?: string;
+	soundDirection?: string;
+	transition?: string;
+	negativeConstraints?: string;
+	subject?: string;
+	action?: string;
+	scene?: string;
+	style?: string;
+	camera?: string;
+	audio?: string;
+};
+
+function joinNonEmpty(parts: Array<string | undefined>, sep = "; "): string {
+	return parts
+		.map((p) => p?.trim())
+		.filter((p): p is string => Boolean(p))
+		.join(sep);
 }
 
-export function videoScenesToMarkdown(scenes: EditableVideoScene[]): string {
+/** Map legacy or mixed scene docs into the six-part shape. */
+export function normalizeVideoScene(
+	raw: LegacyVideoScene,
+	fallbackNumber = 1,
+): EditableVideoScene {
+	const sceneNumber =
+		Number.isFinite(raw.sceneNumber) && raw.sceneNumber > 0
+			? raw.sceneNumber
+			: fallbackNumber;
+
+	const subject =
+		raw.subject?.trim() ||
+		raw.subjects?.trim() ||
+		"Untitled subject";
+	const action =
+		raw.action?.trim() ||
+		raw.actionMotion?.trim() ||
+		"Quiet motion";
+
+	const scene =
+		raw.scene?.trim() ||
+		joinNonEmpty([raw.locationTime, raw.composition]) ||
+		"";
+	const style =
+		raw.style?.trim() ||
+		joinNonEmpty([raw.paletteAesthetics, raw.lighting]) ||
+		"";
+	const camera = raw.camera?.trim() || raw.lensCamera?.trim() || "";
+	const audio =
+		raw.audio?.trim() ||
+		joinNonEmpty([raw.soundDirection, raw.transition]) ||
+		"";
+
+	return {
+		sceneNumber,
+		intent: raw.intent?.trim() || "Untitled beat",
+		subject,
+		action,
+		scene,
+		style,
+		camera,
+		audio,
+	};
+}
+
+export function normalizeVideoScenes(
+	scenes: LegacyVideoScene[] | undefined | null,
+): EditableVideoScene[] {
+	if (!scenes?.length) return [];
 	return scenes
+		.map((s, i) => normalizeVideoScene(s, i + 1))
+		.sort((a, b) => a.sceneNumber - b.sceneNumber)
+		.map((s, i) => ({ ...s, sceneNumber: i + 1 }));
+}
+
+function compactSceneLine(scene: EditableVideoScene, index: number): string {
+	const chunks: string[] = [
+		`${index + 1}.${scene.intent}`,
+		`Subject:${scene.subject}`,
+		`Action:${scene.action}`,
+	];
+	if (scene.scene.trim()) chunks.push(`Scene:${scene.scene.trim()}`);
+	if (scene.style.trim()) chunks.push(`Style:${scene.style.trim()}`);
+	if (scene.camera.trim()) chunks.push(`Camera:${scene.camera.trim()}`);
+	if (scene.audio.trim()) chunks.push(`Audio:${scene.audio.trim()}`);
+	return chunks.join(" ");
+}
+
+/**
+ * Compact provider prompt from structured scenes (Seedance-oriented).
+ * No scene-count truncation — full plan is included; summarization handles limits.
+ */
+export function buildVideoPromptFromScenes(
+	scenes: Array<LegacyVideoScene | EditableVideoScene>,
+): string {
+	const normalized = normalizeVideoScenes(scenes);
+	if (normalized.length === 0) {
+		return "stylized illustrated characters, not photoreal people";
+	}
+	const body = normalized.map((s, i) => compactSceneLine(s, i)).join("|");
+	return `${body}|stylized illustrated characters, not photoreal people`;
+}
+
+/** Compact markdown for UI edit — omit blank optional slots; single blank line between scenes. */
+export function videoScenesToMarkdown(scenes: EditableVideoScene[]): string {
+	const normalized = normalizeVideoScenes(scenes);
+	return normalized
 		.map((scene) => {
-			const lines = [
-				`### Scene ${scene.sceneNumber}: ${scene.intent}`,
-				...FIELD_LABELS.map(
-					([key, label]) => `- **${label}:** ${scene[key] || "—"}`,
-				),
-			];
+			const lines = [`### Scene ${scene.sceneNumber}: ${scene.intent}`];
+			for (const [key, label] of FIELD_LABELS) {
+				const value = scene[key]?.trim() ?? "";
+				if (!value && OPTIONAL_FIELDS.has(key)) continue;
+				lines.push(`- **${label}:** ${value || "—"}`);
+			}
 			return lines.join("\n");
 		})
-		.join("\n\n");
+		.join("\n");
 }
 
 function emptyScene(sceneNumber: number): EditableVideoScene {
 	return {
 		sceneNumber,
 		intent: "Untitled beat",
-		subjects: "",
-		locationTime: "",
-		composition: "",
-		lensCamera: "",
-		lighting: "",
-		paletteAesthetics: "",
-		actionMotion: "",
-		soundDirection: "",
-		transition: "",
-		negativeConstraints: "",
+		subject: "",
+		action: "",
+		scene: "",
+		style: "",
+		camera: "",
+		audio: "",
 	};
 }
 
+/** Accept new labels and common legacy aliases when parsing markdown. */
 function labelToField(label: string): SceneField | null {
 	const normalized = label.trim().toLowerCase();
-	for (const [key, fieldLabel] of FIELD_LABELS) {
-		if (fieldLabel.toLowerCase() === normalized) {
-			return key;
-		}
-	}
-	return null;
+	const aliases: Record<string, SceneField> = {
+		subject: "subject",
+		subjects: "subject",
+		action: "action",
+		"action / event": "action",
+		motion: "action",
+		scene: "scene",
+		"scene / environment": "scene",
+		"location / time": "scene",
+		location: "scene",
+		environment: "scene",
+		style: "style",
+		"visual style": "style",
+		palette: "style",
+		lighting: "style",
+		camera: "camera",
+		"camera movement / cut": "camera",
+		"lens / camera": "camera",
+		audio: "audio",
+		sound: "audio",
+	};
+	return aliases[normalized] ?? null;
 }
 
 export type MarkdownToVideoScenesResult = {
@@ -90,10 +215,7 @@ export type MarkdownToVideoScenesResult = {
 
 /**
  * Parse markdown produced by {@link videoScenesToMarkdown}.
- *
- * Never throws. Recovers every scene it can and reports non-conformance
- * (skipped sections, unrecognized field lines) via {@link MarkdownToVideoScenesResult.warning}.
- * `scenes` is empty only when nothing recognizable could be recovered.
+ * Never throws. Also accepts legacy field labels where possible.
  */
 export function markdownToVideoScenes(
 	markdown: string,
@@ -111,8 +233,6 @@ export function markdownToVideoScenes(
 	for (const chunk of chunks) {
 		const lines = chunk.split("\n");
 		const header = lines[0]?.trim() ?? "";
-		// Accept "Scene 1: intent", "Scene 1 - intent", "Scene 1 — intent",
-		// or even "Scene 1 intent" / "Scene 1".
 		const headerMatch = /^Scene\s+(\d+)\s*[:\-—]?\s*(.*)$/i.exec(header);
 		if (!headerMatch) {
 			skippedSections++;
@@ -131,7 +251,6 @@ export function markdownToVideoScenes(
 			if (!trimmedLine) continue;
 			const fieldMatch = /^-\s+\*\*(.+?):\*\*\s*(.*)$/.exec(trimmedLine);
 			if (!fieldMatch) {
-				// A bullet-looking line that didn't match the bold-label shape.
 				if (/^[-*]\s+/.test(trimmedLine)) {
 					unrecognizedFields++;
 				}
@@ -152,7 +271,7 @@ export function markdownToVideoScenes(
 		return {
 			scenes: [],
 			warning:
-				'Could not parse any scenes. Keep headings like "### Scene 1: …" with bullet fields ("- **Label:** value").',
+				'Could not parse any scenes. Keep headings like "### Scene 1: …" with bullet fields ("- **Subject:** value").',
 		};
 	}
 
@@ -173,10 +292,22 @@ export function markdownToVideoScenes(
 		.map((scene, index) => ({
 			...scene,
 			sceneNumber: index + 1,
+			subject: scene.subject.trim() || "Untitled subject",
+			action: scene.action.trim() || "Quiet motion",
 		}));
 
 	return {
 		scenes: sorted,
 		warning: warnings.length > 0 ? warnings.join(" ") : null,
 	};
+}
+
+/** Stable hash of the canonical provider prompt source (for summarization cache). */
+export function hashVideoPromptSource(text: string): string {
+	let h = 2166136261;
+	for (let i = 0; i < text.length; i++) {
+		h ^= text.charCodeAt(i);
+		h = Math.imul(h, 16777619);
+	}
+	return (h >>> 0).toString(16);
 }

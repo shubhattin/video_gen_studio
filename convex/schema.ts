@@ -17,7 +17,20 @@ export const provenanceValidator = v.union(
 	v.literal("model-studio"),
 );
 
+/** Current Seedance six-part scene shape. */
 export const videoSceneValidator = v.object({
+	sceneNumber: v.number(),
+	intent: v.string(),
+	subject: v.string(),
+	action: v.string(),
+	scene: v.string(),
+	style: v.string(),
+	camera: v.string(),
+	audio: v.string(),
+});
+
+/** Legacy 11-field scenes still present on older runs/plans. */
+export const legacyVideoSceneValidator = v.object({
 	sceneNumber: v.number(),
 	intent: v.string(),
 	subjects: v.string(),
@@ -31,6 +44,12 @@ export const videoSceneValidator = v.object({
 	transition: v.string(),
 	negativeConstraints: v.string(),
 });
+
+/** Stored scenes may be new or legacy until rewritten. */
+export const storedVideoSceneValidator = v.union(
+	videoSceneValidator,
+	legacyVideoSceneValidator,
+);
 
 export const mediaMetaValidator = v.object({
 	mimeType: v.string(),
@@ -140,12 +159,17 @@ export default defineSchema({
 		plannerModel: v.optional(v.string()),
 		plannerReasoning: v.optional(v.string()),
 		imagePrompt: v.optional(v.string()),
-		videoScenes: v.optional(v.array(videoSceneValidator)),
+		videoScenes: v.optional(v.array(storedVideoSceneValidator)),
 		imageSize: v.optional(v.string()),
 		imageQuality: v.optional(v.string()),
 		selectedModelId: v.optional(v.string()),
 		videoParams: v.optional(videoParamsValidator),
+		/** Canonical provider prompt built from scenes (may exceed model char limit). */
 		videoPrompt: v.optional(v.string()),
+		/** Luna-compressed prompt when videoPrompt exceeds the model limit. */
+		summarizedVideoPrompt: v.optional(v.string()),
+		/** Hash of the videoPrompt that produced summarizedVideoPrompt. */
+		videoPromptSourceHash: v.optional(v.string()),
 		compositionMode: v.optional(compositionModeValidator),
 		compositionMultiplier: v.optional(v.number()),
 		compositionClipCount: v.optional(v.number()),
@@ -214,7 +238,7 @@ export default defineSchema({
 		plannerModel: v.optional(v.string()),
 		plannerReasoning: v.optional(v.string()),
 		imagePrompt: v.string(),
-		videoScenes: v.array(videoSceneValidator),
+		videoScenes: v.array(storedVideoSceneValidator),
 		planningKey: v.string(),
 		warnings: v.optional(v.array(v.string())),
 		lastError: v.optional(v.string()),

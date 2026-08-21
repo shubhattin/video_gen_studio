@@ -7,19 +7,19 @@ import {
 	type VideoModelId,
 } from "./modelCatalog";
 
+/**
+ * Seedance six-part scene beat.
+ * Required: subject + action. Optional slots may be empty strings.
+ */
 export const videoSceneSchema = z.object({
 	sceneNumber: z.number().int().positive(),
 	intent: z.string().min(1),
-	subjects: z.string().min(1),
-	locationTime: z.string().min(1),
-	composition: z.string().min(1),
-	lensCamera: z.string().min(1),
-	lighting: z.string().min(1),
-	paletteAesthetics: z.string().min(1),
-	actionMotion: z.string().min(1),
-	soundDirection: z.string().min(1),
-	transition: z.string().min(1),
-	negativeConstraints: z.string().min(1),
+	subject: z.string().min(1),
+	action: z.string().min(1),
+	scene: z.string(),
+	style: z.string(),
+	camera: z.string(),
+	audio: z.string(),
 });
 
 export const normalPlannerOutputSchema = z.object({

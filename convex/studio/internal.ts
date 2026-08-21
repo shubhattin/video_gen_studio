@@ -10,6 +10,10 @@ import {
 	videoSceneValidator,
 } from "../schema";
 import { estimateVideoCostUsd } from "../lib/videoAdapters";
+import {
+	buildVideoPromptFromScenes,
+	normalizeVideoScenes,
+} from "../lib/videoPlanMarkdown";
 import { leftoverObjectKeys } from "./migrateLegacy";
 import { uniqueIds } from "./media";
 import { resolvePlannerPromptSnapshot } from "./queries";
@@ -114,6 +118,8 @@ export const commitPlan = internalMutation({
 			snapshot = resolved.content;
 			templateId = resolved.templateId;
 		}
+		const videoScenes = normalizeVideoScenes(args.videoScenes);
+		const videoPrompt = buildVideoPromptFromScenes(videoScenes);
 		const existing = await ctx.db
 			.query("shlokaPlans")
 			.withIndex("by_runId", (q) => q.eq("runId", args.runId))
@@ -130,7 +136,7 @@ export const commitPlan = internalMutation({
 			plannerModel: args.plannerModel,
 			plannerReasoning: args.plannerReasoning,
 			imagePrompt: args.imagePrompt,
-			videoScenes: args.videoScenes,
+			videoScenes,
 			planningKey: args.planningKey,
 			warnings: args.warnings,
 			createdAt: now,
@@ -142,7 +148,10 @@ export const commitPlan = internalMutation({
 			plannerModel: args.plannerModel,
 			plannerReasoning: args.plannerReasoning,
 			imagePrompt: args.imagePrompt,
-			videoScenes: args.videoScenes,
+			videoScenes,
+			videoPrompt,
+			summarizedVideoPrompt: undefined,
+			videoPromptSourceHash: undefined,
 			warnings: args.warnings,
 			planningKey: args.planningKey,
 			planningCompletedAt: now,
@@ -150,11 +159,59 @@ export const commitPlan = internalMutation({
 			updatedAt: now,
 		});
 		await ctx.scheduler.runAfter(
+			0,
+			internal.studio.actions.refreshVideoPromptSummary,
+			{ runId: args.runId },
+		);
+		await ctx.scheduler.runAfter(
 			4000,
 			internal.studio.actions.generateRunTitleScheduled,
 			{ runId: args.runId },
 		);
 		return planId;
+	},
+});
+
+export const setVideoPromptSummaryCache = internalMutation({
+	args: {
+		runId: v.id("generationRuns"),
+		videoPrompt: v.string(),
+		sourceHash: v.string(),
+		summarizedVideoPrompt: v.optional(v.string()),
+	},
+	returns: v.null(),
+	handler: async (ctx, args) => {
+		const run = await ctx.db.get(args.runId);
+		if (!run) {
+			return null;
+		}
+		await ctx.db.patch(args.runId, {
+			videoPrompt: args.videoPrompt,
+			videoPromptSourceHash: args.sourceHash,
+			summarizedVideoPrompt: args.summarizedVideoPrompt,
+			updatedAt: Date.now(),
+		});
+		return null;
+	},
+});
+
+/** Clear stale summary when prompt is under limit or source changed. */
+export const clearVideoPromptSummary = internalMutation({
+	args: {
+		runId: v.id("generationRuns"),
+		videoPrompt: v.optional(v.string()),
+	},
+	returns: v.null(),
+	handler: async (ctx, args) => {
+		await ctx.db.patch(args.runId, {
+			...(args.videoPrompt !== undefined
+				? { videoPrompt: args.videoPrompt }
+				: {}),
+			summarizedVideoPrompt: undefined,
+			videoPromptSourceHash: undefined,
+			updatedAt: Date.now(),
+		});
+		return null;
 	},
 });
 
@@ -756,6 +813,8 @@ export const applyActiveShlokaPlan = internalMutation({
 		} else {
 			plannerPromptSelection = { kind: "default" };
 		}
+		const videoScenes = normalizeVideoScenes(plan.videoScenes);
+		const videoPrompt = buildVideoPromptFromScenes(videoScenes);
 		await ctx.db.patch(args.runId, {
 			activePlanId: plan._id,
 			plannerSystemPrompt: plan.plannerSystemPrompt,
@@ -763,12 +822,20 @@ export const applyActiveShlokaPlan = internalMutation({
 			plannerModel: plan.plannerModel,
 			plannerReasoning: plan.plannerReasoning,
 			imagePrompt: plan.imagePrompt,
-			videoScenes: plan.videoScenes,
+			videoScenes,
+			videoPrompt,
+			summarizedVideoPrompt: undefined,
+			videoPromptSourceHash: undefined,
 			planningKey: plan.planningKey,
 			warnings: plan.warnings,
 			status: plan.status === "ready" ? "plan_ready" : run.status,
 			updatedAt: Date.now(),
 		});
+		await ctx.scheduler.runAfter(
+			0,
+			internal.studio.actions.refreshVideoPromptSummary,
+			{ runId: args.runId },
+		);
 		return null;
 	},
 });

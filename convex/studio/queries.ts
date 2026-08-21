@@ -15,6 +15,7 @@ import {
 	DEFAULT_PLANNER_SYSTEM_PROMPT,
 	type PlannerPromptSelection,
 } from "../lib/plannerPrompt";
+import { normalizeVideoScenes } from "../lib/videoPlanMarkdown";
 import { plannerPromptSelectionValidator } from "../schema";
 import {
 	collectRunMediaIds,
@@ -105,6 +106,9 @@ async function hydrateRun(ctx: QueryCtx, run: Doc<"generationRuns">) {
 	]);
 	return {
 		...run,
+		videoScenes: run.videoScenes
+			? normalizeVideoScenes(run.videoScenes)
+			: run.videoScenes,
 		attachedImageIds,
 		attachedVideoIds,
 		firstFrameImageId: asGalleryImageId(ctx, run.firstFrameImageId),
@@ -203,7 +207,7 @@ export const listShlokaPlansForRun = query({
 			plannerModel: plan.plannerModel,
 			plannerReasoning: plan.plannerReasoning,
 			imagePrompt: plan.imagePrompt,
-			videoScenes: plan.videoScenes,
+			videoScenes: normalizeVideoScenes(plan.videoScenes),
 			planningKey: plan.planningKey,
 			warnings: plan.warnings,
 			lastError: plan.lastError,

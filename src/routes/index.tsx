@@ -568,7 +568,7 @@ function ShlokaStudioPage() {
 				<StudioRunSkeleton />
 			) : (
 				<>
-					<div className="space-y-6 rounded-2xl border border-border/80 bg-gradient-to-b from-card to-card/40 p-4 shadow-sm sm:p-6">
+					<div className="space-y-6 rounded-2xl border border-border/80 bg-linear-to-b from-card to-card/40 p-4 shadow-sm sm:p-6">
 						{runId ? (
 							<div className="flex items-start justify-end">
 								<AutosaveStatus
@@ -818,6 +818,8 @@ function ShlokaStudioPage() {
 										<ShlokaPlanPreview
 											imagePrompt={run?.imagePrompt}
 											videoScenes={run?.videoScenes}
+											videoPrompt={run?.videoPrompt}
+											summarizedVideoPrompt={run?.summarizedVideoPrompt}
 											compositionOverallDescription={
 												compositionJob?.overallDescription
 											}

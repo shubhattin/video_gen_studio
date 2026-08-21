@@ -10,6 +10,7 @@ import {
 	MODEL_CAPABILITY_PROFILES,
 	PLANNER_MODEL_ID,
 	TITLE_MODEL_ID,
+	VIDEO_PROMPT_SUMMARIZER_MODEL_ID,
 	VIDEO_MODEL_IDS,
 	type VideoModelId,
 	isVideoModelId,
@@ -34,10 +35,15 @@ import {
 } from "../lib/schemas";
 import {
 	MODEL_STUDIO_PLANNER_SYSTEM_PROMPT,
+	VIDEO_PROMPT_SUMMARIZER_SYSTEM_PROMPT,
 	buildShlokaPlannerSystemPrompt,
 	multiClipPlannerInstructions,
 } from "../lib/plannerPrompt";
-import { buildVideoPromptFromScenes } from "../lib/videoPlanMarkdown";
+import {
+	buildVideoPromptFromScenes,
+	hashVideoPromptSource,
+	normalizeVideoScenes,
+} from "../lib/videoPlanMarkdown";
 import { adaptOpenRouterVideoRequest } from "../lib/videoAdapters";
 import {
 	buildStudioObjectKey,
@@ -46,22 +52,68 @@ import {
 	putObjectBytes,
 } from "../lib/r2";
 
-function buildPlannerPrompt(
-	shlokaText: string,
-	customInstructions: string | undefined,
-	mode: "single-clip" | "multi-clip",
-) {
-	const outputHint =
-		mode === "multi-clip"
-			? "Produce imagePrompt + overallDescription + ordered clips for a portrait 9:16 multi-clip short rooted in this shloka."
-			: "Produce imagePrompt + videoScenes for a portrait 9:16 short rooted in this shloka.";
-	return [
-		`Shloka (preserve meaning; do not replace with an invented translation unless asked):\n"""\n${shlokaText}\n"""`,
-		customInstructions?.trim()
-			? `Custom instructions (follow closely):\n"""\n${customInstructions.trim()}\n"""`
-			: "Custom instructions: none. Default to warm Indian devotional atmosphere.",
-		outputHint,
-	].join("\n\n");
+function buildPlannerPrompt(args: {
+	shlokaText: string;
+	customInstructions?: string;
+	mode: "single-clip" | "multi-clip";
+	durationSeconds?: number;
+	maxPromptChars?: number;
+	aspectRatio?: string;
+}) {
+	const sections: string[] = [
+		[
+			"## Shloka",
+			"Preserve meaning; do not replace with an invented translation unless asked.",
+			`"""`,
+			args.shlokaText.trim(),
+			`"""`,
+		].join("\n"),
+	];
+
+	if (args.customInstructions?.trim()) {
+		sections.push(
+			[
+				"## Custom instructions (hard constraints)",
+				`"""`,
+				args.customInstructions.trim(),
+				`"""`,
+			].join("\n"),
+		);
+	} else {
+		sections.push(
+			"## Custom instructions\nnone — default to warm Indian devotional atmosphere.",
+		);
+	}
+
+	const meta: string[] = [];
+	if (args.aspectRatio) {
+		meta.push(`- Aspect ratio: ${args.aspectRatio}`);
+	}
+	if (args.durationSeconds != null) {
+		meta.push(
+			`- Target video length: ${args.durationSeconds} seconds (modulate beat count to fit).`,
+		);
+	}
+	if (args.maxPromptChars != null) {
+		meta.push(
+			`- Provider video prompt character limit: ${args.maxPromptChars} (videoScenes will be flattened into one text prompt; stay concise and pricise).`,
+		);
+	}
+	if (meta.length > 0) {
+		sections.push(["## Generation constraints", ...meta].join("\n"));
+	}
+
+	if (args.mode === "multi-clip") {
+		sections.push(
+			"## Task\nProduce imagePrompt + overallDescription + ordered clips for a portrait multi-clip short rooted in this shloka.",
+		);
+	} else {
+		sections.push(
+			"## Task\nProduce imagePrompt + videoScenes (Seedance six-part beats) for a portrait short rooted in this shloka.",
+		);
+	}
+
+	return sections.join("\n\n");
 }
 
 function buildModelStudioPlannerPrompt(prompt: string) {
@@ -88,6 +140,122 @@ function compositionPlannerExtension(run: {
 		maxPromptChars: MODEL_CAPABILITY_PROFILES[run.videoParams.modelId]
 			.maxPromptChars,
 	};
+}
+
+function singleClipPlannerBudget(run: {
+	videoParams?: { durationSeconds: number; modelId: string; aspectRatio?: string };
+	selectedModelId?: string;
+}) {
+	const modelId =
+		(run.videoParams?.modelId && isVideoModelId(run.videoParams.modelId)
+			? run.videoParams.modelId
+			: null) ??
+		(run.selectedModelId && isVideoModelId(run.selectedModelId)
+			? run.selectedModelId
+			: null) ??
+		"bytedance/seedance-2.5";
+	const profile = MODEL_CAPABILITY_PROFILES[modelId];
+	return {
+		modelId,
+		durationSeconds: run.videoParams?.durationSeconds ?? 8,
+		maxPromptChars: profile.maxPromptChars,
+		aspectRatio: run.videoParams?.aspectRatio ?? "9:16",
+	};
+}
+
+const MAX_SUMMARIZE_ATTEMPTS = 3;
+
+async function summarizeVideoPromptToLimit(
+	prompt: string,
+	maxChars: number,
+): Promise<string> {
+	const openrouter = getOpenRouterProvider();
+	let current = prompt.trim();
+	for (let attempt = 1; attempt <= MAX_SUMMARIZE_ATTEMPTS; attempt++) {
+		const result = await generateText({
+			model: openrouter(VIDEO_PROMPT_SUMMARIZER_MODEL_ID),
+			reasoning: "none",
+			instructions: VIDEO_PROMPT_SUMMARIZER_SYSTEM_PROMPT,
+			prompt: [
+				`Character limit: ${maxChars}`,
+				`Current length: ${current.length}`,
+				attempt > 1
+					? `Previous attempt was still ${current.length} chars — compress more aggressively. Prefer shorter clauses; keep beat order.`
+					: "Compress the following video prompt to fit the limit.",
+				"",
+				"PROMPT:",
+				current,
+			].join("\n"),
+		});
+		const next = result.text.replace(/^["'`\s]+|["'`\s]+$/g, "").trim();
+		if (!next) {
+			continue;
+		}
+		if (next.length <= maxChars && next.length < current.length) {
+			return next;
+		}
+		// Accept if under limit even if not much shorter (edge: already near limit).
+		if (next.length <= maxChars) {
+			return next;
+		}
+		current = next.length < current.length ? next : current;
+	}
+	// Last resort: hard truncate at a word boundary.
+	const fitted = current.slice(0, Math.max(1, maxChars - 1));
+	const lastSpace = fitted.lastIndexOf(" ");
+	const sliced =
+		lastSpace > Math.floor(maxChars * 0.6) ? fitted.slice(0, lastSpace) : fitted;
+	return `${sliced.trimEnd()}…`;
+}
+
+/**
+ * Resolve the prompt that should be sent to the video provider.
+ * Uses cached summary when hash matches; otherwise summarizes if over limit.
+ */
+async function resolveProviderVideoPrompt(
+	ctx: ActionCtx,
+	args: {
+		runId: Id<"generationRuns">;
+		fullPrompt: string;
+		maxPromptChars: number;
+		cachedSummary?: string;
+		cachedHash?: string;
+		persist?: boolean;
+	},
+): Promise<{ prompt: string; usedSummary: boolean }> {
+	const full = args.fullPrompt.trim();
+	const sourceHash = hashVideoPromptSource(full);
+	if (full.length <= args.maxPromptChars) {
+		if (args.persist) {
+			await ctx.runMutation(internal.studio.internal.clearVideoPromptSummary, {
+				runId: args.runId,
+				videoPrompt: full,
+			});
+		}
+		return { prompt: full, usedSummary: false };
+	}
+
+	if (
+		args.cachedSummary?.trim() &&
+		args.cachedHash === sourceHash &&
+		args.cachedSummary.trim().length <= args.maxPromptChars
+	) {
+		return { prompt: args.cachedSummary.trim(), usedSummary: true };
+	}
+
+	const summarized = await summarizeVideoPromptToLimit(
+		full,
+		args.maxPromptChars,
+	);
+	if (args.persist) {
+		await ctx.runMutation(internal.studio.internal.setVideoPromptSummaryCache, {
+			runId: args.runId,
+			videoPrompt: full,
+			sourceHash,
+			summarizedVideoPrompt: summarized,
+		});
+	}
+	return { prompt: summarized, usedSummary: true };
 }
 
 /** Prepended at image gen time so gpt-image-2 / Seedance refs stay illustrated. */
@@ -183,19 +351,23 @@ export const planShlokaRun = action({
 		try {
 			const openrouter = getOpenRouterProvider();
 			const composition = compositionPlannerExtension(run);
+			const budget = singleClipPlannerBudget(run);
 			if (composition) {
 				const result = await generateText({
 					model: openrouter(PLANNER_MODEL_ID),
 					reasoning: "medium",
-					system: buildShlokaPlannerSystemPrompt({
+					instructions: buildShlokaPlannerSystemPrompt({
 						stored: resolvedPrompt.content,
 						composition,
 					}),
-					prompt: buildPlannerPrompt(
-						run.shlokaText,
-						run.customInstructions,
-						"multi-clip",
-					),
+					prompt: buildPlannerPrompt({
+						shlokaText: run.shlokaText,
+						customInstructions: run.customInstructions,
+						mode: "multi-clip",
+						durationSeconds: composition.clipDurationSeconds,
+						maxPromptChars: composition.maxPromptChars,
+						aspectRatio: budget.aspectRatio,
+					}),
 					output: Output.object({ schema: compositionPlannerOutputSchema }),
 				});
 				const plan = result.output;
@@ -214,25 +386,33 @@ export const planShlokaRun = action({
 				const result = await generateText({
 					model: openrouter(PLANNER_MODEL_ID),
 					reasoning: "medium",
-					system: buildShlokaPlannerSystemPrompt({
+					instructions: buildShlokaPlannerSystemPrompt({
 						stored: resolvedPrompt.content,
 						composition: null,
+						singleClip: {
+							durationSeconds: budget.durationSeconds,
+							maxPromptChars: budget.maxPromptChars,
+						},
 					}),
-					prompt: buildPlannerPrompt(
-						run.shlokaText,
-						run.customInstructions,
-						"single-clip",
-					),
+					prompt: buildPlannerPrompt({
+						shlokaText: run.shlokaText,
+						customInstructions: run.customInstructions,
+						mode: "single-clip",
+						durationSeconds: budget.durationSeconds,
+						maxPromptChars: budget.maxPromptChars,
+						aspectRatio: budget.aspectRatio,
+					}),
 					output: Output.object({ schema: normalPlannerOutputSchema }),
 				});
 				const plan = result.output;
 				const warnings = warningMessages(result.warnings ?? []);
+				const videoScenes = normalizeVideoScenes(plan.videoScenes);
 				await ctx.runMutation(internal.studio.internal.commitPlan, {
 					runId: args.runId,
 					plannerModel: PLANNER_MODEL_ID,
 					plannerReasoning: "medium",
 					imagePrompt: plan.imagePrompt,
-					videoScenes: plan.videoScenes,
+					videoScenes,
 					warnings: warnings.length > 0 ? warnings : undefined,
 					planningKey,
 					plannerSystemPrompt: resolvedPrompt.content,
@@ -292,7 +472,7 @@ export const planModelStudioComposition = action({
 			const result = await generateText({
 				model: getOpenRouterProvider()(PLANNER_MODEL_ID),
 				reasoning: "medium",
-				system: `${MODEL_STUDIO_PLANNER_SYSTEM_PROMPT}\n\n${multiClipPlannerInstructions(composition)}`,
+				instructions: `${MODEL_STUDIO_PLANNER_SYSTEM_PROMPT}\n\n${multiClipPlannerInstructions(composition)}`,
 				prompt: buildModelStudioPlannerPrompt(prompt),
 				output: Output.object({ schema: compositionPlannerOutputSchema }),
 			});
@@ -459,12 +639,21 @@ export const generateVideoForRun = action({
 			modelId,
 		});
 
-		const fallbackPrompt =
+		const fullPrompt =
 			run.videoPrompt?.trim() ||
 			(run.videoScenes
 				? buildVideoPromptFromScenes(run.videoScenes)
 				: run.imagePrompt) ||
 			"Warm Indian cinematic motion portrait.";
+
+		const resolved = await resolveProviderVideoPrompt(ctx, {
+			runId: args.runId,
+			fullPrompt,
+			maxPromptChars: profile.maxPromptChars,
+			cachedSummary: run.summarizedVideoPrompt,
+			cachedHash: run.videoPromptSourceHash,
+			persist: true,
+		});
 
 		const firstUrl = first ? await signedReadUrl(first.objectKey) : null;
 		const lastUrl = last ? await signedReadUrl(last.objectKey) : null;
@@ -473,8 +662,11 @@ export const generateVideoForRun = action({
 		);
 
 		const adapted = adaptOpenRouterVideoRequest({
-			params: parsedParams,
-			fallbackPrompt,
+			params: {
+				...parsedParams,
+				prompt: resolved.prompt,
+			},
+			fallbackPrompt: resolved.prompt,
 			firstFrameUrl: firstUrl,
 			lastFrameUrl: lastUrl,
 			referenceUrls,
@@ -484,7 +676,7 @@ export const generateVideoForRun = action({
 			runId: args.runId,
 			selectedModelId: modelId,
 			videoParams: parsedParams,
-			videoPrompt: adapted.body.prompt,
+			videoPrompt: fullPrompt,
 		});
 
 		await ctx.runMutation(internal.studio.internal.setRunStatus, {
@@ -506,6 +698,15 @@ export const generateVideoForRun = action({
 				mimeType: downloaded.mimeType,
 			});
 
+			const genWarnings = [
+				...adapted.warnings,
+				...(resolved.usedSummary
+					? [
+							`Provider prompt was summarized to fit ${profile.maxPromptChars} characters.`,
+						]
+					: []),
+			];
+
 			await ctx.runMutation(internal.studio.internal.insertGalleryVideo, {
 				runId: args.runId,
 				video: {
@@ -523,11 +724,10 @@ export const generateVideoForRun = action({
 							: undefined,
 					videoParams: parsedParams,
 					videoPrompt: adapted.body.prompt,
-					warnings:
-						adapted.warnings.length > 0 ? adapted.warnings : undefined,
+					warnings: genWarnings.length > 0 ? genWarnings : undefined,
 					createdAt: Date.now(),
 				},
-				warnings: adapted.warnings.length > 0 ? adapted.warnings : undefined,
+				warnings: genWarnings.length > 0 ? genWarnings : undefined,
 			});
 		} catch (error) {
 			const message =
@@ -540,6 +740,40 @@ export const generateVideoForRun = action({
 			throw error;
 		}
 
+		return null;
+	},
+});
+
+/** Rebuild / refresh summarized provider prompt when scenes or model budget change. */
+export const refreshVideoPromptSummary = internalAction({
+	args: {
+		runId: v.id("generationRuns"),
+	},
+	returns: v.null(),
+	handler: async (ctx, args) => {
+		const run = await ctx.runQuery(internal.studio.queries.getRunDoc, {
+			runId: args.runId,
+		});
+		if (!run) {
+			return null;
+		}
+		const fullPrompt =
+			run.videoPrompt?.trim() ||
+			(run.videoScenes
+				? buildVideoPromptFromScenes(run.videoScenes)
+				: undefined);
+		if (!fullPrompt) {
+			return null;
+		}
+		const budget = singleClipPlannerBudget(run);
+		await resolveProviderVideoPrompt(ctx, {
+			runId: args.runId,
+			fullPrompt,
+			maxPromptChars: budget.maxPromptChars,
+			cachedSummary: run.summarizedVideoPrompt,
+			cachedHash: run.videoPromptSourceHash,
+			persist: true,
+		});
 		return null;
 	},
 });
@@ -783,7 +1017,7 @@ async function runTitleGeneration(
 		const result = await generateText({
 			model: getOpenRouterProvider()(TITLE_MODEL_ID),
 			reasoning: "none",
-			system:
+			instructions:
 				"You write short, clear titles for video-generation runs (under 60 characters). No quotes, emoji, hashtags, or trailing punctuation.",
 			prompt: `Write a short title for this run.\n\n${context}`,
 		});

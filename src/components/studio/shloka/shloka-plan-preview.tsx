@@ -22,10 +22,19 @@ import {
 } from "#/components/ui/dialog";
 import { Input } from "#/components/ui/input";
 import { Label } from "#/components/ui/label";
+import {
+	Popover,
+	PopoverContent,
+	PopoverDescription,
+	PopoverHeader,
+	PopoverTitle,
+	PopoverTrigger,
+} from "#/components/ui/popover";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs";
 import { MarkdownTextarea } from "#/components/ui/markdown-textarea";
 import {
 	markdownToVideoScenes,
+	normalizeVideoScenes,
 	videoScenesToMarkdown,
 	type EditableVideoScene,
 } from "#/lib/video-plan-markdown";
@@ -46,6 +55,10 @@ type CompositionClipPlan = {
 type ShlokaPlanPreviewProps = {
 	imagePrompt?: string;
 	videoScenes?: VideoScene[];
+	/** Provider prompt built from scenes (may exceed model limit). */
+	videoPrompt?: string;
+	/** Cached compressed prompt when over the model character limit. */
+	summarizedVideoPrompt?: string;
 	compositionOverallDescription?: string;
 	compositionClips?: CompositionClipPlan[];
 	activePlanId?: string | null;
@@ -183,6 +196,8 @@ function PlanEditor({
 export function ShlokaPlanPreview({
 	imagePrompt,
 	videoScenes,
+	videoPrompt,
+	summarizedVideoPrompt,
 	compositionOverallDescription,
 	compositionClips,
 	activePlanId,
@@ -206,10 +221,14 @@ export function ShlokaPlanPreview({
 	const [deleteOpen, setDeleteOpen] = useState(false);
 	const hasCompositionClips = Boolean(compositionClips?.length);
 	const hasScenes = Boolean(videoScenes?.length) || hasCompositionClips;
-	const scenesMarkdown = videoScenes?.length
-		? videoScenesToMarkdown(videoScenes)
+	const normalizedScenes = videoScenes?.length
+		? normalizeVideoScenes(videoScenes)
+		: [];
+	const scenesMarkdown = normalizedScenes.length
+		? videoScenesToMarkdown(normalizedScenes)
 		: "";
-	const videoPlanMarkdown = videoScenes?.length
+	const showSummarizedPrompt = Boolean(summarizedVideoPrompt?.trim());
+	const videoPlanMarkdown = normalizedScenes.length
 		? scenesMarkdown
 		: hasCompositionClips
 			? (compositionClips ?? [])
@@ -289,6 +308,47 @@ export function ShlokaPlanPreview({
 							<Copy className="size-4" />
 							{copied === activeCopy.key ? "Copied" : activeCopy.label}
 						</Button>
+					) : null}
+					{showSummarizedPrompt && activeTab === "video-scenes" ? (
+						<Popover>
+							<PopoverTrigger
+								render={
+									<Button variant="outline" size="sm" className="min-h-11" />
+								}
+							>
+								Summarized prompt
+							</PopoverTrigger>
+							<PopoverContent
+								align="start"
+								className="w-[min(28rem,90vw)] gap-3 p-4"
+							>
+								<PopoverHeader>
+									<PopoverTitle>Summarized provider prompt</PopoverTitle>
+									<PopoverDescription>
+										Compressed to fit the video model character limit
+										{videoPrompt
+											? ` (${videoPrompt.length} → ${summarizedVideoPrompt?.length} chars)`
+											: ""}
+										.
+									</PopoverDescription>
+								</PopoverHeader>
+								<pre className="max-h-64 overflow-auto whitespace-pre-wrap wrap-break-word rounded-md bg-muted/50 p-3 font-mono text-xs leading-relaxed">
+									{summarizedVideoPrompt}
+								</pre>
+								<Button
+									variant="ghost"
+									size="sm"
+									className="self-start"
+									onClick={() =>
+										summarizedVideoPrompt &&
+										void copyText("summarized", summarizedVideoPrompt)
+									}
+								>
+									<Copy className="size-3.5" />
+									{copied === "summarized" ? "Copied" : "Copy"}
+								</Button>
+							</PopoverContent>
+						</Popover>
 					) : null}
 				</div>
 				<div className="flex flex-wrap items-center gap-2">
@@ -463,7 +523,7 @@ export function ShlokaPlanPreview({
 						/>
 					) : (
 						<div className="max-h-[min(28rem,55vh)] space-y-3 overflow-y-auto overscroll-contain pr-1">
-							{videoScenes?.map((scene) => (
+							{normalizedScenes.map((scene) => (
 								<div
 									key={scene.sceneNumber}
 									className="rounded-lg border border-border/80 p-4"
@@ -473,23 +533,37 @@ export function ShlokaPlanPreview({
 									</p>
 									<dl className="mt-2 grid gap-1 text-sm text-muted-foreground">
 										<div>
-											<dt className="font-medium text-foreground">Subjects</dt>
-											<dd>{scene.subjects}</dd>
+											<dt className="font-medium text-foreground">Subject</dt>
+											<dd>{scene.subject}</dd>
 										</div>
 										<div>
-											<dt className="font-medium text-foreground">
-												Composition
-											</dt>
-											<dd>{scene.composition}</dd>
+											<dt className="font-medium text-foreground">Action</dt>
+											<dd>{scene.action}</dd>
 										</div>
-										<div>
-											<dt className="font-medium text-foreground">Motion</dt>
-											<dd>{scene.actionMotion}</dd>
-										</div>
-										<div>
-											<dt className="font-medium text-foreground">Avoid</dt>
-											<dd>{scene.negativeConstraints}</dd>
-										</div>
+										{scene.scene.trim() ? (
+											<div>
+												<dt className="font-medium text-foreground">Scene</dt>
+												<dd>{scene.scene}</dd>
+											</div>
+										) : null}
+										{scene.style.trim() ? (
+											<div>
+												<dt className="font-medium text-foreground">Style</dt>
+												<dd>{scene.style}</dd>
+											</div>
+										) : null}
+										{scene.camera.trim() ? (
+											<div>
+												<dt className="font-medium text-foreground">Camera</dt>
+												<dd>{scene.camera}</dd>
+											</div>
+										) : null}
+										{scene.audio.trim() ? (
+											<div>
+												<dt className="font-medium text-foreground">Audio</dt>
+												<dd>{scene.audio}</dd>
+											</div>
+										) : null}
 									</dl>
 								</div>
 							))}

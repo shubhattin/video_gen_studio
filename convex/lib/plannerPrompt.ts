@@ -113,11 +113,59 @@ Turn the user's video brief into a short, coherent visual plan. Keep the supplie
 
 When the brief does not specify otherwise, prefer stylized / illustrated characters over photoreal people.`;
 
-export function singleClipPlannerInstructions() {
+/** System prompt for compressing an over-limit provider video prompt. */
+export const VIDEO_PROMPT_SUMMARIZER_SYSTEM_PROMPT = `You compress video-generation prompts so they fit a hard character limit without losing the shot plan.
+
+Rules:
+- Output ONLY the compressed prompt text. No preamble, quotes, or markdown fences.
+- Preserve: subject identity, key actions in order, environment, visual style, camera moves, audio cues, and non-photoreal / stylized constraints.
+- Prefer Seedance-style production language: Subject + Action + Scene + Style + Camera + Audio in compact sentences.
+- Drop redundancy and filler. Keep chronological beats.
+- The result MUST be strictly shorter than the input and MUST be at or under the character limit given in the user message.
+- Never invent new scenes, deities, scripture, or photoreal people.`;
+
+export function singleClipPlannerInstructions(args?: {
+	durationSeconds?: number;
+	maxPromptChars?: number;
+}) {
+	const durationHint =
+		args?.durationSeconds != null
+			? `Target video length is about ${args.durationSeconds} seconds (exact value is also in the user prompt).`
+			: "Match scene count to the target video length given in the user prompt.";
+	const charHint =
+		args?.maxPromptChars != null
+			? `The videoScenes JSON will later be flattened into a single provider text prompt with a hard limit of about ${args.maxPromptChars} characters.`
+			: "The videoScenes JSON will later be flattened into a single provider text prompt with a hard character limit (see user prompt).";
+
 	return `## Output shape
 Always return \`kind: "single-clip"\` with:
-- \`imagePrompt\`: the reference still prompt described above;
-- \`videoScenes\`: multi-scene cinematic beats for a short reel (same stylized register).`;
+- \`imagePrompt\`: one portrait-friendly reference still prompt;
+- \`videoScenes\`: ordered cinematic beats using the Seedance six-part fields.
+
+## videoScenes schema (per beat)
+- \`sceneNumber\`: 1-based consecutive
+- \`intent\`: short beat title (what this beat conveys)
+- \`subject\`: who/what appears (required)
+- \`action\`: what happens (required)
+- \`scene\`: environment / setting (optional; use "" if unused)
+- \`style\`: visual style, lighting, palette (optional; use "" if unused)
+- \`camera\`: camera move / cut (optional; use "" if unused)
+- \`audio\`: sound / music / SFX (optional; use "" if unused)
+
+Keep each field concise (one tight sentence or less). Do not pad optional fields.
+
+## Scene count vs duration
+${durationHint}
+- 4–6s → 1–2 beats
+- 7–10s → 2–3 beats
+- 11–15s → 3–4 beats
+- 16–24s → 4–5 beats
+- 25–30s → 5–6 beats
+Prefer fewer denser beats over many thin ones. Absolute maximum: 12.
+
+## Provider text budget
+${charHint}
+Write fields so the flattened prompt stays useful within that budget. Prefer density over long prose. Never request text overlays, logos, watermarks, or photoreal / live-action people.`;
 }
 
 export function multiClipPlannerInstructions(args: {
@@ -196,10 +244,15 @@ export function buildShlokaPlannerSystemPrompt(args: {
 		clipDurationSeconds: number;
 		maxPromptChars: number;
 	} | null;
+	/** Single-clip duration + provider char budget (ignored when composition is set). */
+	singleClip?: {
+		durationSeconds: number;
+		maxPromptChars: number;
+	} | null;
 }) {
 	const base = resolvePlannerSystemPrompt(args.stored);
 	const appendix = args.composition
 		? multiClipPlannerInstructions(args.composition)
-		: singleClipPlannerInstructions();
+		: singleClipPlannerInstructions(args.singleClip ?? undefined);
 	return `${base}\n\n${appendix}`;
 }
