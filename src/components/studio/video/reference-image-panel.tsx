@@ -201,6 +201,15 @@ function ReferenceImageCard({
 	onRemoveImage: (id: string) => void;
 }) {
 	const [downloading, setDownloading] = useState(false);
+	const imageWidth = image.meta?.width;
+	const imageHeight = image.meta?.height;
+	const ratio =
+		imageWidth &&
+		imageHeight &&
+		Number.isFinite(imageWidth) &&
+		Number.isFinite(imageHeight)
+			? `${imageWidth} / ${imageHeight}`
+			: undefined;
 	const isUnassigned = !isFirst && !isLast && !isExtra;
 	const sourceLabel = sourceLabelFor(image.source);
 	const assigned =
@@ -234,12 +243,17 @@ function ReferenceImageCard({
 				isFirst || isLast || isExtra ? "border-primary/50" : "border-border/70",
 			)}
 		>
-			<div className="flex h-36 items-center justify-center overflow-hidden bg-muted/30">
+			<div className="flex justify-center overflow-hidden bg-muted/30">
 				{image.url ? (
 					<img
 						src={image.url}
 						alt="Reference still"
-						className="min-h-0 min-w-0 max-h-full max-w-full object-contain"
+						className={
+							ratio
+								? "block max-h-72 w-auto max-w-full object-contain"
+								: "block max-h-72 h-auto w-full object-contain"
+						}
+						style={ratio ? { aspectRatio: ratio } : undefined}
 						loading="lazy"
 					/>
 				) : (
@@ -673,6 +687,15 @@ export function ReferenceImagePanel({
 								}) => {
 									const withUrl = withSignedUrl(item, galleryUrls);
 									const attached = attachedIds.has(item.id);
+									const itemWidth = item.meta?.width;
+									const itemHeight = item.meta?.height;
+									const itemRatio =
+										itemWidth &&
+										itemHeight &&
+										Number.isFinite(itemWidth) &&
+										Number.isFinite(itemHeight)
+											? `${itemWidth} / ${itemHeight}`
+											: undefined;
 									return (
 										<button
 											key={item.id}
@@ -696,11 +719,18 @@ export function ReferenceImagePanel({
 											}}
 										>
 											{withUrl.url ? (
-												<div className="flex h-32 w-full items-center justify-center overflow-hidden bg-muted/40">
+												<div className="flex justify-center overflow-hidden bg-muted/40">
 													<img
 														src={withUrl.url}
 														alt=""
-														className="min-h-0 min-w-0 max-h-full max-w-full object-contain"
+														className={
+															itemRatio
+																? "block max-h-60 w-auto max-w-full object-contain"
+																: "block max-h-60 h-auto w-full object-contain"
+														}
+														style={
+															itemRatio ? { aspectRatio: itemRatio } : undefined
+														}
 														loading="lazy"
 													/>
 												</div>

@@ -116,6 +116,22 @@ function InfoRow({
 	);
 }
 
+function aspectRatioValue(video: VideoResultItem): string | undefined {
+	const width = video.meta?.width;
+	const height = video.meta?.height;
+	if (width && height && Number.isFinite(width) && Number.isFinite(height)) {
+		return `${width} / ${height}`;
+	}
+	const aspectRatio = video.videoParams?.aspectRatio;
+	if (aspectRatio) {
+		const [w, h] = aspectRatio.split("/");
+		if (w && h && Number.isFinite(Number(w)) && Number.isFinite(Number(h))) {
+			return `${w} / ${h}`;
+		}
+	}
+	return undefined;
+}
+
 function VideoClipCard({
 	runId,
 	video,
@@ -137,22 +153,23 @@ function VideoClipCard({
 			modelId)
 		: null;
 	const prompt = video.videoPrompt ?? video.videoParams?.prompt;
+	const ratio = aspectRatioValue(video);
 
 	return (
 		<article className="overflow-hidden rounded-2xl border border-border/70 bg-card">
-			<div className="relative bg-black">
+			<div className="flex justify-center bg-black">
 				{video.url ? (
 					<video
 						src={video.url}
 						controls
 						playsInline
 						preload="metadata"
-						className="block max-h-96 w-full object-contain"
-						style={
-							video.meta?.width && video.meta?.height
-								? { aspectRatio: `${video.meta.width} / ${video.meta.height}` }
-								: undefined
+						className={
+							ratio
+								? "block max-h-[min(75vh,42rem)] w-auto max-w-full"
+								: "block max-h-[min(70vh,560px)] w-full"
 						}
+						style={ratio ? { aspectRatio: ratio } : undefined}
 					/>
 				) : (
 					<div className="flex h-56 items-center justify-center text-sm text-muted-foreground">
