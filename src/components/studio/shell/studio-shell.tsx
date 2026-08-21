@@ -1,13 +1,7 @@
 import { api } from "@convex/_generated/api";
 import { Link } from "@tanstack/react-router";
 import { useConvexAuth, useQuery } from "convex/react";
-import {
-	Clapperboard,
-	FileText,
-	Image as ImageIcon,
-	Images,
-	Sparkles,
-} from "lucide-react";
+import { FileText, Images, Sparkles } from "lucide-react";
 import { Activity, type CSSProperties, type ReactNode } from "react";
 import { AccountPopover } from "#/components/studio/shell/account-popover";
 import {
@@ -39,12 +33,7 @@ const emptyStudioSearch = {} as const;
 type StudioShellProps = {
 	children: ReactNode;
 	history: ReactNode;
-	activePath?:
-		| "/"
-		| "/studio"
-		| "/gallery"
-		| "/gallery/images"
-		| "/system-prompts";
+	activePath?: "/" | "/studio" | "/gallery" | "/prompt-templates";
 };
 
 export function StudioShell({
@@ -86,58 +75,38 @@ export function StudioShell({
 
 						<SidebarGroup className="p-0">
 							<SidebarGroupLabel className="group-data-[collapsible=icon]:sr-only">
-								New run
+								Navigation
 							</SidebarGroupLabel>
 							<SidebarGroupContent>
 								<SidebarMenu>
 									<SidebarMenuItem>
 										<SidebarMenuButton
 											isActive={activePath === "/"}
-											tooltip="New Shloka run"
+											tooltip="Start a new run"
 											render={<Link to="/" search={emptyStudioSearch} />}
 										>
 											<Sparkles />
-											<span>Shloka Studio</span>
-										</SidebarMenuButton>
-									</SidebarMenuItem>
-									<SidebarMenuItem>
-										<SidebarMenuButton
-											isActive={activePath === "/studio"}
-											tooltip="New Model Studio run"
-											render={<Link to="/studio" search={emptyStudioSearch} />}
-										>
-											<Clapperboard />
-											<span>Model Studio</span>
+											<span>New</span>
 										</SidebarMenuButton>
 									</SidebarMenuItem>
 									<SidebarMenuItem>
 										<SidebarMenuButton
 											isActive={activePath === "/gallery"}
-											tooltip="Video gallery"
+											tooltip="Gallery"
 											render={<Link to="/gallery" />}
 										>
 											<Images />
-											<span>Video gallery</span>
+											<span>Gallery</span>
 										</SidebarMenuButton>
 									</SidebarMenuItem>
 									<SidebarMenuItem>
 										<SidebarMenuButton
-											isActive={activePath === "/gallery/images"}
-											tooltip="Image gallery"
-											render={<Link to="/gallery/images" />}
-										>
-											<ImageIcon />
-											<span>Image gallery</span>
-										</SidebarMenuButton>
-									</SidebarMenuItem>
-									<SidebarMenuItem>
-										<SidebarMenuButton
-											isActive={activePath === "/system-prompts"}
-											tooltip="System prompt templates"
-											render={<Link to="/system-prompts" />}
+											isActive={activePath === "/prompt-templates"}
+											tooltip="Prompt templates"
+											render={<Link to="/prompt-templates" />}
 										>
 											<FileText />
-											<span>System prompts</span>
+											<span>Prompt Templates</span>
 										</SidebarMenuButton>
 									</SidebarMenuItem>
 								</SidebarMenu>
@@ -177,25 +146,21 @@ export function StudioShell({
 								{activePath === "/studio"
 									? "Model Studio"
 									: activePath === "/gallery"
-										? "Video gallery"
-										: activePath === "/gallery/images"
-											? "Image gallery"
-											: activePath === "/system-prompts"
-												? "System prompts"
-												: "Shloka Studio"}
+										? "Gallery"
+										: activePath === "/prompt-templates"
+											? "System Prompt Templates"
+											: "New"}
 							</p>
 							<p className="truncate text-xs text-muted-foreground sm:text-sm">
 								{waitingForStudioData
 									? mainLabel
 									: activePath === "/studio"
-										? "Browse video models and generate reference stills"
+										? "Direct video model API access"
 										: activePath === "/gallery"
-											? "Browse and download generated clips"
-											: activePath === "/gallery/images"
-												? "Browse and download reference stills"
-												: activePath === "/system-prompts"
-													? "Manage the prompts the planner uses for Shloka plans"
-													: "Plan scenes → reference stills → render video"}
+											? "Browse and download generated clips and reference stills"
+											: activePath === "/prompt-templates"
+												? "Manage the prompts the planner uses for Shloka plans"
+												: "Pick a studio and start a new run"}
 							</p>
 						</div>
 					</header>

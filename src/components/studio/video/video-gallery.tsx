@@ -2,7 +2,6 @@ import { api } from "@convex/_generated/api";
 import { useQuery } from "convex/react";
 import { Download, Info, Loader2 } from "lucide-react";
 import { useState } from "react";
-import { GalleryNav } from "#/components/studio/gallery-nav";
 import { Button } from "#/components/ui/button";
 import {
 	Popover,
@@ -251,17 +250,14 @@ export function VideoGallery() {
 	return (
 		<section className="space-y-5">
 			<div className="flex flex-wrap items-start justify-between gap-3">
-				<div className="flex flex-col gap-3">
-					<GalleryNav active="videos" />
-					<div>
-						<h1 className="font-heading text-xl font-semibold tracking-tight sm:text-2xl">
-							Video gallery
-						</h1>
-						<p className="text-sm text-muted-foreground">
-							Shared library of generated clips. Deleting a run does not remove
-							these files.
-						</p>
-					</div>
+				<div>
+					<h1 className="font-heading text-xl font-semibold tracking-tight sm:text-2xl">
+						Video gallery
+					</h1>
+					<p className="text-sm text-muted-foreground">
+						Shared library of generated clips. Deleting a run does not remove
+						these files.
+					</p>
 				</div>
 				{videos && videos.length > 0 ? (
 					<Select

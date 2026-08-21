@@ -1,29 +1,35 @@
-import { Link } from "@tanstack/react-router";
 import { Image as ImageIcon, Video } from "lucide-react";
 import { cn } from "#/lib/utils";
 
-type GalleryTab = "videos" | "images";
+export type GalleryTab = "videos" | "images";
 
 const tabs: Array<{
 	id: GalleryTab;
 	label: string;
-	to: string;
 	icon: typeof Video;
 }> = [
-	{ id: "videos", label: "Videos", to: "/gallery", icon: Video },
-	{ id: "images", label: "Images", to: "/gallery/images", icon: ImageIcon },
+	{ id: "videos", label: "Videos", icon: Video },
+	{ id: "images", label: "Images", icon: ImageIcon },
 ];
 
-export function GalleryNav({ active }: { active: GalleryTab }) {
+type GalleryNavProps = {
+	active: GalleryTab;
+	onChange: (tab: GalleryTab) => void;
+};
+
+/** Tab switcher for the unified gallery — switches the view without routing. */
+export function GalleryNav({ active, onChange }: GalleryNavProps) {
 	return (
 		<div className="inline-flex items-center gap-1 rounded-full border border-border/80 bg-muted/30 p-1">
 			{tabs.map((tab) => {
 				const Icon = tab.icon;
 				const isActive = active === tab.id;
 				return (
-					<Link
+					<button
 						key={tab.id}
-						to={tab.to}
+						type="button"
+						aria-pressed={isActive}
+						onClick={() => onChange(tab.id)}
 						className={cn(
 							"inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-sm font-medium transition-colors",
 							isActive
@@ -33,7 +39,7 @@ export function GalleryNav({ active }: { active: GalleryTab }) {
 					>
 						<Icon className="size-4" />
 						{tab.label}
-					</Link>
+					</button>
 				);
 			})}
 		</div>

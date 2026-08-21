@@ -119,15 +119,12 @@ export function SystemPromptItem({
 				className="gap-3"
 			>
 				<div className="flex flex-wrap items-center justify-between gap-2">
-					<div className="flex flex-wrap items-center gap-2">
-						<span className="font-medium">{template.title}</span>
-						<Badge
-							variant="outline"
-							className="h-5 px-1.5 text-[10px] font-normal text-muted-foreground capitalize"
-						>
-							{formatDistanceToNow(template.updatedAt, { addSuffix: true })}
-						</Badge>
-					</div>
+					<Badge
+						variant="outline"
+						className="h-5 px-1.5 text-[10px] font-normal text-muted-foreground capitalize"
+					>
+						{formatDistanceToNow(template.updatedAt, { addSuffix: true })}
+					</Badge>
 					<TabsList>
 						<TabsTrigger value="view">View</TabsTrigger>
 						<TabsTrigger value="edit">

@@ -187,7 +187,7 @@ export function SystemPromptPicker({
 
 				{selection && selection.kind === "template" && resolved ? (
 					<a
-						href={`/system-prompts${resolved.editHash}`}
+						href={`/prompt-templates${resolved.editHash}`}
 						target="_blank"
 						rel="noreferrer"
 						className="inline-flex items-center gap-1 rounded-md text-sm font-medium text-foreground underline underline-offset-3 hover:text-accent-foreground"

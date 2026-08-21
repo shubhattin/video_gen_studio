@@ -14,7 +14,7 @@ import {
 } from "#/components/studio/composition/multi-clip-composition-controls";
 import { AutosaveStatus } from "#/components/studio/shell/autosave-status";
 import { HistoryPanel } from "#/components/studio/shell/history-panel";
-import { NewRunSetup } from "#/components/studio/shell/new-run-setup";
+import { StudioLauncher } from "#/components/studio/shell/studio-launcher";
 import { StudioRunSkeleton } from "#/components/studio/shell/studio-run-skeleton";
 import { StudioShell } from "#/components/studio/shell/studio-shell";
 import { ShlokaComposer } from "#/components/studio/shloka/shloka-composer";
@@ -587,10 +587,7 @@ function ShlokaStudioPage() {
 						</section>
 
 						{!runId ? (
-							<NewRunSetup
-								provenance="shloka"
-								onCreated={(id) => setRunId(id)}
-							/>
+							<StudioLauncher onShlokaRunCreated={(id) => setRunId(id)} />
 						) : (
 							<>
 								<ShlokaComposer

@@ -3,7 +3,6 @@ import type { Id } from "@convex/_generated/dataModel";
 import { useMutation, useQuery } from "convex/react";
 import { Download, Loader2, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { GalleryNav } from "#/components/studio/gallery-nav";
 import { saveDownloadResponse } from "#/components/studio/video/video-result";
 import {
 	AlertDialog,
@@ -193,17 +192,14 @@ export function ImageGallery() {
 	return (
 		<section className="space-y-5">
 			<div className="flex flex-wrap items-start justify-between gap-3">
-				<div className="flex flex-col gap-3">
-					<GalleryNav active="images" />
-					<div>
-						<h1 className="font-heading text-xl font-semibold tracking-tight sm:text-2xl">
-							Image gallery
-						</h1>
-						<p className="text-sm text-muted-foreground">
-							Shared library of generated, uploaded, and continuity images.
-							Deleting a run does not remove these files.
-						</p>
-					</div>
+				<div>
+					<h1 className="font-heading text-xl font-semibold tracking-tight sm:text-2xl">
+						Image gallery
+					</h1>
+					<p className="text-sm text-muted-foreground">
+						Shared library of generated, uploaded, and continuity images.
+						Deleting a run does not remove these files.
+					</p>
 				</div>
 				{images && images.length > 0 ? (
 					<Select
