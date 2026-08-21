@@ -69,7 +69,7 @@ export function singleClipPlannerInstructions(args?: {
 
 	return `## Output shape
 Always return \`kind: "single-clip"\` with:
-- \`imagePrompt\`: one portrait-friendly reference still prompt;
+- \`imagePrompt\`: one portrait-friendly reference still prompt. No character limit applies here — the reference-image generator (gpt-image-2) accepts long prompts, so write it as richly as needed;
 - \`videoScenes\`: ordered cinematic beats using the Seedance six-part fields.
 
 ## videoScenes schema (per beat)
@@ -112,7 +112,7 @@ export function multiClipPlannerInstructions(args: {
 	return `## Output shape (multi-clip — overrides single-clip / videoScenes)
 Create exactly ${args.clipCount} ordered clips, each ${args.clipDurationSeconds} seconds. Return \`kind: "multi-clip"\` (do not return \`videoScenes\`).
 
-Still produce a strong \`imagePrompt\` for the establishing reference still (Clip 1's opening frame), following the reference-image rules above — stylized Indian miniature / temple-mural illustration, warm Indian-devotional palette, no photoreal people.
+Still produce a strong \`imagePrompt\` for the establishing reference still (Clip 1's opening frame), following the reference-image rules above — stylized Indian miniature / temple-mural illustration, warm Indian-devotional palette, no photoreal people. There is no character limit on \`imagePrompt\` (gpt-image-2 accepts long prompts), so make it as detailed as needed.
 
 Also provide \`overallDescription\`: one concise description of the finished multi-clip video.
 

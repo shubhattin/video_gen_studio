@@ -71,7 +71,12 @@ export interface ModelCapabilityProfile {
 	supportsSeed: boolean;
 	supportsNegativePrompt: boolean;
 	passthroughParams: string[];
-	/** Upstream provider prompt character limit (Kling enforces 2500). */
+	/**
+	 * Upstream provider prompt character limit. Sourced from each provider's
+	 * API docs (not OpenRouter — https://openrouter.ai/api/v1/videos/models
+	 * exposes no prompt-limit field). Verification links are in the
+	 * per-model comments below.
+	 */
 	maxPromptChars: number;
 	pricingNotes: string;
 	/** Silent / base $/s estimate used for sorting + cost preview. */
@@ -113,7 +118,10 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 			"conditioningScale",
 			"enhancePrompt",
 		],
-		maxPromptChars: 4000,
+		// Google publishes no hard prompt char cap for Veo (Gemini API Veo docs:
+		// https://ai.google.dev/gemini-api/docs/veo — no length field). ~2,000
+		// chars is the limit enforced across Veo-serving APIs / resellers.
+		maxPromptChars: 2000,
 		pricingNotes: "~$0.03–0.05/s silent · ~$0.05–0.08/s with audio.",
 		fallbackEstimateUsdPerSecond: 0.05,
 		fallbackEstimateUsdPerSecondWithAudio: 0.08,
@@ -137,6 +145,9 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 		supportsSeed: true,
 		supportsNegativePrompt: false,
 		passthroughParams: ["watermark"],
+		// BytePlus ModelArk (Seedance upstream): recommended ≤1,000 English
+		// words / ≤500 Chinese chars; no hard char cap documented.
+		// https://docs.byteplus.com/en/docs/ModelArk/1520757
 		maxPromptChars: 4000,
 		pricingNotes: "~$0.04/s (token-based OpenRouter pricing).",
 		fallbackEstimateUsdPerSecond: 0.04035,
@@ -160,6 +171,9 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 		supportsSeed: true,
 		supportsNegativePrompt: false,
 		passthroughParams: ["watermark"],
+		// BytePlus ModelArk (Seedance upstream): recommended ≤1,000 English
+		// words / ≤500 Chinese chars; no hard char cap documented.
+		// https://docs.byteplus.com/en/docs/ModelArk/1520757
 		maxPromptChars: 4000,
 		pricingNotes: "Token-based OpenRouter pricing (~$0.07+/s depending on size).",
 		fallbackEstimateUsdPerSecond: 0.07,
@@ -183,6 +197,9 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 		supportsSeed: true,
 		supportsNegativePrompt: false,
 		passthroughParams: ["watermark", "req_key", "output_format"],
+		// BytePlus ModelArk (Seedance upstream): recommended ≤1,000 English
+		// words / ≤500 Chinese chars; no hard char cap documented.
+		// https://docs.byteplus.com/en/docs/ModelArk/1520757
 		maxPromptChars: 4000,
 		pricingNotes:
 			"~$0.103/s at 480p (token-based OpenRouter pricing; higher at larger sizes).",
@@ -206,6 +223,8 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 		supportsSeed: false,
 		supportsNegativePrompt: true,
 		passthroughParams: ["negative_prompt", "cfg_scale"],
+		// Kling official API docs: prompt max length 2,500 characters.
+		// https://kling.ai/document-api/api/video/3-0-omni/text-to-video
 		maxPromptChars: 2500,
 		pricingNotes: "~$0.084/s silent · ~$0.126/s with audio.",
 		fallbackEstimateUsdPerSecond: 0.084,
@@ -230,6 +249,8 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 		supportsSeed: false,
 		supportsNegativePrompt: true,
 		passthroughParams: ["negative_prompt", "cfg_scale"],
+		// Kling official API docs: prompt max length 2,500 characters.
+		// https://kling.ai/document-api/api/video/3-0-omni/text-to-video
 		maxPromptChars: 2500,
 		pricingNotes: "$0.112/s video · $0.168/s with audio.",
 		fallbackEstimateUsdPerSecond: 0.112,
@@ -260,7 +281,10 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 			"audio",
 			"size",
 		],
-		maxPromptChars: 4000,
+		// Alibaba Cloud Model Studio: wan2.6 series prompts up to 1,500 chars
+		// (longer text is auto-truncated).
+		// https://www.alibabacloud.com/help/en/model-studio/text-to-video-api-reference
+		maxPromptChars: 1500,
 		pricingNotes:
 			"~$0.04/s 480p text · ~$0.08/s 720p text · higher for image-to-video / 1080p.",
 		fallbackEstimateUsdPerSecond: 0.05,
@@ -285,7 +309,10 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 		supportsSeed: true,
 		supportsNegativePrompt: true,
 		passthroughParams: ["negative_prompt", "prompt_extend"],
-		maxPromptChars: 4000,
+		// Alibaba Cloud Model Studio: wan2.7 prompts up to 5,000 chars
+		// (longer text is auto-truncated).
+		// https://www.alibabacloud.com/help/en/model-studio/text-to-video-api-reference
+		maxPromptChars: 5000,
 		pricingNotes: "$0.10/s on OpenRouter (flat).",
 		fallbackEstimateUsdPerSecond: 0.1,
 		fallbackEstimateUsdPerSecondWithAudio: 0.1,
@@ -309,7 +336,10 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 		supportsSeed: true,
 		supportsNegativePrompt: false,
 		passthroughParams: ["contentModeration"],
-		maxPromptChars: 4000,
+		// Runway API spec: promptText maxLength 1,000 characters (Gen-4.5).
+		// https://docs.dev.runwayml.com/ (text-to-video / image-to-video API
+		// reference) · https://help.runwayml.com/hc/en-us/articles/37327109429011
+		maxPromptChars: 1000,
 		pricingNotes: "$0.12/s on OpenRouter (720p).",
 		fallbackEstimateUsdPerSecond: 0.12,
 	},
