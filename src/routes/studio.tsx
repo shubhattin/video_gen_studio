@@ -71,7 +71,7 @@ function ModelStudioPage() {
 			{!selectedRunId ? (
 				<div className="rounded-2xl border border-border/80 bg-card p-4 sm:p-6">
 					<NewRunSetup
-							onCreated={(id) => setSelectedRunId(id as Id<"modelStudioRuns">)}
+						onCreated={(id) => setSelectedRunId(id as Id<"modelStudioRuns">)}
 					/>
 				</div>
 			) : run === undefined ? (

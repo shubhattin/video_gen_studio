@@ -351,7 +351,7 @@ export function ShlokaPlanPreview({
 							disabled={disabled}
 							saving={savingScenes}
 							ariaLabel="Edit video plan markdown"
-							editorClassName="min-h-64"
+							editorClassName="min-h-64 border-border shadow-sm"
 							viewClassName="max-h-[min(32rem,60vh)] overflow-y-auto overscroll-contain pr-1"
 							editMode={editMode}
 							onEditModeChange={setEditMode}

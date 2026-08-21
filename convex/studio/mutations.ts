@@ -717,6 +717,14 @@ export const updateModelStudioDraft = mutation({
 			]),
 			updatedAt: Date.now(),
 		});
+
+		if (!run.title && prompt) {
+			await ctx.scheduler.runAfter(
+				1500,
+				internal.studio.actions.generateModelStudioTitleScheduled,
+				{ runId: args.runId },
+			);
+		}
 		return null;
 	},
 });

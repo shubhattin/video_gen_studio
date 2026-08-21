@@ -93,6 +93,9 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 		api.studio.mutations.renameModelStudioRun,
 	);
 	const generateRunTitle = useAction(api.studio.actions.generateRunTitle);
+	const generateModelStudioTitle = useAction(
+		api.studio.actions.generateModelStudioTitle,
+	);
 	const [pendingDeleteId, setPendingDeleteId] = useState<
 		Id<"generationRuns"> | Id<"modelStudioRuns"> | null
 	>(null);
@@ -170,10 +173,23 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 		}
 	};
 
-	const regenerateTitle = async (runId: Id<"generationRuns">) => {
-		setRegeneratingId(runId);
+	const regenerateTitle = async (
+		runId: Id<"generationRuns"> | Id<"modelStudioRuns">,
+		kind: "shloka" | "model-studio",
+	) => {
+		setRegeneratingId(runId as Id<"generationRuns">);
 		try {
-			await generateRunTitle({ runId, force: true });
+			if (kind === "model-studio") {
+				await generateModelStudioTitle({
+					runId: runId as Id<"modelStudioRuns">,
+					force: true,
+				});
+			} else {
+				await generateRunTitle({
+					runId: runId as Id<"generationRuns">,
+					force: true,
+				});
+			}
 		} finally {
 			setRegeneratingId(null);
 		}
@@ -273,24 +289,20 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 											<Pencil />
 											Rename title
 										</DropdownMenuItem>
-										{run.kind === "shloka" ? (
-											<DropdownMenuItem
-												className="gap-2"
-												disabled={regeneratingId === run._id}
-												onClick={() =>
-													void regenerateTitle(run._id as Id<"generationRuns">)
+										<DropdownMenuItem
+											className="gap-2"
+											disabled={regeneratingId === run._id}
+											onClick={() => void regenerateTitle(run._id, run.kind)}
+										>
+											<RefreshCw
+												className={
+													regeneratingId === run._id ? "animate-spin" : ""
 												}
-											>
-												<RefreshCw
-													className={
-														regeneratingId === run._id ? "animate-spin" : ""
-													}
-												/>
-												{regeneratingId === run._id
-													? "Generating…"
-													: "Regenerate title"}
-											</DropdownMenuItem>
-										) : null}
+											/>
+											{regeneratingId === run._id
+												? "Generating…"
+												: "Regenerate title"}
+										</DropdownMenuItem>
 										<DropdownMenuSeparator />
 										<DropdownMenuItem
 											variant="destructive"

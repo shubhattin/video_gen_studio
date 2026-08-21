@@ -169,6 +169,7 @@ function ShlokaStudioPage() {
 		source?: "generated" | "uploaded" | "terminal_frame";
 		revisedImagePrompt?: string;
 		createdAt: number;
+		meta?: { width?: number; height?: number };
 	}>;
 	const rawVideos = (activePlan?.videos ?? []) as Array<{
 		id: string;

@@ -125,6 +125,7 @@ export function ModelStudio({ runId }: ModelStudioProps) {
 		source?: "generated" | "uploaded" | "terminal_frame";
 		revisedImagePrompt?: string;
 		createdAt: number;
+		meta?: { width?: number; height?: number };
 	}>;
 	const rawVideos = (run?.videos ?? []) as Array<{
 		id: string;

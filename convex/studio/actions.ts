@@ -298,9 +298,10 @@ export const planShlokaRun = action({
 		if (!run.plannerPromptSelection) {
 			throw new Error("Select a system prompt template before planning.");
 		}
-		if (!forceArg(args.force) && plan.status === "ready") {
-			return null;
-		}
+		// No idempotency short-circuit here: regeneration is explicitly
+		// confirmed in the UI, so an already-"ready" plan is always overwritten
+		// (image prompt + scenes + lastModelParamsUsed). The action also
+		// re-establishes the "planning" status so progress UI updates.
 
 		await ctx.runMutation(internal.studio.internal.setPlanStatus, {
 			planId: args.planId,
@@ -375,10 +376,6 @@ export const planShlokaRun = action({
 		return null;
 	},
 });
-
-function forceArg(force?: boolean) {
-	return force === true;
-}
 
 // ── Reference image (shloka run) ────────────────────────────────────────
 
@@ -882,7 +879,79 @@ export const generateModelStudioVideo = action({
 	},
 });
 
-// ── Catalog + titles ────────────────────────────────────────────────────
+// ── Model studio titles ─────────────────────────────────────────────────
+
+async function modelStudioTitleGeneration(
+	ctx: ActionCtx,
+	args: { runId: Id<"modelStudioRuns">; force?: boolean },
+): Promise<string> {
+	const run: Doc<"modelStudioRuns"> | null = await ctx.runQuery(
+		internal.studio.queries.getModelStudioRunDoc,
+		{ runId: args.runId },
+	);
+	if (!run) {
+		throw new Error("Run not found.");
+	}
+	if (!args.force && run.title?.trim()) {
+		return run.title;
+	}
+
+	const prompt = (run.prompt as string | undefined)?.trim();
+	const modelId = run.selectedModelId;
+	const modelLabel =
+		modelId && isVideoModelId(modelId)
+			? MODEL_CAPABILITY_PROFILES[modelId as VideoModelId].displayName
+			: null;
+	const fallback = modelLabel ?? "Model Run";
+
+	const context = prompt ? `Video prompt: ${prompt.slice(0, 600)}` : "";
+	if (!context.trim()) {
+		return fallback;
+	}
+
+	try {
+		const result = await generateText({
+			model: getOpenRouterProvider()(TITLE_MODEL_ID),
+			reasoning: "none",
+			instructions:
+				"You write short, clear titles for video-generation runs (under 60 characters). No quotes, emoji, hashtags, or trailing punctuation.",
+			prompt: `Write a short title for this run.\n\n${context}`,
+		});
+		const title =
+			result.text.replace(/^["'`\s]+|["'`\s]+$/g, "").trim().slice(0, 90) ||
+			fallback;
+		await ctx.runMutation(internal.studio.internal.setModelStudioTitle, {
+			runId: args.runId,
+			title,
+		});
+		return title;
+	} catch {
+		return fallback;
+	}
+}
+
+export const generateModelStudioTitle = action({
+	args: {
+		runId: v.id("modelStudioRuns"),
+		force: v.optional(v.boolean()),
+	},
+	returns: v.string(),
+	handler: async (ctx, args): Promise<string> => {
+		await requireAdmin(ctx);
+		return await modelStudioTitleGeneration(ctx, args);
+	},
+});
+
+export const generateModelStudioTitleScheduled = internalAction({
+	args: {
+		runId: v.id("modelStudioRuns"),
+		force: v.optional(v.boolean()),
+	},
+	returns: v.string(),
+	handler: async (ctx, args): Promise<string> => {
+		return await modelStudioTitleGeneration(ctx, args);
+	},
+});
 
 export const refreshModelCatalog = action({
 	args: {},

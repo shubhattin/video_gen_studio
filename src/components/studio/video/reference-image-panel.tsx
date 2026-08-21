@@ -1,7 +1,7 @@
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { useQuery } from "convex/react";
-import { Download, Images, Info, Loader2, Trash2, Upload } from "lucide-react";
+import { Download, Images, Info, Loader2, Upload, X } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
@@ -42,6 +42,10 @@ export type ReferenceImageItem = {
 	source?: "generated" | "uploaded" | "terminal_frame";
 	revisedImagePrompt?: string;
 	createdAt: number;
+	meta?: {
+		width?: number;
+		height?: number;
+	};
 };
 
 type ReferenceImagePanelProps = {
@@ -226,16 +230,17 @@ function ReferenceImageCard({
 	return (
 		<article
 			className={cn(
-				"overflow-hidden rounded-2xl border bg-card",
+				"overflow-hidden rounded-xl border bg-card",
 				isFirst || isLast || isExtra ? "border-primary/50" : "border-border/70",
 			)}
 		>
-			<div className="relative bg-muted/30">
+			<div className="flex h-36 items-center justify-center overflow-hidden bg-muted/30">
 				{image.url ? (
 					<img
 						src={image.url}
 						alt="Reference still"
-						className="mx-auto max-h-72 w-full object-contain"
+						className="min-h-0 min-w-0 max-h-full max-w-full object-contain"
+						loading="lazy"
 					/>
 				) : (
 					<div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
@@ -334,7 +339,7 @@ function ReferenceImageCard({
 						aria-label="Remove from this run"
 						onClick={() => onRemoveImage(image.id)}
 					>
-						<Trash2 />
+						<X />
 					</Button>
 				</div>
 
@@ -620,7 +625,7 @@ export function ReferenceImagePanel({
 			</div>
 
 			{images.length > 0 ? (
-				<div className="grid gap-4 sm:grid-cols-2">
+				<div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
 					{images.map((image) => (
 						<ReferenceImageCard
 							key={image.id}
@@ -668,10 +673,6 @@ export function ReferenceImagePanel({
 								}) => {
 									const withUrl = withSignedUrl(item, galleryUrls);
 									const attached = attachedIds.has(item.id);
-									const width = item.meta?.width;
-									const height = item.meta?.height;
-									const ratio =
-										width && height ? `${width} / ${height}` : undefined;
 									return (
 										<button
 											key={item.id}
@@ -695,22 +696,12 @@ export function ReferenceImagePanel({
 											}}
 										>
 											{withUrl.url ? (
-												<div
-													className="flex w-full items-center justify-center overflow-hidden bg-muted/40"
-													style={
-														ratio
-															? {
-																	aspectRatio: ratio,
-																	maxHeight: "12rem",
-																	height: "auto",
-																}
-															: { height: "10rem" }
-													}
-												>
+												<div className="flex h-32 w-full items-center justify-center overflow-hidden bg-muted/40">
 													<img
 														src={withUrl.url}
 														alt=""
-														className="h-full w-full object-contain"
+														className="min-h-0 min-w-0 max-h-full max-w-full object-contain"
+														loading="lazy"
 													/>
 												</div>
 											) : (

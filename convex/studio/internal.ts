@@ -289,6 +289,29 @@ export const setModelStudioStatus = internalMutation({
 	},
 });
 
+export const setModelStudioTitle = internalMutation({
+	args: {
+		runId: v.id("modelStudioRuns"),
+		title: v.string(),
+	},
+	returns: v.null(),
+	handler: async (ctx, args) => {
+		const run = await ctx.db.get(args.runId);
+		if (!run) {
+			throw new Error("Run not found.");
+		}
+		const trimmed = args.title.trim();
+		if (!trimmed) {
+			return null;
+		}
+		await ctx.db.patch(args.runId, {
+			title: trimmed.slice(0, 90),
+			updatedAt: Date.now(),
+		});
+		return null;
+	},
+});
+
 export const appendModelStudioVideoOutput = internalMutation({
 	args: {
 		runId: v.id("modelStudioRuns"),
