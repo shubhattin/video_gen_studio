@@ -574,10 +574,11 @@ export const generateVideoForRun = action({
 					: []),
 			];
 
-			const videoId = await ctx.runMutation(
+			await ctx.runMutation(
 				internal.studio.internal.insertGalleryVideo,
 				{
 					runId: args.runId,
+					planId: args.planId,
 					video: {
 						objectKey,
 						meta: {
@@ -601,11 +602,6 @@ export const generateVideoForRun = action({
 					warnings: genWarnings.length > 0 ? genWarnings : undefined,
 				},
 			);
-			await ctx.runMutation(internal.studio.internal.appendPlanVideoOutput, {
-				planId: args.planId,
-				videoId,
-				warnings: genWarnings.length > 0 ? genWarnings : undefined,
-			});
 		} catch (error) {
 			const message =
 				error instanceof Error ? error.message : "Video generation failed.";

@@ -405,12 +405,67 @@ export const insertGalleryImage = internalMutation({
 export const insertGalleryVideo = internalMutation({
 	args: {
 		runId: v.optional(v.id("generationRuns")),
+		planId: v.optional(v.id("shlokaPlans")),
 		modelStudioRunId: v.optional(v.id("modelStudioRuns")),
 		video: galleryVideoInsertValidator,
 		warnings: v.optional(v.array(v.string())),
 	},
 	returns: v.id("galleryVideos"),
 	handler: async (ctx, args) => {
+		// Idempotency: retried action (OpenRouter poll) must not create duplicate gallery row.
+		if (args.video.openRouterJobId) {
+			const existing = await ctx.db
+				.query("galleryVideos")
+				.filter((q) =>
+					q.eq(q.field("openRouterJobId"), args.video.openRouterJobId),
+				)
+				.first();
+			if (existing) {
+				// Ensure the link exists if this is a retry that previously inserted but failed to link.
+				if (args.planId) {
+					const plan = await ctx.db.get(args.planId);
+					if (
+						plan &&
+						!(plan.videoOutputIds ?? []).includes(existing._id)
+					) {
+						const now = Date.now();
+						await ctx.db.patch(plan._id, {
+							videoOutputIds: uniqueIds([
+								...(plan.videoOutputIds ?? []),
+								existing._id,
+							]),
+							warnings: args.warnings,
+							updatedAt: now,
+						});
+						const run = await ctx.db.get(plan.runId);
+						if (run) {
+							await ctx.db.patch(run._id, {
+								status: "completed",
+								lastError: undefined,
+								updatedAt: now,
+							});
+						}
+					}
+				}
+				if (args.modelStudioRunId) {
+					const run = await ctx.db.get(args.modelStudioRunId);
+					if (run && !(run.videoOutputIds ?? []).includes(existing._id)) {
+						await ctx.db.patch(run._id, {
+							videoOutputIds: uniqueIds([
+								...(run.videoOutputIds ?? []),
+								existing._id,
+							]),
+							status: "completed",
+							warnings: args.warnings,
+							lastError: undefined,
+							updatedAt: Date.now(),
+						});
+					}
+				}
+				return existing._id;
+			}
+		}
+
 		const videoId = await ctx.db.insert("galleryVideos", {
 			objectKey: args.video.objectKey,
 			meta: args.video.meta,
@@ -423,16 +478,45 @@ export const insertGalleryVideo = internalMutation({
 			sourceRunId: args.runId,
 			createdAt: args.video.createdAt,
 		});
-		if (args.modelStudioRunId !== undefined) {
-			await ctx.scheduler.runAfter(
-				0,
-				internal.studio.internal.appendModelStudioVideoOutput,
-				{
-					runId: args.modelStudioRunId,
+
+		// Atomic link: gallery row + plan/run list in same transaction (no scheduler window).
+		if (args.planId) {
+			const plan = await ctx.db.get(args.planId);
+			if (!plan) {
+				throw new Error("Plan not found for video link.");
+			}
+			const now = Date.now();
+			await ctx.db.patch(plan._id, {
+				videoOutputIds: uniqueIds([
+					...(plan.videoOutputIds ?? []),
 					videoId,
-					warnings: args.warnings,
-				},
-			);
+				]),
+				warnings: args.warnings,
+				updatedAt: now,
+			});
+			const run = await ctx.db.get(plan.runId);
+			if (run) {
+				await ctx.db.patch(run._id, {
+					status: "completed",
+					lastError: undefined,
+					updatedAt: now,
+				});
+			}
+		} else if (args.modelStudioRunId !== undefined) {
+			const run = await ctx.db.get(args.modelStudioRunId);
+			if (!run) {
+				throw new Error("Model studio run not found for video link.");
+			}
+			await ctx.db.patch(run._id, {
+				videoOutputIds: uniqueIds([
+					...(run.videoOutputIds ?? []),
+					videoId,
+				]),
+				status: "completed",
+				warnings: args.warnings,
+				lastError: undefined,
+				updatedAt: Date.now(),
+			});
 		}
 		return videoId;
 	},

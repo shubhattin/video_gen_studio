@@ -150,11 +150,7 @@ export function PlanTabs({
 			>
 				<TabsList>
 					{plans.map((plan) => (
-						<TabsTrigger
-							key={plan._id}
-							value={plan._id}
-							disabled={disabled}
-						>
+						<TabsTrigger key={plan._id} value={plan._id} disabled={disabled}>
 							<TabLabel label={planLabel(plan)} />
 						</TabsTrigger>
 					))}

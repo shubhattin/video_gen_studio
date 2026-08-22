@@ -385,6 +385,7 @@ function ShlokaStudioPage() {
 		if (!runId || !activePlanId) return;
 		setBusyStage("planning");
 		try {
+			await planAutosave.flush();
 			await ensureRun();
 			await planRun({ runId, planId: activePlanId });
 			notifyStudioSuccess("Plan ready", "Image and video prompts updated.");
