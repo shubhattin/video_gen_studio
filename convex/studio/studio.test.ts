@@ -746,19 +746,16 @@ describe("studio authorization", () => {
 
 		await expect(
 			backend.action(api.studio.r2.getReadUrls, {
-				runId,
 				objectKeys: [objectKey],
 			}),
 		).rejects.toThrow("Not authenticated.");
 		await expect(
 			member.action(api.studio.r2.getReadUrls, {
-				runId,
 				objectKeys: [objectKey],
 			}),
 		).rejects.toThrow("Admin access required.");
 
 		const urls = await admin.action(api.studio.r2.getReadUrls, {
-			runId,
 			objectKeys: [objectKey],
 		});
 		expect(urls[objectKey]).toBe(`https://r2.example/get/${objectKey}`);

@@ -94,7 +94,7 @@ function buildPlannerPrompt(args: {
 	}
 	if (args.maxPromptChars != null) {
 		meta.push(
-			`- Provider video prompt character limit: ${args.maxPromptChars} (videoScenes will be flattened into one text prompt; stay concise and pricise).`,
+			`- Provider video prompt character limit: ${args.maxPromptChars} (videoScenes will be flattened into one text prompt; stay concise and pricise but details that would enrich video scene should not be cut down either).`,
 		);
 	}
 	meta.push(`- Generate Audio Plans: ${args.generateAudio ? "Yes" : "No"}`);
@@ -221,22 +221,6 @@ async function resolveProviderVideoPrompt(
 	return { prompt: summarized, usedSummary: true };
 }
 
-/** Prepended at image gen time so gpt-image-2 / Seedance refs stay illustrated. */
-const IMAGE_STYLE_SAFETY_PREFIX =
-	"Stylized Indian miniature painting and temple-mural illustration, painted characters only, warm temple gold and marigold accents, not a photograph of a real person, no photoreal skin, no celebrity likeness.";
-
-function withImageStyleSafety(prompt: string) {
-	const trimmed = prompt.trim();
-	if (
-		/stylized indian miniature|temple[- ]mural|not a (photo|photograph) of a real person/i.test(
-			trimmed,
-		)
-	) {
-		return trimmed;
-	}
-	return `${IMAGE_STYLE_SAFETY_PREFIX} ${trimmed}`;
-}
-
 function warningMessages(
 	warnings: Array<{ message?: string; feature?: string; details?: string }>,
 ) {
@@ -331,12 +315,6 @@ export const planShlokaRun = action({
 				reasoning: "medium",
 				instructions: buildShlokaPlannerSystemPrompt({
 					stored: resolvedPrompt.content,
-					singleClip: {
-						durationSeconds: budget.durationSeconds,
-						maxPromptChars: budget.maxPromptChars,
-						aspectRatio: budget.aspectRatio,
-						generateAudio,
-					},
 				}),
 				prompt: buildPlannerPrompt({
 					shlokaText: run.shlokaText,
@@ -422,7 +400,7 @@ export const generateReferenceImage = action({
 			const openai = getOpenAIProvider();
 			const result = await generateImage({
 				model: openai.image("gpt-image-2"),
-				prompt: withImageStyleSafety(imagePrompt),
+				prompt: imagePrompt.trim(),
 				size: imageConfig.size as ImageConfig["size"],
 				providerOptions: {
 					openai: {
@@ -708,7 +686,7 @@ export const generateModelStudioImage = action({
 			const openai = getOpenAIProvider();
 			const result = await generateImage({
 				model: openai.image("gpt-image-2"),
-				prompt: withImageStyleSafety(imagePrompt),
+				prompt: imagePrompt.trim(),
 				size: imageConfig.size as ImageConfig["size"],
 				providerOptions: {
 					openai: {

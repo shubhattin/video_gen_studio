@@ -46,34 +46,21 @@ Rules:
 - Prefer Seedance-style production language: Subject + Action + Scene + Style + Camera + Audio in compact sentences.
 - Drop redundancy and filler. Keep chronological beats.
 - The result MUST be strictly shorter than the input and MUST be at or under the character limit given in the user message.
-- Never invent new scenes, deities, scripture, or photoreal people.`;
+- Never invent new scenes, deities, scripture, or photoreal people.
+- **Never** sacrifice key details or aesthetical additions to meet the character limit.
+- Character limit is important but detailing should not be compromised either.
+`;
 
-export function singleClipPlannerInstructions(args?: {
-	durationSeconds?: number;
-	maxPromptChars?: number;
-	aspectRatio?: string;
-	generateAudio?: boolean;
-}) {
-	const durationHint =
-		args?.durationSeconds != null
-			? `Target video length is about ${args.durationSeconds} seconds (exact value is also in the user prompt).`
-			: "Match scene count to the target video length given in the user prompt.";
-	const charHint =
-		args?.maxPromptChars != null
-			? `The videoScenes JSON will later be flattened into a single provider text prompt with a hard limit of about ${args.maxPromptChars} characters.`
-			: "The videoScenes JSON will later be flattened into a single provider text prompt with a hard character limit (see user prompt).";
-	const ratioHint =
-		args?.aspectRatio != null
-			? `The video will be rendered at ${args.aspectRatio}; compose every beat's framing, subject placement, and camera moves for that frame.`
-			: "Respect the aspect ratio given in the user prompt when composing scenes.";
-	const audioHint = args?.generateAudio
-		? "- `audio`: sound / music / SFX direction for the beat (optional; use \"\" if a beat has none). Audio generation is ENABLED for this plan — write short, concrete audio cues."
-		: "- `audio`: DO NOT include this field at all. Audio generation is DISABLED for this plan (the user prompt says Generate Audio Plans: No) — omit it from every beat.";
-
-	return `## Output shape
+export const SINGLE_CLIP_PLANNER_INSTRUCTIONS = `## Output shape
 Always return \`kind: "single-clip"\` with:
 - \`imagePrompt\`: one portrait-friendly reference still prompt. No character limit applies here — the reference-image generator (gpt-image-2) accepts long prompts, so write it as richly as needed;
 - \`videoScenes\`: ordered cinematic beats using the Seedance six-part fields.
+
+## Image Prompt Generation Instructions
+- Follow the aesthetic instructions as above in ths system or as requested by the user down below.
+- Do not mess up geneders of characters or dieties.
+- If no specifc image instructions provided then follow : Follow a warm aesthetic indian tone fitting of the shloka and other text given.
+- A general rule would to have aesthetics, symmetry and proper which makes the image look good. This is genral guideline which should be good to have.
 
 ## videoScenes schema (per beat)
 - \`sceneNumber\`: 1-based consecutive
@@ -83,25 +70,31 @@ Always return \`kind: "single-clip"\` with:
 - \`scene\`: environment / setting (optional; use "" if unused)
 - \`style\`: visual style, lighting, palette (optional; use "" if unused)
 - \`camera\`: camera move / cut (optional; use "" if unused)
-${audioHint}
+- \`audio\`: sound / music / SFX direction. ONLY include this field when the user prompt explicitly says "Generate Audio Plans: Yes"; otherwise omit it entirely from every beat.
 
 Keep each field concise (one tight sentence or less). Do not pad optional fields.
 
-## Scene count vs duration (A general rule of thumb)
-${durationHint}
+## Scene count vs duration
+A general rule of thumb for the target duration given in the user prompt:
 - 4–6s → 1–2 beats
 - 7–10s → 2–3 beats
 - 11–15s → 3–4 beats
 - 16–24s → 4–5 beats
 - 25–30s → 5–6 beats
-Prefer fewer denser beats over many thin ones. Absolute maximum: 12.
+Prefer fewer denser beats over many thin ones. Absolute maximum: 12. Match the exact target duration provided in the user prompt.
 
 ## Aspect ratio
-${ratioHint}
+Respect the aspect ratio given in the user prompt when planning and composing scenes.
 
 ## Provider text budget
-${charHint}
-Write fields so the flattened prompt stays useful within that budget. Prefer density over long prose. Never request text overlays, logos, watermarks, or photoreal / live-action people.`;
+The videoScenes JSON will later be flattened into a single provider text prompt with the hard character limit given in the user prompt.
+Write fields so the flattened prompt stays useful within that budget. Prefer density over long prose. Never request text overlays, logos, watermarks, real live-action people or public figures.`;
+
+/** @deprecated Use SINGLE_CLIP_PLANNER_INSTRUCTIONS — kept for backwards compat, now constant. */
+export function singleClipPlannerInstructions(
+	_args?: unknown,
+): string {
+	return SINGLE_CLIP_PLANNER_INSTRUCTIONS;
 }
 
 function isBuiltInPlannerSystemPrompt(value: string) {
@@ -137,18 +130,12 @@ export function resolvePlannerSystemPrompt(
 	);
 }
 
-/** Full system string for Shloka planning: creative base + output-shape appendix. */
+/** Full system string for Shloka planning: creative base + output-shape appendix. Constant for prompt caching. */
 export function buildShlokaPlannerSystemPrompt(args: {
 	stored?: string | null;
-	/** Single-clip duration + provider char budget + aspect ratio + audio flag. */
-	singleClip?: {
-		durationSeconds: number;
-		maxPromptChars: number;
-		aspectRatio?: string;
-		generateAudio?: boolean;
-	} | null;
+	/** @deprecated Ignored — kept for backwards compat. System prompt is now constant for caching. */
+	singleClip?: unknown;
 }) {
 	const base = resolvePlannerSystemPrompt(args.stored);
-	const appendix = singleClipPlannerInstructions(args.singleClip ?? undefined);
-	return `${base}\n\n${appendix}`;
+	return `${base}\n\n${SINGLE_CLIP_PLANNER_INSTRUCTIONS}`;
 }
