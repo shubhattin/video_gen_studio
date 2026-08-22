@@ -1,6 +1,14 @@
 import { api } from "@convex/_generated/api";
 import { useQuery } from "convex/react";
-import { Download, Images, Info, Loader2, Upload, X } from "lucide-react";
+import {
+	Download,
+	Images,
+	Info,
+	Loader2,
+	Maximize2,
+	Upload,
+	X,
+} from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
@@ -199,6 +207,7 @@ function ReferenceImageCard({
 	onRemoveImage: (id: string) => void;
 }) {
 	const [downloading, setDownloading] = useState(false);
+	const [previewOpen, setPreviewOpen] = useState(false);
 	const imageWidth = image.meta?.width;
 	const imageHeight = image.meta?.height;
 	const ratio =
@@ -241,7 +250,13 @@ function ReferenceImageCard({
 				isFirst || isLast || isExtra ? "border-primary/50" : "border-border/70",
 			)}
 		>
-			<div className="flex justify-center overflow-hidden bg-muted/30">
+			<button
+				type="button"
+				disabled={!image.url}
+				onClick={() => image.url && setPreviewOpen(true)}
+				className="flex w-full justify-center overflow-hidden bg-muted/30 not-disabled:cursor-zoom-in disabled:cursor-default"
+				aria-label={image.url ? "View full size" : undefined}
+			>
 				{image.url ? (
 					<img
 						src={image.url}
@@ -255,11 +270,11 @@ function ReferenceImageCard({
 						loading="lazy"
 					/>
 				) : (
-					<div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
+					<div className="flex h-40 w-full items-center justify-center text-sm text-muted-foreground">
 						Image unavailable
 					</div>
 				)}
-			</div>
+			</button>
 
 			<div className="flex flex-col gap-2.5 p-3">
 				<div className="flex items-start gap-2">
@@ -340,6 +355,17 @@ function ReferenceImageCard({
 						type="button"
 						variant="ghost"
 						size="icon-sm"
+						disabled={!image.url}
+						aria-label="View full size"
+						onClick={() => setPreviewOpen(true)}
+					>
+						<Maximize2 />
+					</Button>
+
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon-sm"
 						disabled={busy || downloading || !image.url}
 						aria-label="Download image"
 						onClick={() => void onDownload()}
@@ -383,6 +409,28 @@ function ReferenceImageCard({
 					/>
 				</div>
 			</div>
+
+			<Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+				<DialogContent className="max-w-4xl bg-black p-0 overflow-hidden border-black sm:max-w-5xl">
+					<DialogHeader className="sr-only">
+						<DialogTitle>Full size image</DialogTitle>
+						<DialogDescription>
+							Full resolution preview of the reference image.
+						</DialogDescription>
+					</DialogHeader>
+					{image.url ? (
+						<img
+							src={image.url}
+							alt="Full size reference"
+							className="max-h-[85vh] w-full object-contain"
+						/>
+					) : (
+						<div className="flex h-64 items-center justify-center text-sm text-white">
+							Image unavailable
+						</div>
+					)}
+				</DialogContent>
+			</Dialog>
 		</article>
 	);
 }

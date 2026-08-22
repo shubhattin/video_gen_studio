@@ -1,7 +1,7 @@
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { useMutation, useQuery } from "convex/react";
-import { Download, Info, Loader2, Trash2 } from "lucide-react";
+import { Download, Info, Loader2, Maximize2, Trash2 } from "lucide-react";
 import { useState } from "react";
 import {
 	formatBytes,
@@ -19,6 +19,13 @@ import {
 } from "#/components/ui/alert-dialog";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogHeader,
+	DialogTitle,
+} from "#/components/ui/dialog";
 import {
 	Popover,
 	PopoverContent,
@@ -103,6 +110,7 @@ function GalleryImageCard({
 }) {
 	const [downloading, setDownloading] = useState(false);
 	const [detailsOpen, setDetailsOpen] = useState(false);
+	const [previewOpen, setPreviewOpen] = useState(false);
 	const references = useQuery(
 		api.studio.queries.listRunsReferencingImage,
 		detailsOpen ? { imageId: image.id as Id<"galleryImages"> } : "skip",
@@ -125,13 +133,17 @@ function GalleryImageCard({
 
 	return (
 		<article className="mb-4 break-inside-avoid overflow-hidden rounded-2xl border border-border/70 bg-card">
-			<div
-				className="relative flex w-full items-center justify-center overflow-hidden bg-muted/30"
+			<button
+				type="button"
+				disabled={!image.url}
+				onClick={() => image.url && setPreviewOpen(true)}
+				className="relative flex w-full items-center justify-center overflow-hidden bg-muted/30 not-disabled:cursor-zoom-in disabled:cursor-default"
 				style={
 					ratio
 						? { aspectRatio: ratio, maxHeight: "24rem" }
 						: { height: "14rem" }
 				}
+				aria-label={image.url ? "View full size" : undefined}
 			>
 				{image.url ? (
 					<img
@@ -142,7 +154,7 @@ function GalleryImageCard({
 				) : (
 					<div className="text-sm text-muted-foreground">Image unavailable</div>
 				)}
-			</div>
+			</button>
 
 			<div className="flex items-center gap-2 px-3 py-2.5">
 				<div className="flex min-w-0 flex-1 flex-col gap-1">
@@ -239,6 +251,17 @@ function GalleryImageCard({
 					</PopoverContent>
 				</Popover>
 
+				<Button
+					type="button"
+					variant="ghost"
+					size="icon-sm"
+					disabled={!image.url}
+					aria-label="View full size"
+					onClick={() => setPreviewOpen(true)}
+				>
+					<Maximize2 />
+				</Button>
+
 				{image.url ? (
 					<Button
 						type="button"
@@ -263,6 +286,28 @@ function GalleryImageCard({
 					<Trash2 />
 				</Button>
 			</div>
+
+			<Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+				<DialogContent className="max-w-4xl bg-black p-0 overflow-hidden border-black sm:max-w-5xl">
+					<DialogHeader className="sr-only">
+						<DialogTitle>Full size image</DialogTitle>
+						<DialogDescription>
+							Full resolution preview.
+						</DialogDescription>
+					</DialogHeader>
+					{image.url ? (
+						<img
+							src={image.url}
+							alt=""
+							className="max-h-[85vh] w-full object-contain"
+						/>
+					) : (
+						<div className="flex h-64 items-center justify-center text-sm text-white">
+							Image unavailable
+						</div>
+					)}
+				</DialogContent>
+			</Dialog>
 		</article>
 	);
 }

@@ -5,6 +5,7 @@ import { useAction, useConvexAuth, useMutation, useQuery } from "convex/react";
 import { formatDistanceToNow } from "date-fns";
 import {
 	Clapperboard,
+	Info,
 	MoreHorizontal,
 	Pencil,
 	RefreshCw,
@@ -115,6 +116,7 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 	const [renameTarget, setRenameTarget] = useState<HistoryRun | null>(null);
 	const [renameValue, setRenameValue] = useState("");
 	const [renaming, setRenaming] = useState(false);
+	const [infoTarget, setInfoTarget] = useState<HistoryRun | null>(null);
 	const [regeneratingId, setRegeneratingId] =
 		useState<Id<"generationRuns"> | null>(null);
 
@@ -305,6 +307,13 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 										</DropdownMenuItem>
 										<DropdownMenuSeparator />
 										<DropdownMenuItem
+											className="gap-2"
+											onClick={() => setInfoTarget(run)}
+										>
+											<Info />
+											View details
+										</DropdownMenuItem>
+										<DropdownMenuItem
 											variant="destructive"
 											className="gap-2"
 											onClick={() => {
@@ -455,6 +464,71 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 							onClick={() => void confirmRename()}
 						>
 							{renaming ? "Saving…" : "Save"}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+
+			<Dialog
+				open={infoTarget != null}
+				onOpenChange={(open) => {
+					if (!open) {
+						setInfoTarget(null);
+					}
+				}}
+			>
+				<DialogContent className="sm:max-w-md">
+					<DialogHeader>
+						<DialogTitle>Run details</DialogTitle>
+						<DialogDescription>
+							Full ID and metadata for debugging.
+						</DialogDescription>
+					</DialogHeader>
+					{infoTarget ? (
+						<div className="flex flex-col gap-3 text-sm">
+							<div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-2 text-xs">
+								<span className="text-muted-foreground">id</span>
+								<span className="break-all font-mono">{infoTarget._id}</span>
+							</div>
+							<div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-2 text-xs">
+								<span className="text-muted-foreground">Kind</span>
+								<span className="capitalize">
+									{infoTarget.kind === "shloka" ? "Shloka" : "Model"}
+								</span>
+							</div>
+							<div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-2 text-xs">
+								<span className="text-muted-foreground">Status</span>
+								<span className="capitalize">
+									{infoTarget.status.replaceAll("_", " ")}
+								</span>
+							</div>
+							{infoTarget.title ? (
+								<div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-2 text-xs">
+									<span className="text-muted-foreground">Title</span>
+									<span className="break-words">{infoTarget.title}</span>
+								</div>
+							) : null}
+							{infoTarget.selectedModelId ? (
+								<div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-2 text-xs">
+									<span className="text-muted-foreground">Model</span>
+									<span className="break-all font-mono">
+										{infoTarget.selectedModelId}
+									</span>
+								</div>
+							) : null}
+							<div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-2 text-xs">
+								<span className="text-muted-foreground">Created</span>
+								<span>{new Date(infoTarget.createdAt).toLocaleString()}</span>
+							</div>
+							<div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-2 text-xs">
+								<span className="text-muted-foreground">Videos</span>
+								<span>{infoTarget.videoCount ?? 0}</span>
+							</div>
+						</div>
+					) : null}
+					<DialogFooter>
+						<Button variant="outline" onClick={() => setInfoTarget(null)}>
+							Close
 						</Button>
 					</DialogFooter>
 				</DialogContent>
