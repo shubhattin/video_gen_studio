@@ -1,20 +1,18 @@
-import type { Id } from "@convex/_generated/dataModel";
 import { useQueries } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { type ViewUrlRecord, viewUrlQueryOptions } from "#/lib/view-url-query";
 
 /**
- * Resolve short-lived R2 read URLs for object keys belonging to a run.
+ * Resolve short-lived R2 read URLs for gallery object keys.
  *
  * Backed by TanStack Query with per-key cache entries
- * (["view_url", runId, objectKey]) and a TTL-matched staleTime, so URLs are
+ * (["view_url", objectKey]) and a TTL-matched staleTime, so URLs are
  * reused across navigation/tabs instead of being refetched on every mount.
  * Per-key requests made in the same tick are coalesced into a single
  * getReadUrls action call. URLs are kept in client cache only — never
  * persisted.
  */
 export function useSignedMediaUrls(
-	runId: Id<"generationRuns"> | null | undefined,
 	objectKeys: Array<string | undefined | null>,
 ): ViewUrlRecord {
 	// Callers typically rebuild the array inline; memoize off its joined
@@ -28,8 +26,8 @@ export function useSignedMediaUrls(
 		[signature],
 	);
 
-	const combined = useQueries({
-		queries: keys.map((objectKey) => viewUrlQueryOptions(runId, objectKey)),
+	return useQueries({
+		queries: keys.map((objectKey) => viewUrlQueryOptions(objectKey)),
 		combine: (results) => {
 			const record: ViewUrlRecord = {};
 			for (const [index, objectKey] of keys.entries()) {
@@ -38,8 +36,6 @@ export function useSignedMediaUrls(
 			return record;
 		},
 	});
-
-	return combined;
 }
 
 export function withSignedUrl<T extends { objectKey?: string }>(

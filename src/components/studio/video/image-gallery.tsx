@@ -295,7 +295,7 @@ export function ImageGallery() {
 	const objectKeys = (images ?? []).map(
 		(image: { objectKey?: string }) => image.objectKey,
 	);
-	const urlsByKey = useSignedMediaUrls(null, objectKeys);
+	const urlsByKey = useSignedMediaUrls(objectKeys);
 	const withUrls = (images ?? []).map((image: GalleryImage) =>
 		withSignedUrl(image, urlsByKey),
 	);

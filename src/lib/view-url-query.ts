@@ -1,5 +1,4 @@
 import { api } from "@convex/_generated/api";
-import type { Id } from "@convex/_generated/dataModel";
 import { queryOptions } from "@tanstack/react-query";
 import { convex } from "#/lib/convex";
 
@@ -10,44 +9,41 @@ import { convex } from "#/lib/convex";
  */
 export const VIEW_URL_STALE_TIME_MS = 15 * 60 * 1000 - 4_000;
 
-/** Query key for one object's signed read URL: ["view_url", runId, objectKey]. */
-export function viewUrlQueryKey(
-	runId: Id<"generationRuns"> | null | undefined,
-	objectKey: string,
-) {
-	return ["view_url", runId ?? null, objectKey] as const;
+/**
+ * Query key for one object's signed read URL: ["view_url", objectKey].
+ * The object key is globally unique (gallery images/videos are their own
+ * tables), so a single canonical key is shared across every surface that
+ * references the same object — plan runs, model studio, and the galleries.
+ */
+export function viewUrlQueryKey(objectKey: string) {
+	return ["view_url", objectKey] as const;
 }
 
 // ── Request coalescing ──────────────────────────────────────────────────
 
 type PendingBatch = {
-	/** Original (possibly null) runId for the getReadUrls call. */
-	runId: Id<"generationRuns"> | null | undefined;
 	/** Object keys queued in this tick → resolvers waiting for their URL. */
 	keys: Map<string, Array<(url: string | null) => void>>;
 };
 
 /**
  * getReadUrls takes an array of keys and returns a record, but every query
- * caches a single object ("view_url", runId, key). To avoid firing one action
- * call per key, all keys requested within the same tick are coalesced into a
+ * caches a single object ("view_url", key). To avoid firing one action call
+ * per key, all keys requested within the same tick are coalesced into a
  * single getReadUrls call, then fanned back out to their per-key promises.
  */
-const pendingBatches = new Map<string, PendingBatch>();
+let pendingBatch: PendingBatch | undefined;
+let flushTimer: ReturnType<typeof setTimeout> | undefined;
 
-function batchCacheKey(runId: Id<"generationRuns"> | null | undefined) {
-	return runId ?? "";
-}
-
-function flushBatch(runIdKey: string): void {
-	const batch = pendingBatches.get(runIdKey);
-	pendingBatches.delete(runIdKey);
+function flushBatch(): void {
+	const batch = pendingBatch;
+	pendingBatch = undefined;
+	flushTimer = undefined;
 	if (!batch || batch.keys.size === 0) {
 		return;
 	}
 	void convex
 		.action(api.studio.r2.getReadUrls, {
-			runId: batch.runId ?? undefined,
 			objectKeys: [...batch.keys.keys()],
 		})
 		.then((urlsByKey) => {
@@ -67,19 +63,16 @@ function flushBatch(runIdKey: string): void {
 		});
 }
 
-async function fetchViewUrl(
-	runId: Id<"generationRuns"> | null | undefined,
-	objectKey: string,
-): Promise<string | null> {
+async function fetchViewUrl(objectKey: string): Promise<string | null> {
 	if (!objectKey) {
 		return null;
 	}
-	const runIdKey = batchCacheKey(runId);
-	let batch = pendingBatches.get(runIdKey);
-	if (!batch) {
-		batch = { runId, keys: new Map() };
-		pendingBatches.set(runIdKey, batch);
-		setTimeout(() => flushBatch(runIdKey), 0);
+	if (!pendingBatch) {
+		pendingBatch = { keys: new Map() };
+	}
+	const batch = pendingBatch;
+	if (flushTimer === undefined) {
+		flushTimer = setTimeout(() => flushBatch(), 0);
 	}
 	return new Promise<string | null>((resolve) => {
 		const resolvers = batch.keys.get(objectKey);
@@ -98,13 +91,10 @@ async function fetchViewUrl(
  * key with a TTL-matched staleTime, so navigating between tabs/pages never
  * refetches URLs that are still fresh.
  */
-export function viewUrlQueryOptions(
-	runId: Id<"generationRuns"> | null | undefined,
-	objectKey: string,
-) {
+export function viewUrlQueryOptions(objectKey: string) {
 	return queryOptions({
-		queryKey: viewUrlQueryKey(runId, objectKey),
-		queryFn: () => fetchViewUrl(runId, objectKey),
+		queryKey: viewUrlQueryKey(objectKey),
+		queryFn: () => fetchViewUrl(objectKey),
 		staleTime: VIEW_URL_STALE_TIME_MS,
 		retry: false,
 	});

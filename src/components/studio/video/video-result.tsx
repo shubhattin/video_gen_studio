@@ -1,6 +1,7 @@
 import type { Id } from "@convex/_generated/dataModel";
 import { Download, Info, Loader2 } from "lucide-react";
 import { useState } from "react";
+import { MessageResponse } from "#/components/ai-elements/message";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
 import {
@@ -17,6 +18,18 @@ import {
 } from "#/lib/model-catalog";
 import { fetchStudioMedia } from "#/lib/studio-media-proxy";
 import { cn } from "#/lib/utils";
+import {
+	type EditableVideoScene,
+	normalizeVideoScenes,
+	videoScenesToMarkdown,
+} from "#/lib/video-plan-markdown";
+
+/**
+ * Compact markdown style for clip popovers. Headings are forced small so
+ * "### Scene N:" renders as a small bold label — never a giant h1/h2.
+ */
+const clipPromptMarkdownClassName =
+	"text-xs leading-relaxed [&_strong]:font-semibold [&_em]:italic [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em] [&_h1]:mt-2 [&_h1]:mb-1 [&_h1]:font-heading [&_h1]:text-sm [&_h1]:font-semibold [&_h2]:mt-2 [&_h2]:mb-1 [&_h2]:font-heading [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:mt-2 [&_h3]:mb-1 [&_h3]:font-heading [&_h3]:text-xs [&_h3]:font-semibold [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-4 [&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-4 [&_li]:my-0.5 [&_p]:my-1.5 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0";
 
 export type VideoResultItem = {
 	id: string;
@@ -48,6 +61,8 @@ export type VideoResultItem = {
 type VideoResultProps = {
 	runId?: Id<"generationRuns"> | null;
 	videos: VideoResultItem[];
+	/** The plan's scenes (Shloka Studio). When present, shown as markdown in the popover. */
+	scenes?: EditableVideoScene[] | null;
 };
 
 export function extensionForMime(mimeType?: string) {
@@ -137,11 +152,14 @@ function VideoClipCard({
 	video,
 	versionLabel,
 	isLatest,
+	sceneMarkdown,
 }: {
 	runId?: Id<"generationRuns"> | null;
 	video: VideoResultItem;
 	versionLabel: string;
 	isLatest: boolean;
+	/** Markdown for the plan's scenes (JSON→markdown), preferred over the flat prompt. */
+	sceneMarkdown?: string | null;
 }) {
 	const [downloading, setDownloading] = useState(false);
 	const canDownload = Boolean(video.objectKey || video.url);
@@ -258,12 +276,14 @@ function VideoClipCard({
 								mono
 							/>
 						</div>
-						{prompt?.trim() ? (
+						{sceneMarkdown?.trim() || prompt?.trim() ? (
 							<div className="flex flex-col gap-1.5 border-t border-border/70 pt-3">
 								<span className="text-xs text-muted-foreground">Prompt</span>
-								<p className="max-h-28 overflow-y-auto text-xs leading-relaxed text-foreground">
-									{prompt.trim()}
-								</p>
+								<div className="max-h-28 overflow-y-auto text-foreground">
+									<MessageResponse className={clipPromptMarkdownClassName}>
+										{sceneMarkdown?.trim() || prompt?.trim()}
+									</MessageResponse>
+								</div>
 							</div>
 						) : null}
 						{video.warnings?.length ? (
@@ -339,12 +359,15 @@ function VideoClipCard({
 	);
 }
 
-export function VideoResult({ runId, videos }: VideoResultProps) {
+export function VideoResult({ runId, videos, scenes }: VideoResultProps) {
 	if (!videos.length) {
 		return null;
 	}
 
 	const ordered = [...videos].reverse();
+	const scenesMarkdown = scenes?.length
+		? videoScenesToMarkdown(normalizeVideoScenes(scenes))
+		: null;
 
 	return (
 		<section className="flex flex-col gap-4 border-t border-border/80 pt-6">
@@ -365,6 +388,7 @@ export function VideoResult({ runId, videos }: VideoResultProps) {
 						video={video}
 						versionLabel={`Clip ${videos.length - index}`}
 						isLatest={index === 0}
+						sceneMarkdown={scenesMarkdown}
 					/>
 				))}
 			</div>

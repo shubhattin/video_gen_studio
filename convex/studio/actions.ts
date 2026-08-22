@@ -41,6 +41,7 @@ import {
 	buildVideoPromptFromScenes,
 	hashVideoPromptSource,
 	normalizeVideoScenes,
+	videoScenesToMarkdown,
 } from "../lib/videoPlanMarkdown";
 import { adaptOpenRouterVideoRequest } from "../lib/videoAdapters";
 import {
@@ -100,10 +101,6 @@ function buildPlannerPrompt(args: {
 	if (meta.length > 0) {
 		sections.push(["## Generation constraints", ...meta].join("\n"));
 	}
-
-	sections.push(
-		"## Task\nProduce imagePrompt + videoScenes (Seedance six-part beats) for a portrait short rooted in this shloka.",
-	);
 
 	return sections.join("\n\n");
 }
@@ -617,7 +614,9 @@ export const generateVideoForRun = action({
 								? completed.usage.cost
 								: undefined,
 						videoParams: parsedParams,
-						videoPrompt: adapted.body.prompt,
+						videoPrompt: videoScenesToMarkdown(
+							normalizeVideoScenes(plan.videoScenes),
+						),
 						warnings: genWarnings.length > 0 ? genWarnings : undefined,
 						createdAt: Date.now(),
 					},

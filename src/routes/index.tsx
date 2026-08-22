@@ -180,7 +180,7 @@ function ShlokaStudioPage() {
 		...rawImages.map((image) => image.objectKey),
 		...rawVideos.map((video) => video.objectKey),
 	];
-	const urlsByKey = useSignedMediaUrls(runId, mediaObjectKeys);
+	const urlsByKey = useSignedMediaUrls(mediaObjectKeys);
 	const images = rawImages.map((image) => withSignedUrl(image, urlsByKey));
 	const videos = rawVideos.map((video) => withSignedUrl(video, urlsByKey));
 
@@ -756,7 +756,6 @@ function ShlokaStudioPage() {
 													}}
 												/>
 												<ReferenceImagePanel
-													runId={runId}
 													imageSize={imageSize}
 													imageQuality={imageQuality}
 													onSizeChange={onImageSizeChange}
@@ -902,7 +901,11 @@ function ShlokaStudioPage() {
 														triggerLabel="Generate video"
 														onConfirm={onGenerateVideo}
 													/>
-													<VideoResult runId={runId} videos={videos} />
+													<VideoResult
+														runId={runId}
+														videos={videos}
+														scenes={activePlan.videoScenes}
+													/>
 												</div>
 											</div>
 										) : null}

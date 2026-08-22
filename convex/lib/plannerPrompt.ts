@@ -87,7 +87,7 @@ ${audioHint}
 
 Keep each field concise (one tight sentence or less). Do not pad optional fields.
 
-## Scene count vs duration
+## Scene count vs duration (A general rule of thumb)
 ${durationHint}
 - 4–6s → 1–2 beats
 - 7–10s → 2–3 beats

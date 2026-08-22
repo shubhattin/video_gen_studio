@@ -136,7 +136,7 @@ export function ModelStudio({ runId }: ModelStudioProps) {
 		...rawImages.map((image) => image.objectKey),
 		...rawVideos.map((video) => video.objectKey),
 	];
-	const urlsByKey = useSignedMediaUrls(null, mediaObjectKeys);
+	const urlsByKey = useSignedMediaUrls(mediaObjectKeys);
 	const images = rawImages.map((image) => withSignedUrl(image, urlsByKey));
 	const videos = rawVideos.map((video) => withSignedUrl(video, urlsByKey));
 
@@ -283,7 +283,6 @@ export function ModelStudio({ runId }: ModelStudioProps) {
 				</div>
 
 				<ReferenceImagePanel
-					runId={null}
 					imageSize={imageSize}
 					imageQuality={imageQuality}
 					onSizeChange={(value) => {

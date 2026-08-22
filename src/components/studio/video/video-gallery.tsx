@@ -304,7 +304,7 @@ const VIDEO_SKELETON_KEYS = Array.from(
 );
 
 const markdownPromptClassName =
-	"text-xs leading-relaxed [&_strong]:font-semibold [&_em]:italic [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em] [&_p]:my-1.5 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0";
+	"text-xs leading-relaxed [&_strong]:font-semibold [&_em]:italic [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em] [&_h1]:mt-2 [&_h1]:mb-1 [&_h1]:font-heading [&_h1]:text-sm [&_h1]:font-semibold [&_h2]:mt-2 [&_h2]:mb-1 [&_h2]:font-heading [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:mt-2 [&_h3]:mb-1 [&_h3]:font-heading [&_h3]:text-xs [&_h3]:font-semibold [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-4 [&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-4 [&_li]:my-0.5 [&_p]:my-1.5 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0";
 
 function GalleryVideoCardSkeleton() {
 	return (
@@ -336,7 +336,7 @@ export function VideoGallery() {
 	const objectKeys = (videos ?? []).map(
 		(video: { objectKey?: string }) => video.objectKey,
 	);
-	const urlsByKey = useSignedMediaUrls(null, objectKeys);
+	const urlsByKey = useSignedMediaUrls(objectKeys);
 	const withUrls = (videos ?? []).map((video: GalleryVideo) =>
 		withSignedUrl(video, urlsByKey),
 	);

@@ -276,7 +276,6 @@ export const finalizeModelStudioReferenceImageUpload = action({
 
 export const getReadUrls = action({
 	args: {
-		runId: v.optional(v.id("generationRuns")),
 		objectKeys: v.array(v.string()),
 	},
 	returns: v.record(v.string(), v.union(v.string(), v.null())),
@@ -307,7 +306,6 @@ export const getReadUrls = action({
 
 export const getDownloadUrl = action({
 	args: {
-		runId: v.id("generationRuns"),
 		objectKey: v.string(),
 		filename: v.string(),
 		contentType: v.optional(v.string()),

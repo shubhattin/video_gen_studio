@@ -1,5 +1,4 @@
 import { api } from "@convex/_generated/api";
-import type { Id } from "@convex/_generated/dataModel";
 import { useQuery } from "convex/react";
 import { Download, Images, Info, Loader2, Upload, X } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
@@ -49,7 +48,6 @@ export type ReferenceImageItem = {
 };
 
 type ReferenceImagePanelProps = {
-	runId?: Id<"generationRuns"> | null;
 	imageSize: string;
 	imageQuality: string;
 	onSizeChange: (value: string) => void;
@@ -386,7 +384,6 @@ function ReferenceImageCard({
 }
 
 export function ReferenceImagePanel({
-	runId,
 	imageSize,
 	imageQuality,
 	onSizeChange,
@@ -423,7 +420,7 @@ export function ReferenceImagePanel({
 		() => (gallery ?? []).map((item: { objectKey?: string }) => item.objectKey),
 		[gallery],
 	);
-	const galleryUrls = useSignedMediaUrls(runId, galleryKeys);
+	const galleryUrls = useSignedMediaUrls(galleryKeys);
 	const estimate =
 		GPT_IMAGE_ESTIMATES_USD[
 			(imageSize as keyof typeof GPT_IMAGE_ESTIMATES_USD) ?? "1024x1536"
