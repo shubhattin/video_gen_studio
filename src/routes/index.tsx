@@ -51,7 +51,10 @@ import {
 	type StudioRunSearch,
 	studioRunSearchSchema,
 } from "#/lib/studio-run-search";
-import type { StudioBusyStage } from "#/lib/studio-run-status";
+import {
+	isActiveRunStatus,
+	type StudioBusyStage,
+} from "#/lib/studio-run-status";
 import { notifyStudioError, notifyStudioSuccess } from "#/lib/studio-toast";
 import { uploadReferenceImage } from "#/lib/upload-reference-image";
 import { buildVideoPromptFromScenes } from "#/lib/video-plan-markdown";
@@ -447,9 +450,12 @@ function ShlokaStudioPage() {
 		busyStage === "planning" ||
 		run?.status === "planning";
 
-	const planningBusy = busyStage === "planning";
 	const videoBusy = busyStage === "video";
-	const anyBusy = busyStage !== null;
+	const anyBusy =
+		busyStage !== null ||
+		isActiveRunStatus(run?.status) ||
+		activePlan?.status === "planning" ||
+		creatingPlan;
 
 	// Divergence: current config differs from what the plan was generated with.
 	const divergenceFields = useMemo(() => {
@@ -592,7 +598,7 @@ function ShlokaStudioPage() {
 										onPlannerPromptSelectionChange
 									}
 									onPersist={() => void autosave.flush()}
-									disabled={planningBusy}
+									disabled={anyBusy}
 								/>
 
 								{plans && plans.length > 0 ? (
@@ -669,21 +675,13 @@ function ShlokaStudioPage() {
 												value={videoConfig.modelId as VideoModelId}
 												gatewayPricingById={gatewayById}
 												pricingSkusById={pricingSkusById}
-												disabled={
-													planningBusy ||
-													videoBusy ||
-													activePlan.status === "planning"
-												}
+												disabled={anyBusy}
 												onValueChange={onModelChange}
 											/>
 											<VideoConfiguration
 												value={videoConfig}
 												onChange={onVideoConfigChange}
-												disabled={
-													planningBusy ||
-													videoBusy ||
-													activePlan.status === "planning"
-												}
+												disabled={anyBusy}
 											/>
 											{hasDivergence ? (
 												<DivergenceWarning
@@ -729,7 +727,7 @@ function ShlokaStudioPage() {
 													summarizedVideoPrompt={
 														activePlan.summarizedVideoPrompt
 													}
-													disabled={planningBusy}
+													disabled={anyBusy}
 													actions={regeneratePlanControl}
 													onSaveImagePrompt={async (imagePrompt) => {
 														if (!runId || !activePlanId) return;

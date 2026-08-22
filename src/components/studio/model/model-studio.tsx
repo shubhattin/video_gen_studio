@@ -222,7 +222,7 @@ export function ModelStudio({ runId }: ModelStudioProps) {
 		}
 	};
 
-	const anyBusy = busyStage !== null;
+	const anyBusy = busyStage !== null || run?.status === "generating";
 
 	return (
 		<>

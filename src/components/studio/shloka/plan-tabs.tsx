@@ -143,11 +143,18 @@ export function PlanTabs({
 		<div className={`flex items-center gap-2 ${className ?? ""}`}>
 			<Tabs
 				value={activePlanId ?? undefined}
-				onValueChange={(value) => onSelect(value)}
+				onValueChange={(value) => {
+					if (disabled) return;
+					onSelect(value);
+				}}
 			>
 				<TabsList>
 					{plans.map((plan) => (
-						<TabsTrigger key={plan._id} value={plan._id}>
+						<TabsTrigger
+							key={plan._id}
+							value={plan._id}
+							disabled={disabled}
+						>
 							<TabLabel label={planLabel(plan)} />
 						</TabsTrigger>
 					))}

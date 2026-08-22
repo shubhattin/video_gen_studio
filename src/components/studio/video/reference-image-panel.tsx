@@ -426,11 +426,11 @@ export function ReferenceImagePanel({
 			(imageSize as keyof typeof GPT_IMAGE_ESTIMATES_USD) ?? "1024x1536"
 		]?.[imageQuality as "low" | "medium" | "high"] ??
 		GPT_IMAGE_ESTIMATES_USD["1024x1536"].medium;
-	const uploadBusy = Boolean(disabled || uploading);
+	const uploadBusy = Boolean(disabled || uploading || globalBusy);
 	const generateBusy = Boolean(
 		disabled || generating || uploading || globalBusy,
 	);
-	const configBusy = Boolean(disabled || generating);
+	const configBusy = Boolean(disabled || generating || globalBusy);
 	const attachedIds = new Set(images.map((image) => image.id));
 	const warnings = referenceCapabilityWarnings({
 		supportsFirstFrame,
@@ -545,7 +545,7 @@ export function ReferenceImagePanel({
 					<Button
 						className="h-9"
 						variant="outline"
-						disabled={Boolean(disabled) || !onReuseImage}
+						disabled={Boolean(disabled || globalBusy) || !onReuseImage}
 						onClick={() => setReuseOpen(true)}
 					>
 						<Images data-icon="inline-start" />
@@ -644,7 +644,7 @@ export function ReferenceImagePanel({
 							isFirst={firstFrameImageId === image.id}
 							isLast={lastFrameImageId === image.id}
 							isExtra={extraReferenceImageIds.includes(image.id)}
-							busy={Boolean(disabled)}
+							busy={Boolean(disabled || globalBusy)}
 							onSelectFirstFrame={onSelectFirstFrame}
 							onSelectLastFrame={onSelectLastFrame}
 							onToggleExtraReference={onToggleExtraReference}
