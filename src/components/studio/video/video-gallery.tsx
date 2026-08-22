@@ -209,6 +209,10 @@ function GalleryVideoCard({
 						</PopoverHeader>
 						<div className="flex flex-col gap-2 text-xs">
 							<div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-2">
+								<span className="text-muted-foreground">id</span>
+								<span className="break-all font-mono">{video.id}</span>
+							</div>
+							<div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-2">
 								<span className="text-muted-foreground">Created</span>
 								<span>{new Date(video.createdAt).toLocaleString()}</span>
 							</div>

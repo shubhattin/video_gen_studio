@@ -225,6 +225,7 @@ function VideoClipCard({
 							</PopoverDescription>
 						</PopoverHeader>
 						<div className="flex flex-col gap-2">
+							<InfoRow label="id" value={video.id} mono />
 							<InfoRow
 								label="Created"
 								value={new Date(video.createdAt).toLocaleString()}
