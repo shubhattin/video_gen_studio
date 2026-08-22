@@ -29,6 +29,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "#/components/ui/select";
+import { Skeleton } from "#/components/ui/skeleton";
 import {
 	useSignedMediaUrls,
 	withSignedUrl,
@@ -294,6 +295,31 @@ function GalleryVideoCard({
 	);
 }
 
+const VIDEO_SKELETON_KEYS = Array.from(
+	{ length: 6 },
+	(_, i) => `video-skeleton-${i}`,
+);
+
+function GalleryVideoCardSkeleton() {
+	return (
+		<article className="mb-4 break-inside-avoid overflow-hidden rounded-2xl border border-border/70 bg-card">
+			<Skeleton className="aspect-video w-full rounded-none" />
+			<div className="flex items-center gap-2 px-3 py-2.5">
+				<div className="flex min-w-0 flex-1 flex-col gap-1.5">
+					<div className="flex items-center gap-1.5">
+						<Skeleton className="h-4 w-24" />
+						<Skeleton className="h-3 w-8" />
+					</div>
+					<Skeleton className="h-3 w-32" />
+				</div>
+				<Skeleton className="size-7 rounded-md" />
+				<Skeleton className="size-7 rounded-md" />
+				<Skeleton className="size-7 rounded-md" />
+			</div>
+		</article>
+	);
+}
+
 export function VideoGallery() {
 	const [sort, setSort] = useState<SortOrder>("latest");
 	const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
@@ -369,7 +395,11 @@ export function VideoGallery() {
 			</div>
 
 			{videos === undefined ? (
-				<p className="text-sm text-muted-foreground">Loading video gallery…</p>
+				<div className="columns-1 gap-4 sm:columns-2 xl:columns-3 2xl:columns-4">
+					{VIDEO_SKELETON_KEYS.map((key) => (
+						<GalleryVideoCardSkeleton key={key} />
+					))}
+				</div>
 			) : videos.length === 0 ? (
 				<div className="rounded-xl border border-dashed border-border/70 px-4 py-10 text-center text-sm text-muted-foreground">
 					No videos yet. Generate a clip from Shloka Studio or Model Studio.

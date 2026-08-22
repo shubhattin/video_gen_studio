@@ -1,11 +1,18 @@
 import { TanStackDevtools } from "@tanstack/react-devtools";
 import {
+	QueryClient,
+	QueryClientProvider,
+	useQueryClient,
+} from "@tanstack/react-query";
+import { ReactQueryDevtoolsPanel } from "@tanstack/react-query-devtools";
+import {
 	createRootRoute,
 	HeadContent,
 	Outlet,
 	Scripts,
 } from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
+import { useState } from "react";
 
 import { AppProviders } from "#/components/providers";
 import { themeBootScript } from "#/hooks/use-theme";
@@ -36,25 +43,56 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 			</head>
 			<body>
 				{children}
-				<TanStackDevtools
-					config={{ position: "bottom-right" }}
-					plugins={[
-						{
-							name: "Tanstack Router",
-							render: <TanStackRouterDevtoolsPanel />,
-						},
-					]}
-				/>
 				<Scripts />
 			</body>
 		</html>
 	);
 }
 
-function RootComponent() {
+function StudioDevtools() {
+	const queryClient = useQueryClient();
+
 	return (
-		<AppProviders>
-			<Outlet />
-		</AppProviders>
+		<TanStackDevtools
+			config={{ position: "bottom-right" }}
+			plugins={[
+				{
+					name: "Tanstack Router",
+					render: <TanStackRouterDevtoolsPanel />,
+				},
+				{
+					name: "Tanstack Query",
+					render: (
+						<ReactQueryDevtoolsPanel
+							client={queryClient}
+							style={{ height: "100%" }}
+						/>
+					),
+				},
+			]}
+		/>
+	);
+}
+
+function RootComponent() {
+	// SPA-style client cache: created once per session, no SSR hydration.
+	const [queryClient] = useState(
+		() =>
+			new QueryClient({
+				defaultOptions: {
+					queries: {
+						refetchOnWindowFocus: false,
+					},
+				},
+			}),
+	);
+
+	return (
+		<QueryClientProvider client={queryClient}>
+			<AppProviders>
+				<Outlet />
+				<StudioDevtools />
+			</AppProviders>
+		</QueryClientProvider>
 	);
 }

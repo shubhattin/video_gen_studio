@@ -4,8 +4,8 @@ import { useMutation, useQuery } from "convex/react";
 import { Download, Info, Loader2, Trash2 } from "lucide-react";
 import { useState } from "react";
 import {
-	saveDownloadResponse,
 	formatBytes,
+	saveDownloadResponse,
 } from "#/components/studio/video/video-result";
 import {
 	AlertDialog,
@@ -34,6 +34,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "#/components/ui/select";
+import { Skeleton } from "#/components/ui/skeleton";
 import {
 	useSignedMediaUrls,
 	withSignedUrl,
@@ -262,6 +263,28 @@ function GalleryImageCard({
 	);
 }
 
+const IMAGE_SKELETON_KEYS = Array.from(
+	{ length: 10 },
+	(_, i) => `image-skeleton-${i}`,
+);
+
+function GalleryImageCardSkeleton() {
+	return (
+		<article className="mb-4 break-inside-avoid overflow-hidden rounded-2xl border border-border/70 bg-card">
+			<Skeleton className="aspect-[3/4] max-h-64 w-full rounded-none" />
+			<div className="flex items-center gap-2 px-3 py-2.5">
+				<div className="flex min-w-0 flex-1 flex-col gap-1.5">
+					<Skeleton className="h-5 w-20" />
+					<Skeleton className="h-3 w-28" />
+				</div>
+				<Skeleton className="size-7 rounded-md" />
+				<Skeleton className="size-7 rounded-md" />
+				<Skeleton className="size-7 rounded-md" />
+			</div>
+		</article>
+	);
+}
+
 export function ImageGallery() {
 	const [sort, setSort] = useState<SortOrder>("latest");
 	const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
@@ -334,7 +357,11 @@ export function ImageGallery() {
 			</div>
 
 			{images === undefined ? (
-				<p className="text-sm text-muted-foreground">Loading image gallery…</p>
+				<div className="columns-2 gap-4 sm:columns-3 lg:columns-4 xl:columns-5">
+					{IMAGE_SKELETON_KEYS.map((key) => (
+						<GalleryImageCardSkeleton key={key} />
+					))}
+				</div>
 			) : images.length === 0 ? (
 				<div className="rounded-xl border border-dashed border-border/70 px-4 py-10 text-center text-sm text-muted-foreground">
 					No images yet. Generate, upload, or capture a continuity frame to see
