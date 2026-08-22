@@ -13,13 +13,19 @@ import { cn } from "@/lib/utils";
  * The textarea and the pre share identical typography/padding/white-space so
  * the colored layer lines up perfectly with the caret; scroll is mirrored.
  */
-function MarkdownHighlight({ text }: { text: string }): ReactNode {
+function MarkdownHighlight({
+	text,
+	tone,
+}: {
+	text: string;
+	tone: MarkdownTone;
+}): ReactNode {
 	const lines = text.split("\n");
 	return (
 		<>
 			{lines.map((line, index) => (
 				<span key={index} className="block min-h-[1em] whitespace-pre-wrap">
-					{highlightLine(line)}
+					{highlightLine(line, tone)}
 					{/* keep empty lines visible & match textarea row height */}
 					{line === "" ? "\u200b" : null}
 				</span>
@@ -35,16 +41,26 @@ const BULLET_RE = /^(\s*)([-*+])\s+(.*)$/;
 const ORDERED_RE = /^(\s*)(\d+\.)\s+(.*)$/;
 const HR_RE = /^(-{3,}|\*{3,}|_{3,})$/;
 
-function highlightLine(line: string): ReactNode {
+/**
+ * "contrast" (default): plain text and markers render in the normal foreground
+ * color (white in dark mode / black in light), with emphasis carried by
+ * weight, italic, and mono instead of graying.
+ * "muted": syntax tokens are grayed so structure reads subtly.
+ */
+type MarkdownTone = "muted" | "contrast";
+
+function highlightLine(line: string, tone: MarkdownTone): ReactNode {
+	const markerColor =
+		tone === "contrast" ? "text-foreground" : "text-muted-foreground";
 	const headingMatch = HEADING_RE.exec(line);
 	if (headingMatch) {
 		const [, marks, rest] = headingMatch;
 		return (
 			<span>
 				<span className="text-primary font-semibold">{marks}</span>
-				<span className="text-muted-foreground"> </span>
+				<span className={markerColor}> </span>
 				<span className="text-foreground font-semibold">
-					{highlightInline(rest)}
+					{highlightInline(rest, tone)}
 				</span>
 			</span>
 		);
@@ -52,7 +68,17 @@ function highlightLine(line: string): ReactNode {
 
 	const hrMatch = HR_RE.exec(line.trim());
 	if (hrMatch) {
-		return <span className="text-muted-foreground/60">{line}</span>;
+		return (
+			<span
+				className={
+					tone === "contrast"
+						? "text-foreground/60"
+						: "text-muted-foreground/60"
+				}
+			>
+				{line}
+			</span>
+		);
 	}
 
 	const bulletMatch = BULLET_RE.exec(line);
@@ -61,9 +87,9 @@ function highlightLine(line: string): ReactNode {
 		return (
 			<span>
 				{indent}
-				<span className="text-muted-foreground">{marker}</span>
-				<span className="text-muted-foreground"> </span>
-				{highlightInline(rest)}
+				<span className={markerColor}>{marker}</span>
+				<span className={markerColor}> </span>
+				{highlightInline(rest, tone)}
 			</span>
 		);
 	}
@@ -74,14 +100,14 @@ function highlightLine(line: string): ReactNode {
 		return (
 			<span>
 				{indent}
-				<span className="text-muted-foreground">{marker}</span>
-				<span className="text-muted-foreground"> </span>
-				{highlightInline(rest)}
+				<span className={markerColor}>{marker}</span>
+				<span className={markerColor}> </span>
+				{highlightInline(rest, tone)}
 			</span>
 		);
 	}
 
-	return highlightInline(line);
+	return highlightInline(line, tone);
 }
 
 // Inline token regexes, tried at the current scan position.
@@ -89,11 +115,13 @@ const INLINE_BOLD = /^\*\*([^*]+?)\*\*/;
 const INLINE_CODE = /^`([^`]+?)`/;
 const INLINE_EM = /^(\*|_)([^*_\n]+?)\1/;
 
-function highlightInline(text: string): ReactNode {
+function highlightInline(text: string, tone: MarkdownTone): ReactNode {
 	if (!text) return null;
 	const nodes: ReactNode[] = [];
 	let remaining = text;
 	let key = 0;
+	const mutedEmphasis =
+		tone === "contrast" ? "text-foreground" : "text-muted-foreground";
 
 	while (remaining.length > 0) {
 		const bold = INLINE_BOLD.exec(remaining);
@@ -113,8 +141,8 @@ function highlightInline(text: string): ReactNode {
 		}
 
 		const earliest = candidates.reduce((best, cur) => {
-			const bestIdx = best.m!.index ?? Infinity;
-			const curIdx = cur.m!.index ?? Infinity;
+			const bestIdx = best.m?.index ?? Infinity;
+			const curIdx = cur.m?.index ?? Infinity;
 			return curIdx < bestIdx ? cur : best;
 		});
 
@@ -131,7 +159,7 @@ function highlightInline(text: string): ReactNode {
 				<span
 					key={key++}
 					className={
-						isLabel
+						isLabel && tone !== "contrast"
 							? "text-accent-foreground font-semibold"
 							: "text-foreground font-semibold"
 					}
@@ -150,7 +178,7 @@ function highlightInline(text: string): ReactNode {
 			);
 		} else {
 			nodes.push(
-				<span key={key++} className="italic text-muted-foreground">
+				<span key={key++} className={cn("italic", mutedEmphasis)}>
 					{match[0]}
 				</span>,
 			);
@@ -167,8 +195,9 @@ function MarkdownTextarea({
 	value,
 	onChange,
 	onScroll,
+	tone = "contrast",
 	...props
-}: React.ComponentProps<"textarea">) {
+}: React.ComponentProps<"textarea"> & { tone?: MarkdownTone }) {
 	const preRef = useRef<HTMLPreElement>(null);
 
 	const handleScroll = useCallback(
@@ -190,10 +219,14 @@ function MarkdownTextarea({
 			<pre
 				ref={preRef}
 				aria-hidden
-				className="pointer-events-none absolute inset-0 m-0 overflow-hidden whitespace-pre-wrap border border-transparent px-2.5 py-2 font-mono text-sm leading-relaxed text-muted-foreground"
+				className={cn(
+					"pointer-events-none absolute inset-0 m-0 overflow-hidden whitespace-pre-wrap border border-transparent px-2.5 py-2 font-mono text-sm leading-relaxed",
+					tone === "contrast" ? "text-foreground" : "text-muted-foreground",
+				)}
 			>
 				<MarkdownHighlight
 					text={typeof value === "string" ? value : String(value ?? "")}
+					tone={tone}
 				/>
 			</pre>
 			<textarea

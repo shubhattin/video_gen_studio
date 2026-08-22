@@ -151,7 +151,9 @@ export function ShlokaComposer({
 						);
 					}}
 					placeholder="Enter or paste a verse in Devanagari…"
-					className={cn("min-h-32 text-base leading-relaxed")}
+					className={cn(
+						"min-h-32 max-h-64 resize-y overflow-y-auto text-base leading-relaxed",
+					)}
 					disabled={disabled}
 					aria-required="true"
 				/>

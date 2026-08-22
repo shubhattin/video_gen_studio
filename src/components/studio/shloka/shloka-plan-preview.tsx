@@ -1,16 +1,6 @@
-import { Copy, Pencil, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Copy, Pencil } from "lucide-react";
+import { type ReactNode, useEffect, useState } from "react";
 import { MessageResponse } from "#/components/ai-elements/message";
-import {
-	AlertDialog,
-	AlertDialogAction,
-	AlertDialogCancel,
-	AlertDialogContent,
-	AlertDialogDescription,
-	AlertDialogFooter,
-	AlertDialogHeader,
-	AlertDialogTitle,
-} from "#/components/ui/alert-dialog";
 import { Button } from "#/components/ui/button";
 import { MarkdownTextarea } from "#/components/ui/markdown-textarea";
 import {
@@ -38,13 +28,11 @@ type ShlokaPlanPreviewProps = {
 	videoPrompt?: string;
 	/** Cached compressed prompt when over the model character limit. */
 	summarizedVideoPrompt?: string;
-	activePlanId?: string | null;
-	/** Videos produced by this plan — not deleted with the plan. */
-	videoCount?: number;
 	disabled?: boolean;
+	/** Extra actions (e.g. "Regenerate plan") rendered first in the header row. */
+	actions?: ReactNode;
 	onSaveImagePrompt?: (imagePrompt: string) => Promise<void> | void;
 	onSaveVideoScenes?: (videoScenes: VideoScene[]) => Promise<void> | void;
-	onDelete?: (planId: string) => void;
 };
 
 const markdownViewClassName =
@@ -165,12 +153,10 @@ export function ShlokaPlanPreview({
 	videoScenes,
 	videoPrompt,
 	summarizedVideoPrompt,
-	activePlanId,
-	videoCount = 0,
 	disabled,
+	actions,
 	onSaveImagePrompt,
 	onSaveVideoScenes,
-	onDelete,
 }: ShlokaPlanPreviewProps) {
 	const [copied, setCopied] = useState<string | null>(null);
 	const [savingImage, setSavingImage] = useState(false);
@@ -179,7 +165,6 @@ export function ShlokaPlanPreview({
 		"image-prompt",
 	);
 	const [editing, setEditing] = useState(false);
-	const [deleteOpen, setDeleteOpen] = useState(false);
 	const hasScenes = Boolean(videoScenes?.length);
 	const normalizedScenes = videoScenes?.length
 		? normalizeVideoScenes(videoScenes)
@@ -221,6 +206,7 @@ export function ShlokaPlanPreview({
 		<section className="space-y-4 border-t border-border/80 pt-5">
 			<div className="flex flex-wrap items-center justify-between gap-2">
 				<div className="flex flex-wrap items-center gap-2">
+					{actions}
 					{activeCopy ? (
 						<Button
 							variant="outline"
@@ -273,8 +259,6 @@ export function ShlokaPlanPreview({
 							</PopoverContent>
 						</Popover>
 					) : null}
-				</div>
-				<div className="flex flex-wrap items-center gap-2">
 					{canEdit ? (
 						<Button
 							variant={editing ? "default" : "ghost"}
@@ -285,19 +269,6 @@ export function ShlokaPlanPreview({
 						>
 							<Pencil className="size-4" />
 							{editing ? "Editing" : "Edit"}
-						</Button>
-					) : null}
-					{onDelete && activePlanId ? (
-						<Button
-							type="button"
-							variant="ghost"
-							size="icon"
-							className="min-h-11 min-w-11 text-destructive hover:bg-destructive/10 hover:text-destructive"
-							disabled={disabled}
-							aria-label="Delete plan"
-							onClick={() => setDeleteOpen(true)}
-						>
-							<Trash2 className="size-4" />
 						</Button>
 					) : null}
 				</div>
@@ -352,7 +323,7 @@ export function ShlokaPlanPreview({
 							saving={savingScenes}
 							ariaLabel="Edit video plan markdown"
 							editorClassName="min-h-64 border-border shadow-sm"
-							viewClassName="max-h-[min(32rem,60vh)] overflow-y-auto overscroll-contain pr-1"
+							viewClassName="max-h-[min(28rem,55vh)] overflow-y-auto overscroll-contain rounded-lg border border-border bg-background/40 p-4"
 							editMode={editMode}
 							onEditModeChange={setEditMode}
 							onSave={async (next) => {
@@ -422,39 +393,6 @@ export function ShlokaPlanPreview({
 					)}
 				</TabsContent>
 			</Tabs>
-
-			<AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-				<AlertDialogContent>
-					<AlertDialogHeader>
-						<AlertDialogTitle>Delete this plan?</AlertDialogTitle>
-						<AlertDialogDescription>
-							This permanently deletes the plan and its prompts and scenes. This
-							cannot be undone.
-						</AlertDialogDescription>
-					</AlertDialogHeader>
-					{videoCount > 0 ? (
-						<div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-xs leading-relaxed text-amber-800 dark:text-amber-200">
-							This plan has {videoCount} video{videoCount === 1 ? "" : "s"}{" "}
-							linked to it. Videos are <strong>not deleted</strong> — they
-							become abandoned items in the shared gallery and can be removed
-							individually from there.
-						</div>
-					) : null}
-					<AlertDialogFooter>
-						<AlertDialogCancel disabled={disabled}>Cancel</AlertDialogCancel>
-						<AlertDialogAction
-							variant="destructive"
-							disabled={disabled}
-							onClick={() => {
-								if (activePlanId) onDelete?.(activePlanId);
-								setDeleteOpen(false);
-							}}
-						>
-							Delete
-						</AlertDialogAction>
-					</AlertDialogFooter>
-				</AlertDialogContent>
-			</AlertDialog>
 		</section>
 	);
 }

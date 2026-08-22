@@ -31,7 +31,7 @@ import {
 type DbCtx = QueryCtx | MutationCtx;
 
 /** Hydrate a plan for clients: normalized scenes + resolved output videos. */
-export async function hydratePlan(
+async function hydratePlan(
 	ctx: QueryCtx,
 	plan: Doc<"shlokaPlans">,
 ): Promise<Doc<"shlokaPlans"> & { videos: ReturnType<typeof galleryVideoToResult>[] }> {

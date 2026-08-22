@@ -494,6 +494,41 @@ function ShlokaStudioPage() {
 
 	const hasDivergence = divergenceFields.length > 0;
 
+	// Rendered inside the plan preview header so Regenerate / Copy / Edit sit
+	// on one line. Only shown when a generated plan actually exists.
+	const regeneratePlanControl =
+		activePlan?.status === "ready" ? (
+			<AlertDialog>
+				<AlertDialogTrigger
+					render={
+						<Button
+							className="min-h-11"
+							disabled={
+								!shlokaText.trim() || !plannerPromptSelection || anyBusy
+							}
+						/>
+					}
+				>
+					Regenerate plan
+				</AlertDialogTrigger>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>Regenerate this plan?</AlertDialogTitle>
+						<AlertDialogDescription>
+							This overwrites the plan’s reference-image prompt and video scenes
+							using your current settings. This cannot be undone.
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel>Cancel</AlertDialogCancel>
+						<AlertDialogAction onClick={() => void onPlan()}>
+							Regenerate
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
+		) : null;
+
 	const extraIds = (run?.extraReferenceImageIds ?? []) as Id<"galleryImages">[];
 	const isRunLoading = Boolean(runId) && run === undefined;
 
@@ -645,47 +680,12 @@ function ShlokaStudioPage() {
 											) : null}
 										</div>
 
-										<div className="flex flex-wrap gap-3 border-t border-border/80 pt-5">
+										<div className="flex flex-wrap items-center gap-3 border-t border-border/80 pt-5">
 											{busyStage === "planning" ||
 											activePlan.status === "planning" ? (
 												<Button className="min-h-11" disabled>
 													Planning…
 												</Button>
-											) : activePlan.status === "ready" ? (
-												<AlertDialog>
-													<AlertDialogTrigger
-														render={
-															<Button
-																className="min-h-11"
-																disabled={
-																	!shlokaText.trim() ||
-																	!plannerPromptSelection ||
-																	anyBusy
-																}
-															/>
-														}
-													>
-														Regenerate plan
-													</AlertDialogTrigger>
-													<AlertDialogContent>
-														<AlertDialogHeader>
-															<AlertDialogTitle>
-																Regenerate this plan?
-															</AlertDialogTitle>
-															<AlertDialogDescription>
-																This overwrites the plan’s reference-image
-																prompt and video scenes using your current
-																settings. This cannot be undone.
-															</AlertDialogDescription>
-														</AlertDialogHeader>
-														<AlertDialogFooter>
-															<AlertDialogCancel>Cancel</AlertDialogCancel>
-															<AlertDialogAction onClick={() => void onPlan()}>
-																Regenerate
-															</AlertDialogAction>
-														</AlertDialogFooter>
-													</AlertDialogContent>
-												</AlertDialog>
 											) : (
 												<Button
 													className="min-h-11"
@@ -721,8 +721,8 @@ function ShlokaStudioPage() {
 													summarizedVideoPrompt={
 														activePlan.summarizedVideoPrompt
 													}
-													activePlanId={activePlan._id}
 													disabled={planningBusy}
+													actions={regeneratePlanControl}
 													onSaveImagePrompt={async (imagePrompt) => {
 														if (!runId || !activePlanId) return;
 														await updatePlanContent({
@@ -747,12 +747,6 @@ function ShlokaStudioPage() {
 															"Video generation will use the updated scenes.",
 														);
 													}}
-													onDelete={(planIdValue) =>
-														void handleDeletePlan(
-															planIdValue as Id<"shlokaPlans">,
-														)
-													}
-													videoCount={activePlan.videos?.length ?? 0}
 												/>
 												<ReferenceImagePanel
 													runId={runId}
