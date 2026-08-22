@@ -18,11 +18,6 @@ import {
 } from "#/lib/model-catalog";
 import { fetchStudioMedia } from "#/lib/studio-media-proxy";
 import { cn } from "#/lib/utils";
-import {
-	type EditableVideoScene,
-	normalizeVideoScenes,
-	videoScenesToMarkdown,
-} from "#/lib/video-plan-markdown";
 
 /**
  * Compact markdown style for clip popovers. Headings are forced small so
@@ -61,8 +56,6 @@ export type VideoResultItem = {
 type VideoResultProps = {
 	runId?: Id<"generationRuns"> | null;
 	videos: VideoResultItem[];
-	/** The plan's scenes (Shloka Studio). When present, shown as markdown in the popover. */
-	scenes?: EditableVideoScene[] | null;
 };
 
 export function extensionForMime(mimeType?: string) {
@@ -152,14 +145,11 @@ function VideoClipCard({
 	video,
 	versionLabel,
 	isLatest,
-	sceneMarkdown,
 }: {
 	runId?: Id<"generationRuns"> | null;
 	video: VideoResultItem;
 	versionLabel: string;
 	isLatest: boolean;
-	/** Markdown for the plan's scenes (JSON→markdown), preferred over the flat prompt. */
-	sceneMarkdown?: string | null;
 }) {
 	const [downloading, setDownloading] = useState(false);
 	const canDownload = Boolean(video.objectKey || video.url);
@@ -276,12 +266,12 @@ function VideoClipCard({
 								mono
 							/>
 						</div>
-						{sceneMarkdown?.trim() || prompt?.trim() ? (
+						{prompt?.trim() ? (
 							<div className="flex flex-col gap-1.5 border-t border-border/70 pt-3">
 								<span className="text-xs text-muted-foreground">Prompt</span>
 								<div className="max-h-28 overflow-y-auto text-foreground">
 									<MessageResponse className={clipPromptMarkdownClassName}>
-										{sceneMarkdown?.trim() || prompt?.trim()}
+										{prompt.trim()}
 									</MessageResponse>
 								</div>
 							</div>
@@ -359,15 +349,12 @@ function VideoClipCard({
 	);
 }
 
-export function VideoResult({ runId, videos, scenes }: VideoResultProps) {
+export function VideoResult({ runId, videos }: VideoResultProps) {
 	if (!videos.length) {
 		return null;
 	}
 
 	const ordered = [...videos].reverse();
-	const scenesMarkdown = scenes?.length
-		? videoScenesToMarkdown(normalizeVideoScenes(scenes))
-		: null;
 
 	return (
 		<section className="flex flex-col gap-4 border-t border-border/80 pt-6">
@@ -388,7 +375,6 @@ export function VideoResult({ runId, videos, scenes }: VideoResultProps) {
 						video={video}
 						versionLabel={`Clip ${videos.length - index}`}
 						isLatest={index === 0}
-						sceneMarkdown={scenesMarkdown}
 					/>
 				))}
 			</div>

@@ -1,5 +1,17 @@
 import { Info, TriangleAlert } from "lucide-react";
 import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+	AlertDialogTrigger,
+} from "#/components/ui/alert-dialog";
+import { Button } from "#/components/ui/button";
+import {
 	Popover,
 	PopoverContent,
 	PopoverTrigger,
@@ -45,13 +57,34 @@ export function DivergenceWarning({
 				still uses the plan’s original settings until you regenerate the plan.
 			</p>
 			{onRegenerate ? (
-				<button
-					type="button"
-					onClick={onRegenerate}
-					className="shrink-0 rounded-md px-2 py-1 text-xs font-semibold underline-offset-2 hover:underline"
-				>
-					Regenerate plan
-				</button>
+				<AlertDialog>
+					<AlertDialogTrigger
+						render={
+							<Button
+								variant="ghost"
+								size="sm"
+								className="h-7 shrink-0 px-2 text-xs font-semibold text-amber-800 hover:bg-amber-500/15 hover:text-amber-900 dark:text-amber-200 dark:hover:text-amber-100"
+							/>
+						}
+					>
+						Regenerate plan
+					</AlertDialogTrigger>
+					<AlertDialogContent>
+						<AlertDialogHeader>
+							<AlertDialogTitle>Regenerate this plan?</AlertDialogTitle>
+							<AlertDialogDescription>
+								This overwrites the plan's reference-image prompt and video
+								scenes using your current settings. This cannot be undone.
+							</AlertDialogDescription>
+						</AlertDialogHeader>
+						<AlertDialogFooter>
+							<AlertDialogCancel>Cancel</AlertDialogCancel>
+							<AlertDialogAction onClick={onRegenerate}>
+								Regenerate
+							</AlertDialogAction>
+						</AlertDialogFooter>
+					</AlertDialogContent>
+				</AlertDialog>
 			) : null}
 			<Popover>
 				<PopoverTrigger

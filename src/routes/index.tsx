@@ -503,38 +503,44 @@ function ShlokaStudioPage() {
 
 	// Rendered inside the plan preview header so Regenerate / Copy / Edit sit
 	// on one line. Only shown when a generated plan actually exists.
-	const regeneratePlanControl =
-		activePlan?.status === "ready" ? (
-			<AlertDialog>
-				<AlertDialogTrigger
-					render={
-						<Button
-							className="min-h-11"
-							disabled={
-								!shlokaText.trim() || !plannerPromptSelection || anyBusy
-							}
-						/>
-					}
-				>
-					Regenerate plan
-				</AlertDialogTrigger>
-				<AlertDialogContent>
-					<AlertDialogHeader>
-						<AlertDialogTitle>Regenerate this plan?</AlertDialogTitle>
-						<AlertDialogDescription>
-							This overwrites the plan’s reference-image prompt and video scenes
-							using your current settings. This cannot be undone.
-						</AlertDialogDescription>
-					</AlertDialogHeader>
-					<AlertDialogFooter>
-						<AlertDialogCancel>Cancel</AlertDialogCancel>
-						<AlertDialogAction onClick={() => void onPlan()}>
-							Regenerate
-						</AlertDialogAction>
-					</AlertDialogFooter>
-				</AlertDialogContent>
-			</AlertDialog>
-		) : null;
+	// Keep it visible (disabled) during regeneration so the extra
+	// "Planning…" button is not needed.
+	const hasExistingPlanContent = Boolean(
+		activePlan?.imagePrompt || activePlan?.videoScenes?.length,
+	);
+	const showRegenerate =
+		activePlan?.status === "ready" ||
+		(hasExistingPlanContent &&
+			(busyStage === "planning" || activePlan?.status === "planning"));
+	const regeneratePlanControl = showRegenerate ? (
+		<AlertDialog>
+			<AlertDialogTrigger
+				render={
+					<Button
+						className="min-h-11"
+						disabled={!shlokaText.trim() || !plannerPromptSelection || anyBusy}
+					/>
+				}
+			>
+				Regenerate plan
+			</AlertDialogTrigger>
+			<AlertDialogContent>
+				<AlertDialogHeader>
+					<AlertDialogTitle>Regenerate this plan?</AlertDialogTitle>
+					<AlertDialogDescription>
+						This overwrites the plan's reference-image prompt and video scenes
+						using your current settings. This cannot be undone.
+					</AlertDialogDescription>
+				</AlertDialogHeader>
+				<AlertDialogFooter>
+					<AlertDialogCancel>Cancel</AlertDialogCancel>
+					<AlertDialogAction onClick={() => void onPlan()}>
+						Regenerate
+					</AlertDialogAction>
+				</AlertDialogFooter>
+			</AlertDialogContent>
+		</AlertDialog>
+	) : null;
 
 	const extraIds = (run?.extraReferenceImageIds ?? []) as Id<"galleryImages">[];
 	const isRunLoading = Boolean(runId) && run === undefined;
@@ -687,13 +693,8 @@ function ShlokaStudioPage() {
 											) : null}
 										</div>
 
-										<div className="flex flex-wrap items-center gap-3 border-t border-border/80 pt-5">
-											{busyStage === "planning" ||
-											activePlan.status === "planning" ? (
-												<Button className="min-h-11" disabled>
-													Planning…
-												</Button>
-											) : (
+										{showRegenerate ? null : (
+											<div className="flex flex-wrap items-center gap-3 border-t border-border/80 pt-5">
 												<Button
 													className="min-h-11"
 													disabled={
@@ -705,13 +706,13 @@ function ShlokaStudioPage() {
 												>
 													Generate plan
 												</Button>
-											)}
-											{activePlan.status === "failed" ? (
-												<p className="text-xs text-destructive">
-													{activePlan.lastError ?? "Planning failed."}
-												</p>
-											) : null}
-										</div>
+												{activePlan.status === "failed" ? (
+													<p className="text-xs text-destructive">
+														{activePlan.lastError ?? "Planning failed."}
+													</p>
+												) : null}
+											</div>
+										)}
 
 										{planReady ? (
 											<div className="flex flex-col gap-3">
@@ -901,11 +902,7 @@ function ShlokaStudioPage() {
 														triggerLabel="Generate video"
 														onConfirm={onGenerateVideo}
 													/>
-													<VideoResult
-														runId={runId}
-														videos={videos}
-														scenes={activePlan.videoScenes}
-													/>
+													<VideoResult runId={runId} videos={videos} />
 												</div>
 											</div>
 										) : null}
