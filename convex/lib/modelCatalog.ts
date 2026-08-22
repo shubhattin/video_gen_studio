@@ -30,7 +30,8 @@ export const VIDEO_MODEL_FAMILY_META: Record<
 	runway: { label: "Runway", order: 5 },
 };
 
-export const PLANNER_MODEL_ID = "openai/gpt-5.6-terra";
+export const PLANNER_MODEL_ID = "openai/gpt-5.6-sol";
+// export const PLANNER_MODEL_ID = "anthropic/claude-fable-5";
 /** Fast, no-reasoning model used to summarize a run into a short title. */
 export const TITLE_MODEL_ID = "openai/gpt-5.6-luna";
 /** Same luna model — compress over-limit provider video prompts. */
