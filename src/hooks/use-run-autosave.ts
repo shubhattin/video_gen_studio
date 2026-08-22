@@ -4,7 +4,7 @@ import { useMutation } from "convex/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { VideoConfigState } from "#/components/studio/video/video-configuration";
 import type { PlannerPromptSelection } from "#/lib/planner-prompt";
-import type { EditableVideoScene } from "#/lib/video-plan-markdown";
+import type { NormalizedVideoScene } from "#/lib/video-plan-markdown";
 
 export type RunAutosaveStatus = "idle" | "saving" | "saved" | "error";
 
@@ -24,7 +24,7 @@ export type DraftPatch = {
 export type PlanPatch = {
 	videoParams?: VideoConfigState;
 	imagePrompt?: string;
-	videoScenes?: EditableVideoScene[];
+	videoScenes?: NormalizedVideoScene[];
 };
 
 export type SaveMode = "debounced" | "immediate";

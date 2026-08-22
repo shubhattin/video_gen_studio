@@ -6,4 +6,5 @@ export {
 	videoScenesToMarkdown,
 	type EditableVideoScene,
 	type MarkdownToVideoScenesResult,
+	type NormalizedVideoScene,
 } from "../../convex/lib/videoPlanMarkdown";

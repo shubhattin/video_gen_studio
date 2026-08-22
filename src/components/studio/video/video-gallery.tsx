@@ -3,6 +3,7 @@ import type { Id } from "@convex/_generated/dataModel";
 import { useMutation, useQuery } from "convex/react";
 import { Download, Info, Loader2, Trash2 } from "lucide-react";
 import { useState } from "react";
+import { MessageResponse } from "#/components/ai-elements/message";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -259,9 +260,11 @@ function GalleryVideoCard({
 						{prompt?.trim() ? (
 							<div className="flex flex-col gap-1.5 border-t border-border/70 pt-3">
 								<span className="text-xs text-muted-foreground">Prompt</span>
-								<p className="max-h-28 overflow-y-auto text-xs leading-relaxed text-foreground">
-									{prompt.trim()}
-								</p>
+								<div className="max-h-28 overflow-y-auto text-foreground">
+									<MessageResponse className={markdownPromptClassName}>
+										{prompt.trim()}
+									</MessageResponse>
+								</div>
 							</div>
 						) : null}
 					</PopoverContent>
@@ -299,6 +302,9 @@ const VIDEO_SKELETON_KEYS = Array.from(
 	{ length: 6 },
 	(_, i) => `video-skeleton-${i}`,
 );
+
+const markdownPromptClassName =
+	"text-xs leading-relaxed [&_strong]:font-semibold [&_em]:italic [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em] [&_p]:my-1.5 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0";
 
 function GalleryVideoCardSkeleton() {
 	return (

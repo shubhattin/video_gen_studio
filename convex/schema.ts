@@ -22,7 +22,7 @@ export const videoSceneValidator = v.object({
 	scene: v.string(),
 	style: v.string(),
 	camera: v.string(),
-	audio: v.string(),
+	audio: v.optional(v.string()),
 });
 
 export const mediaMetaValidator = v.object({

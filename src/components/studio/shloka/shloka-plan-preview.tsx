@@ -1,7 +1,14 @@
-import { Copy, Pencil } from "lucide-react";
+import { Copy, Info, Pencil } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { MessageResponse } from "#/components/ai-elements/message";
 import { Button } from "#/components/ui/button";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogHeader,
+	DialogTitle,
+} from "#/components/ui/dialog";
 import { MarkdownTextarea } from "#/components/ui/markdown-textarea";
 import {
 	Popover,
@@ -13,13 +20,13 @@ import {
 } from "#/components/ui/popover";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs";
 import {
-	type EditableVideoScene,
 	markdownToVideoScenes,
+	type NormalizedVideoScene,
 	normalizeVideoScenes,
 	videoScenesToMarkdown,
 } from "#/lib/video-plan-markdown";
 
-type VideoScene = EditableVideoScene;
+type VideoScene = NormalizedVideoScene;
 
 type ShlokaPlanPreviewProps = {
 	imagePrompt?: string;
@@ -38,6 +45,9 @@ type ShlokaPlanPreviewProps = {
 const markdownViewClassName =
 	"text-sm leading-relaxed [&_strong]:font-semibold [&_em]:italic [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-xs [&_h2]:mt-4 [&_h2]:mb-2 [&_h2]:font-heading [&_h2]:text-base [&_h2]:font-semibold [&_h3]:mt-3 [&_h3]:mb-2 [&_h3]:font-heading [&_h3]:text-sm [&_h3]:font-semibold [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_li]:my-1 [&_p]:my-2 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0";
 
+const markdownPreviewClassName =
+	"text-xs leading-relaxed [&_strong]:font-semibold [&_em]:italic [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em] [&_h2]:mt-3 [&_h2]:mb-1.5 [&_h2]:font-heading [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:mt-2.5 [&_h3]:mb-1.5 [&_h3]:font-heading [&_h3]:text-xs [&_h3]:font-semibold [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-4 [&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-4 [&_li]:my-0.5 [&_p]:my-1.5 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0";
+
 function PlanEditor({
 	title,
 	description,
@@ -50,6 +60,8 @@ function PlanEditor({
 	onEditModeChange,
 	editorClassName,
 	viewClassName,
+	showFormatNote = false,
+	previewBeforeSave = false,
 }: {
 	title: string;
 	description: string;
@@ -64,10 +76,15 @@ function PlanEditor({
 	editorClassName?: string;
 	/** Optional classes for the read-only view (e.g. a capped scroll area). */
 	viewClassName?: string;
+	/** Show the strict-format info note above the editor. */
+	showFormatNote?: boolean;
+	/** Open a Parsed/Text preview dialog before committing the save. */
+	previewBeforeSave?: boolean;
 }) {
 	const [draft, setDraft] = useState(value);
 	const [error, setError] = useState<string | null>(null);
 	const [warning, setWarning] = useState<string | null>(null);
+	const [previewOpen, setPreviewOpen] = useState(false);
 
 	useEffect(() => {
 		if (editMode === "view") {
@@ -82,12 +99,107 @@ function PlanEditor({
 
 	const dirty = draft !== value;
 
+	const runSave = () => {
+		void (async () => {
+			try {
+				const result = await onSave(draft);
+				if (typeof result === "string") {
+					setWarning(result);
+				}
+				onEditModeChange("view");
+			} catch (caught) {
+				setError(caught instanceof Error ? caught.message : "Could not save.");
+			}
+		})();
+	};
+
+	const requestSave = () => {
+		if (!dirty || saving) return;
+		if (!previewBeforeSave) {
+			runSave();
+			return;
+		}
+		const parsed = markdownToVideoScenes(draft);
+		if (parsed.scenes.length === 0) {
+			setError(
+				parsed.warning ??
+					'Could not parse scenes. Keep headings like "### Scene 1: …".',
+			);
+			return;
+		}
+		setError(null);
+		setPreviewOpen(true);
+	};
+
 	return (
 		<div className="space-y-3">
 			<div>
 				<p className="font-heading text-sm font-semibold">{title}</p>
 				<p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
 			</div>
+			{showFormatNote && editMode === "edit" ? (
+				<div className="flex items-center gap-2 rounded-lg border border-blue-500/40 bg-blue-500/10 px-3 py-2 text-xs text-blue-800 dark:text-blue-200">
+					<p className="min-w-0 flex-1 leading-relaxed">
+						Editing must follow the strict format below — free-form markdown
+						won't parse back into scene data.
+					</p>
+					<Popover>
+						<PopoverTrigger
+							render={
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon-xs"
+									className="shrink-0 text-blue-800 hover:bg-blue-500/15 dark:text-blue-200"
+									aria-label="Format details"
+								/>
+							}
+						>
+							<Info />
+						</PopoverTrigger>
+						<PopoverContent align="start" className="w-80 gap-2 p-4">
+							<PopoverHeader>
+								<PopoverTitle>Accepted format</PopoverTitle>
+								<PopoverDescription>
+									The editor only understands this exact shape.
+								</PopoverDescription>
+							</PopoverHeader>
+							<ul className="list-disc space-y-1 pl-4 text-xs leading-relaxed">
+								<li>
+									Each scene starts with a heading like{" "}
+									<code className="rounded bg-muted px-1 py-0.5 font-mono">
+										### Scene 1: title
+									</code>{" "}
+									and scenes are renumbered in order on save.
+								</li>
+								<li>
+									Fields are bullets like{" "}
+									<code className="rounded bg-muted px-1 py-0.5 font-mono">
+										- **Subject:** …
+									</code>{" "}
+									— Subject and Action are required; Scene, Style, Camera are
+									optional.
+								</li>
+								<li>
+									<strong>Audio</strong> is a special optional field — only add
+									an{" "}
+									<code className="rounded bg-muted px-1 py-0.5 font-mono">
+										**Audio:**
+									</code>{" "}
+									line when audio generation is enabled for this plan.
+								</li>
+								<li>
+									Use{" "}
+									<code className="rounded bg-muted px-1 py-0.5 font-mono">
+										—
+									</code>{" "}
+									for empty values or drop the line entirely.
+								</li>
+							</ul>
+						</PopoverContent>
+					</Popover>
+				</div>
+			) : null}
 			{editMode === "edit" ? (
 				<MarkdownTextarea
 					value={draft}
@@ -113,23 +225,7 @@ function PlanEditor({
 						size="sm"
 						className="min-h-11"
 						disabled={disabled || saving || !dirty}
-						onClick={() => {
-							void (async () => {
-								try {
-									const result = await onSave(draft);
-									if (typeof result === "string") {
-										setWarning(result);
-									}
-									onEditModeChange("view");
-								} catch (caught) {
-									setError(
-										caught instanceof Error
-											? caught.message
-											: "Could not save.",
-									);
-								}
-							})();
-						}}
+						onClick={requestSave}
 					>
 						{saving ? "Saving…" : "Save"}
 					</Button>
@@ -144,6 +240,77 @@ function PlanEditor({
 					</Button>
 				</div>
 			) : null}
+
+			<Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+				<DialogContent className="max-h-[min(36rem,90vh)] gap-3 overflow-y-auto sm:max-w-xl">
+					<DialogHeader>
+						<DialogTitle>Review changes before saving</DialogTitle>
+						<DialogDescription>
+							Check how your edits parse into structured scenes before they
+							become the plan.
+						</DialogDescription>
+					</DialogHeader>
+					<Tabs defaultValue="parsed">
+						<TabsList>
+							<TabsTrigger value="parsed">Parsed</TabsTrigger>
+							<TabsTrigger value="text">Text</TabsTrigger>
+						</TabsList>
+						<TabsContent value="parsed" className="mt-3 space-y-2">
+							{(() => {
+								const parsed = markdownToVideoScenes(draft);
+								if (parsed.scenes.length === 0) {
+									return (
+										<p className="text-xs text-destructive">
+											{parsed.warning ?? "Could not parse any scenes."}
+										</p>
+									);
+								}
+								return (
+									<>
+										<p className="text-xs text-muted-foreground">
+											Parsed {parsed.scenes.length} scene
+											{parsed.scenes.length === 1 ? "" : "s"}.
+											{parsed.warning ? ` ${parsed.warning}` : ""}
+										</p>
+										<div className="max-h-64 overflow-y-auto overscroll-contain rounded-lg border border-border bg-background/40 p-3">
+											<MessageResponse className={markdownPreviewClassName}>
+												{videoScenesToMarkdown(parsed.scenes)}
+											</MessageResponse>
+										</div>
+									</>
+								);
+							})()}
+						</TabsContent>
+						<TabsContent value="text" className="mt-3">
+							<pre className="max-h-64 overflow-y-auto overscroll-contain whitespace-pre-wrap wrap-break-word rounded-lg border border-border bg-muted/30 p-3 font-mono text-xs leading-relaxed">
+								{draft}
+							</pre>
+						</TabsContent>
+					</Tabs>
+					<div className="flex items-center justify-end gap-2">
+						<Button
+							variant="outline"
+							size="sm"
+							className="min-h-11"
+							disabled={saving}
+							onClick={() => setPreviewOpen(false)}
+						>
+							Cancel
+						</Button>
+						<Button
+							size="sm"
+							className="min-h-11"
+							disabled={saving || !markdownToVideoScenes(draft).scenes.length}
+							onClick={() => {
+								setPreviewOpen(false);
+								runSave();
+							}}
+						>
+							{saving ? "Saving…" : "Save changes"}
+						</Button>
+					</div>
+				</DialogContent>
+			</Dialog>
 		</div>
 	);
 }
@@ -324,6 +491,8 @@ export function ShlokaPlanPreview({
 							ariaLabel="Edit video plan markdown"
 							editorClassName="min-h-64 border-border shadow-sm"
 							viewClassName="max-h-[min(28rem,55vh)] overflow-y-auto overscroll-contain rounded-lg border border-border bg-background/40 p-4"
+							showFormatNote
+							previewBeforeSave
 							editMode={editMode}
 							onEditModeChange={setEditMode}
 							onSave={async (next) => {
@@ -380,7 +549,7 @@ export function ShlokaPlanPreview({
 												<dd>{scene.camera}</dd>
 											</div>
 										) : null}
-										{scene.audio.trim() ? (
+										{scene.audio?.trim() ? (
 											<div>
 												<dt className="font-medium text-foreground">Audio</dt>
 												<dd>{scene.audio}</dd>

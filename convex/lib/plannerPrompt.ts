@@ -52,6 +52,7 @@ export function singleClipPlannerInstructions(args?: {
 	durationSeconds?: number;
 	maxPromptChars?: number;
 	aspectRatio?: string;
+	generateAudio?: boolean;
 }) {
 	const durationHint =
 		args?.durationSeconds != null
@@ -65,6 +66,9 @@ export function singleClipPlannerInstructions(args?: {
 		args?.aspectRatio != null
 			? `The video will be rendered at ${args.aspectRatio}; compose every beat's framing, subject placement, and camera moves for that frame.`
 			: "Respect the aspect ratio given in the user prompt when composing scenes.";
+	const audioHint = args?.generateAudio
+		? "- `audio`: sound / music / SFX direction for the beat (optional; use \"\" if a beat has none). Audio generation is ENABLED for this plan — write short, concrete audio cues."
+		: "- `audio`: DO NOT include this field at all. Audio generation is DISABLED for this plan (the user prompt says Generate Audio Plans: No) — omit it from every beat.";
 
 	return `## Output shape
 Always return \`kind: "single-clip"\` with:
@@ -79,7 +83,7 @@ Always return \`kind: "single-clip"\` with:
 - \`scene\`: environment / setting (optional; use "" if unused)
 - \`style\`: visual style, lighting, palette (optional; use "" if unused)
 - \`camera\`: camera move / cut (optional; use "" if unused)
-- \`audio\`: sound / music / SFX (optional; use "" if unused)
+${audioHint}
 
 Keep each field concise (one tight sentence or less). Do not pad optional fields.
 
@@ -136,11 +140,12 @@ export function resolvePlannerSystemPrompt(
 /** Full system string for Shloka planning: creative base + output-shape appendix. */
 export function buildShlokaPlannerSystemPrompt(args: {
 	stored?: string | null;
-	/** Single-clip duration + provider char budget + aspect ratio. */
+	/** Single-clip duration + provider char budget + aspect ratio + audio flag. */
 	singleClip?: {
 		durationSeconds: number;
 		maxPromptChars: number;
 		aspectRatio?: string;
+		generateAudio?: boolean;
 	} | null;
 }) {
 	const base = resolvePlannerSystemPrompt(args.stored);

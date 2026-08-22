@@ -55,6 +55,7 @@ function buildPlannerPrompt(args: {
 	durationSeconds?: number;
 	maxPromptChars?: number;
 	aspectRatio?: string;
+	generateAudio?: boolean;
 }) {
 	const sections: string[] = [
 		[
@@ -95,6 +96,7 @@ function buildPlannerPrompt(args: {
 			`- Provider video prompt character limit: ${args.maxPromptChars} (videoScenes will be flattened into one text prompt; stay concise and pricise).`,
 		);
 	}
+	meta.push(`- Generate Audio Plans: ${args.generateAudio ? "Yes" : "No"}`);
 	if (meta.length > 0) {
 		sections.push(["## Generation constraints", ...meta].join("\n"));
 	}
@@ -318,6 +320,14 @@ export const planShlokaRun = action({
 				{ selection: run.plannerPromptSelection },
 			);
 			const { budget } = planBudgetFromConfig(plan.videoParams);
+			// Audio planning only when the model can generate audio AND the
+			// user turned it on for this plan.
+			const generateAudio =
+				Boolean(budget.generateAudio) &&
+				Boolean(
+					MODEL_CAPABILITY_PROFILES[budget.modelId as VideoModelId]
+						?.supportsAudio,
+				);
 
 			const result = await generateText({
 				model: getOpenRouterProvider()(PLANNER_MODEL_ID),
@@ -328,6 +338,7 @@ export const planShlokaRun = action({
 						durationSeconds: budget.durationSeconds,
 						maxPromptChars: budget.maxPromptChars,
 						aspectRatio: budget.aspectRatio,
+						generateAudio,
 					},
 				}),
 				prompt: buildPlannerPrompt({
@@ -336,6 +347,7 @@ export const planShlokaRun = action({
 					durationSeconds: budget.durationSeconds,
 					maxPromptChars: budget.maxPromptChars,
 					aspectRatio: budget.aspectRatio,
+					generateAudio,
 				}),
 				output: Output.object({ schema: normalPlannerOutputSchema }),
 			});

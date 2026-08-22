@@ -16,8 +16,8 @@ export type EditableVideoScene = {
 	style: string;
 	/** Camera movement / cut (optional). */
 	camera: string;
-	/** Audio direction (optional). */
-	audio: string;
+	/** Audio direction — only present when audio generation is enabled for the plan. */
+	audio?: string | null;
 };
 
 /** Labels for markdown edit round-trip. */
@@ -40,14 +40,26 @@ const OPTIONAL_FIELDS = new Set<SceneField>([
 	"audio",
 ]);
 
-/** Order by sceneNumber and renumber 1..n. */
+/**
+ * Scene shape after normalization: audio is stripped of null/whitespace so it
+ * matches the Convex validator (`v.optional(v.string())`).
+ */
+export type NormalizedVideoScene = Omit<EditableVideoScene, "audio"> & {
+	audio?: string;
+};
+
+/** Order by sceneNumber and renumber 1..n. Strips empty/null audio. */
 export function normalizeVideoScenes(
 	scenes: EditableVideoScene[] | undefined | null,
-): EditableVideoScene[] {
+): NormalizedVideoScene[] {
 	if (!scenes?.length) return [];
 	return [...scenes]
 		.sort((a, b) => a.sceneNumber - b.sceneNumber)
-		.map((s, i) => ({ ...s, sceneNumber: i + 1 }));
+		.map((s, i) => ({
+			...s,
+			sceneNumber: i + 1,
+			audio: s.audio?.trim() || undefined,
+		}));
 }
 
 function compactSceneLine(scene: EditableVideoScene, index: number): string {
@@ -59,7 +71,7 @@ function compactSceneLine(scene: EditableVideoScene, index: number): string {
 	if (scene.scene.trim()) chunks.push(`Scene:${scene.scene.trim()}`);
 	if (scene.style.trim()) chunks.push(`Style:${scene.style.trim()}`);
 	if (scene.camera.trim()) chunks.push(`Camera:${scene.camera.trim()}`);
-	if (scene.audio.trim()) chunks.push(`Audio:${scene.audio.trim()}`);
+	if (scene.audio?.trim()) chunks.push(`Audio:${scene.audio.trim()}`);
 	return chunks.join(" ");
 }
 
@@ -103,7 +115,6 @@ function emptyScene(sceneNumber: number): EditableVideoScene {
 		scene: "",
 		style: "",
 		camera: "",
-		audio: "",
 	};
 }
 
@@ -121,7 +132,7 @@ function labelToField(label: string): SceneField | null {
 }
 
 export type MarkdownToVideoScenesResult = {
-	scenes: EditableVideoScene[];
+	scenes: NormalizedVideoScene[];
 	/** Non-blocking notice about non-conforming input. Null when input is clean. */
 	warning: string | null;
 };
@@ -175,6 +186,14 @@ export function markdownToVideoScenes(
 				continue;
 			}
 			const value = (fieldMatch[2] ?? "").trim();
+			// Audio is plan-optional: only populate it when the markdown
+			// actually carries a non-empty value.
+			if (field === "audio") {
+				if (value && value !== "—") {
+					scene.audio = value;
+				}
+				continue;
+			}
 			scene[field] = value === "—" ? "" : value;
 		}
 		scenes.push(scene);
@@ -207,6 +226,7 @@ export function markdownToVideoScenes(
 			sceneNumber: index + 1,
 			subject: scene.subject.trim() || "Untitled subject",
 			action: scene.action.trim() || "Quiet motion",
+			audio: scene.audio?.trim() || undefined,
 		}));
 
 	return {

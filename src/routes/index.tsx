@@ -489,6 +489,13 @@ function ShlokaStudioPage() {
 				used: `${used.durationSeconds}s`,
 			});
 		}
+		if (Boolean(videoConfig.generateAudio) !== Boolean(used.generateAudio)) {
+			fields.push({
+				label: "audio generation",
+				current: videoConfig.generateAudio ? "on" : "off",
+				used: used.generateAudio ? "on" : "off",
+			});
+		}
 		return fields;
 	}, [activePlan, videoConfig]);
 

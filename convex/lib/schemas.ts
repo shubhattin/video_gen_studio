@@ -19,7 +19,12 @@ export const videoSceneSchema = z.object({
 	scene: z.string(),
 	style: z.string(),
 	camera: z.string(),
-	audio: z.string(),
+	audio: z
+		.string()
+		.nullable()
+		.describe(
+			"Sound / music / SFX direction for this beat. Return null unless the user prompt explicitly says Generate Audio Plans: Yes.",
+		),
 });
 
 export const normalPlannerOutputSchema = z.object({
@@ -74,7 +79,11 @@ export function planConfigDiverges(
 	used:
 		| Pick<
 				LastModelParamsUsed,
-				"modelId" | "aspectRatio" | "resolution" | "durationSeconds"
+				| "modelId"
+				| "aspectRatio"
+				| "resolution"
+				| "durationSeconds"
+				| "generateAudio"
 		  >
 		| null
 		| undefined,
@@ -84,7 +93,8 @@ export function planConfigDiverges(
 		current.modelId !== used.modelId ||
 		current.aspectRatio !== used.aspectRatio ||
 		current.resolution !== used.resolution ||
-		current.durationSeconds !== used.durationSeconds
+		current.durationSeconds !== used.durationSeconds ||
+		Boolean(current.generateAudio) !== Boolean(used.generateAudio)
 	);
 }
 
