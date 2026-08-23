@@ -433,6 +433,7 @@ export const listGalleryImages = query({
 			meta: doc.meta,
 			source: doc.source,
 			revisedImagePrompt: doc.revisedImagePrompt,
+			timeTakenMs: doc.timeTakenMs,
 			createdAt: doc.createdAt,
 		}));
 	},
@@ -667,5 +668,16 @@ export const objectKeyInGallery = internalQuery({
 	handler: async (ctx, args) => {
 		const found = await findGalleryByObjectKey(ctx, args.objectKey);
 		return found !== null;
+	},
+});
+
+/** Internal: load an in-flight OpenRouter video job for a poll continuation. */
+export const getOpenRouterVideoJobDoc = internalQuery({
+	args: {
+		jobRecordId: v.id("openRouterVideoJobs"),
+	},
+	returns: v.union(v.null(), v.any()),
+	handler: async (ctx, args) => {
+		return await ctx.db.get(args.jobRecordId);
 	},
 });

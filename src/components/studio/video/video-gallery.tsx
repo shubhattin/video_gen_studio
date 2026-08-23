@@ -2,6 +2,7 @@ import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { useMutation, useQuery } from "convex/react";
 import { Download, Info, Loader2, Trash2 } from "lucide-react";
+import prettyMs from "pretty-ms";
 import { useState } from "react";
 import { MessageResponse } from "#/components/ai-elements/message";
 import {
@@ -60,6 +61,10 @@ type GalleryVideo = {
 		width?: number;
 		height?: number;
 	};
+	openRouterJobId?: string;
+	openRouterGenerationId?: string;
+	actualCostUsd?: number;
+	timeTakenMs?: number;
 	videoParams?: {
 		modelId?: string;
 		aspectRatio?: string;
@@ -244,6 +249,12 @@ function GalleryVideoCard({
 								<div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-2">
 									<span className="text-muted-foreground">Size</span>
 									<span>{formatBytes(video.meta?.bytes)}</span>
+								</div>
+							) : null}
+							{video.timeTakenMs != null ? (
+								<div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-2">
+									<span className="text-muted-foreground">Time taken</span>
+									<span>{prettyMs(video.timeTakenMs)}</span>
 								</div>
 							) : null}
 						</div>

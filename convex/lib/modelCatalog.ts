@@ -37,7 +37,16 @@ export const TITLE_MODEL_ID = "openai/gpt-5.6-luna";
 /** Same luna model — compress over-limit provider video prompts. */
 export const VIDEO_PROMPT_SUMMARIZER_MODEL_ID = TITLE_MODEL_ID;
 export const REFERENCE_IMAGE_MODEL_ID = "gpt-image-2";
+/** video polling attempts for Openrouter Video API */
 export const VIDEO_POLLING_INTERVAL = 4000;
+/**
+ * Max time ONE action spends polling an OpenRouter video job before it
+ * schedules a continuation action and exits. Convex Node actions die at
+ * 10 minutes; an 8-minute poll window leaves headroom for submit + download
+ * + R2 upload + DB writes. Continuations reschedule indefinitely until the
+ * job reaches a terminal state, so expensive generations are never wasted.
+ */
+export const POLL_RETRY_EVENT_MS = 8 * 60 * 1000;
 
 export type AspectRatio =
 	| "16:9"

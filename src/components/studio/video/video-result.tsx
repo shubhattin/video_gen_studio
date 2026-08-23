@@ -1,5 +1,6 @@
 import type { Id } from "@convex/_generated/dataModel";
 import { Download, Info, Loader2 } from "lucide-react";
+import prettyMs from "pretty-ms";
 import { useState } from "react";
 import { MessageResponse } from "#/components/ai-elements/message";
 import { Badge } from "#/components/ui/badge";
@@ -40,6 +41,7 @@ export type VideoResultItem = {
 	openRouterJobId?: string;
 	openRouterGenerationId?: string;
 	actualCostUsd?: number;
+	timeTakenMs?: number;
 	videoParams?: {
 		modelId?: string;
 		aspectRatio?: string;
@@ -178,7 +180,9 @@ function VideoClipCard({
 								: "block max-h-[min(70vh,560px)] w-full"
 						}
 						style={ratio ? { aspectRatio: ratio } : undefined}
-					/>
+					>
+						<track kind="captions" />
+					</video>
 				) : (
 					<div className="flex h-56 items-center justify-center text-sm text-muted-foreground">
 						Video unavailable
@@ -256,6 +260,12 @@ function VideoClipCard({
 									video.actualCostUsd != null
 										? `$${video.actualCostUsd.toFixed(6)}`
 										: null
+								}
+							/>
+							<InfoRow
+								label="Time taken"
+								value={
+									video.timeTakenMs != null ? prettyMs(video.timeTakenMs) : null
 								}
 							/>
 							<InfoRow label="Size" value={formatBytes(video.meta?.bytes)} />

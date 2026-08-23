@@ -2,6 +2,7 @@ import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { useMutation, useQuery } from "convex/react";
 import { Download, Info, Loader2, Maximize2, Trash2 } from "lucide-react";
+import prettyMs from "pretty-ms";
 import { useState } from "react";
 import {
 	formatBytes,
@@ -57,6 +58,7 @@ type GalleryImage = {
 	source?: "generated" | "uploaded" | "terminal_frame";
 	revisedImagePrompt?: string;
 	meta?: { mimeType?: string; width?: number; height?: number; bytes?: number };
+	timeTakenMs?: number;
 	createdAt: number;
 };
 
@@ -217,6 +219,12 @@ function GalleryImageCard({
 									<span>{sizeLabel}</span>
 								</div>
 							) : null}
+							{image.timeTakenMs != null ? (
+								<div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-2">
+									<span className="text-muted-foreground">Time taken</span>
+									<span>{prettyMs(image.timeTakenMs)}</span>
+								</div>
+							) : null}
 							{image.revisedImagePrompt?.trim() ? (
 								<div className="flex flex-col gap-1.5">
 									<span className="text-muted-foreground">Revised prompt</span>
@@ -291,9 +299,7 @@ function GalleryImageCard({
 				<DialogContent className="max-w-4xl bg-black p-0 overflow-hidden border-black sm:max-w-5xl">
 					<DialogHeader className="sr-only">
 						<DialogTitle>Full size image</DialogTitle>
-						<DialogDescription>
-							Full resolution preview.
-						</DialogDescription>
+						<DialogDescription>Full resolution preview.</DialogDescription>
 					</DialogHeader>
 					{image.url ? (
 						<img

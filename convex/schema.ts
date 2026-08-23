@@ -64,6 +64,16 @@ export const modelStudioStatusValidator = v.union(
 	v.literal("failed"),
 );
 
+/** OpenRouter async video job lifecycle (mirrors provider job status). */
+export const openRouterVideoJobStatusValidator = v.union(
+	v.literal("pending"),
+	v.literal("in_progress"),
+	v.literal("completed"),
+	v.literal("failed"),
+	v.literal("cancelled"),
+	v.literal("expired"),
+);
+
 /** Video config stored per plan — no raw prompt slot (that's model-studio's job). */
 export const planVideoConfigValidator = videoParamsValidator.omit("prompt");
 
@@ -98,6 +108,8 @@ export default defineSchema({
 		meta: mediaMetaValidator,
 		source: galleryImageSourceValidator,
 		revisedImagePrompt: v.optional(v.string()),
+		/** Wall-clock generation time (ms). Absent for uploads/frames. */
+		timeTakenMs: v.optional(v.number()),
 		createdAt: v.number(),
 	})
 		.index("by_createdAt", ["createdAt"])
@@ -109,6 +121,8 @@ export default defineSchema({
 		openRouterJobId: v.string(),
 		openRouterGenerationId: v.optional(v.string()),
 		actualCostUsd: v.optional(v.number()),
+		/** Submit → completion wall-clock time (ms), spans poll continuations. */
+		timeTakenMs: v.optional(v.number()),
 		videoParams: videoParamsValidator,
 		videoPrompt: v.optional(v.string()),
 		warnings: v.optional(v.array(v.string())),
@@ -123,6 +137,29 @@ export default defineSchema({
 		payload: v.string(),
 		fetchedAt: v.number(),
 	}),
+
+	/**
+	 * In-flight OpenRouter video jobs. Lets a polling action hand its job to
+	 * a continuation action (fresh 10-minute Node runtime budget) instead of
+	 * dying at the Convex action limit with the generation still pending.
+	 */
+	openRouterVideoJobs: defineTable({
+		jobId: v.string(),
+		pollingUrl: v.string(),
+		status: openRouterVideoJobStatusValidator,
+		generationId: v.optional(v.string()),
+		errorMessage: v.optional(v.string()),
+		runId: v.optional(v.id("generationRuns")),
+		planId: v.optional(v.id("shlokaPlans")),
+		modelStudioRunId: v.optional(v.id("modelStudioRuns")),
+		videoParams: videoParamsValidator,
+		videoPrompt: v.optional(v.string()),
+		warnings: v.optional(v.array(v.string())),
+		createdAt: v.number(),
+		updatedAt: v.number(),
+	})
+		.index("by_jobId", ["jobId"])
+		.index("by_status_createdAt", ["status", "createdAt"]),
 
 	systemPromptTemplates: defineTable({
 		title: v.string(),

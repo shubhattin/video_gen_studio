@@ -4,9 +4,44 @@
  * Kept explicit (not AI SDK video wrapper) for reliable job IDs, timeouts, and Convex Node actions.
  */
 
-import { VIDEO_POLLING_INTERVAL } from "./modelCatalog";
+import { POLL_RETRY_EVENT_MS, VIDEO_POLLING_INTERVAL } from "./modelCatalog";
 
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
+
+/**
+ * Thrown when a single action's poll budget (POLL_RETRY_EVENT_MS) expires
+ * while the job is still in progress. Callers catch this to schedule a
+ * continuation action with a fresh runtime budget instead of failing the run.
+ */
+export class OpenRouterPollTimeoutError extends Error {
+	constructor(
+		readonly jobId: string,
+		readonly timeoutMs: number,
+	) {
+		super(
+			`Video job ${jobId} still in progress after ${timeoutMs}ms poll budget; deferring to a continuation action.`,
+		);
+		this.name = "OpenRouterPollTimeoutError";
+	}
+}
+
+/** Sleep that wakes early when the abort signal fires. */
+async function abortableSleep(ms: number, signal?: AbortSignal) {
+	if (signal?.aborted) {
+		return;
+	}
+	await new Promise<void>((resolve) => {
+		const timer = setTimeout(resolve, ms);
+		signal?.addEventListener(
+			"abort",
+			() => {
+				clearTimeout(timer);
+				resolve();
+			},
+			{ once: true },
+		);
+	});
+}
 
 export type OpenRouterVideoStatus =
 	| "pending"
@@ -97,12 +132,14 @@ export async function submitOpenRouterVideoJob(
 export async function pollOpenRouterVideoJob(
 	apiKey: string,
 	job: OpenRouterVideoJob,
+	options?: { signal?: AbortSignal },
 ): Promise<OpenRouterVideoJob> {
 	const pollingUrl = job.polling_url.startsWith("http")
 		? job.polling_url
 		: new URL(job.polling_url, OPENROUTER_BASE).toString();
 	const response = await fetch(pollingUrl, {
 		headers: authHeaders(apiKey),
+		signal: options?.signal,
 	});
 	if (!response.ok) {
 		throw new Error(await parseError(response));
@@ -116,11 +153,12 @@ export async function waitForOpenRouterVideoJob(
 	options?: {
 		intervalMs?: number;
 		timeoutMs?: number;
+		signal?: AbortSignal;
 		onStatus?: (job: OpenRouterVideoJob) => void | Promise<void>;
 	},
 ): Promise<OpenRouterVideoJob> {
 	const intervalMs = options?.intervalMs ?? VIDEO_POLLING_INTERVAL;
-	const timeoutMs = options?.timeoutMs ?? 540_000;
+	const timeoutMs = options?.timeoutMs ?? POLL_RETRY_EVENT_MS;
 	const started = Date.now();
 	let job = initial;
 
@@ -137,13 +175,16 @@ export async function waitForOpenRouterVideoJob(
 				job.error ?? `Video generation ${job.status} (job ${job.id}).`,
 			);
 		}
-		if (Date.now() - started >= timeoutMs) {
-			throw new Error(
-				`Video generation timed out after ${timeoutMs}ms (job ${job.id}).`,
-			);
+		if (options?.signal?.aborted || Date.now() - started >= timeoutMs) {
+			throw new OpenRouterPollTimeoutError(job.id, timeoutMs);
 		}
-		await new Promise((resolve) => setTimeout(resolve, intervalMs));
-		job = await pollOpenRouterVideoJob(apiKey, job);
+		await abortableSleep(intervalMs, options?.signal);
+		if (options?.signal?.aborted) {
+			throw new OpenRouterPollTimeoutError(job.id, timeoutMs);
+		}
+		job = await pollOpenRouterVideoJob(apiKey, job, {
+			signal: options?.signal,
+		});
 		await options?.onStatus?.(job);
 	}
 }

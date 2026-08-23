@@ -881,11 +881,13 @@ export const wipeAllStudioData = mutation({
 		runsDeleted: v.number(),
 		filesDeleted: v.number(),
 		cachesDeleted: v.number(),
+		jobsDeleted: v.number(),
 	}),
 	handler: async (ctx): Promise<{
 		runsDeleted: number;
 		filesDeleted: number;
 		cachesDeleted: number;
+		jobsDeleted: number;
 	}> => {
 		await requireAdmin(ctx);
 		return await ctx.runMutation(internal.studio.internal.wipeAllStudioData, {});

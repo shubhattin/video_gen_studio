@@ -101,6 +101,11 @@ function referenceCapabilityWarnings(args: {
 			"Last-frame tag will be ignored — this model does not support last frames.",
 		);
 	}
+	if (args.lastFrameImageId && !args.firstFrameImageId) {
+		warnings.push(
+			"Last frame needs a first frame — providers reject frame interpolation with an input image but no first frame, so the last frame will be skipped.",
+		);
+	}
 	if (
 		args.extraReferenceImageIds.length > 0 &&
 		args.supportsInputReferences === false
@@ -680,6 +685,7 @@ export function ReferenceImagePanel({
 						fileInputRef.current?.click();
 					}
 				}}
+				// biome-ignore lint/a11y/useSemanticElements: drag-and-drop upload zone requires div semantics
 				role="button"
 				tabIndex={uploadBusy ? -1 : 0}
 			>

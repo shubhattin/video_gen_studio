@@ -70,6 +70,13 @@ export function adaptOpenRouterVideoRequest(args: {
 	if (args.lastFrameUrl) {
 		if (!profile.supportsLastFrame) {
 			warnings.push("Last-frame image ignored — model does not support it.");
+		} else if (!args.firstFrameUrl) {
+			// Providers fail the whole job ("Frame interpolation requires both
+			// an input image and a last frame") when a last frame arrives
+			// without a first frame — skip it instead of burning a generation.
+			warnings.push(
+				"Last-frame image ignored — a first frame is required whenever a last frame is used (frame interpolation needs both). Tag a first-frame image to enable it.",
+			);
 		} else {
 			frame_images.push({
 				type: "image_url",

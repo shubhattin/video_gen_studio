@@ -6,6 +6,7 @@ import {
 	lastModelParamsUsedValidator,
 	mediaMetaValidator,
 	modelStudioStatusValidator,
+	openRouterVideoJobStatusValidator,
 	runStatusValidator,
 	shlokaPlanStatusValidator,
 	videoParamsValidator,
@@ -34,10 +35,67 @@ const galleryVideoInsertValidator = v.object({
 	openRouterJobId: v.string(),
 	openRouterGenerationId: v.optional(v.string()),
 	actualCostUsd: v.optional(v.number()),
+	timeTakenMs: v.optional(v.number()),
 	videoParams: videoParamsValidator,
 	videoPrompt: v.optional(v.string()),
 	warnings: v.optional(v.array(v.string())),
 	createdAt: v.number(),
+});
+
+// ── OpenRouter video job records (poll continuation) ────────────────────
+
+export const createVideoJobRecord = internalMutation({
+	args: {
+		jobId: v.string(),
+		pollingUrl: v.string(),
+		status: openRouterVideoJobStatusValidator,
+		generationId: v.optional(v.string()),
+		errorMessage: v.optional(v.string()),
+		runId: v.optional(v.id("generationRuns")),
+		planId: v.optional(v.id("shlokaPlans")),
+		modelStudioRunId: v.optional(v.id("modelStudioRuns")),
+		videoParams: videoParamsValidator,
+		videoPrompt: v.optional(v.string()),
+		warnings: v.optional(v.array(v.string())),
+	},
+	returns: v.id("openRouterVideoJobs"),
+	handler: async (ctx, args) => {
+		const now = Date.now();
+		return await ctx.db.insert("openRouterVideoJobs", {
+			jobId: args.jobId,
+			pollingUrl: args.pollingUrl,
+			status: args.status,
+			generationId: args.generationId,
+			errorMessage: args.errorMessage,
+			runId: args.runId,
+			planId: args.planId,
+			modelStudioRunId: args.modelStudioRunId,
+			videoParams: args.videoParams,
+			videoPrompt: args.videoPrompt,
+			warnings: args.warnings,
+			createdAt: now,
+			updatedAt: now,
+		});
+	},
+});
+
+export const setVideoJobStatus = internalMutation({
+	args: {
+		jobRecordId: v.id("openRouterVideoJobs"),
+		status: openRouterVideoJobStatusValidator,
+		generationId: v.optional(v.string()),
+		errorMessage: v.optional(v.string()),
+	},
+	returns: v.null(),
+	handler: async (ctx, args) => {
+		await ctx.db.patch(args.jobRecordId, {
+			status: args.status,
+			generationId: args.generationId,
+			errorMessage: args.errorMessage,
+			updatedAt: Date.now(),
+		});
+		return null;
+	},
 });
 
 // ── Run-level ───────────────────────────────────────────────────────────
@@ -351,6 +409,7 @@ export const insertGalleryImage = internalMutation({
 		setAsFirstFrame: v.optional(v.boolean()),
 		attachToRun: v.optional(v.boolean()),
 		warnings: v.optional(v.array(v.string())),
+		timeTakenMs: v.optional(v.number()),
 	},
 	returns: v.id("galleryImages"),
 	handler: async (ctx, args) => {
@@ -359,6 +418,7 @@ export const insertGalleryImage = internalMutation({
 			meta: args.meta,
 			source: args.source,
 			revisedImagePrompt: args.revisedImagePrompt,
+			timeTakenMs: args.timeTakenMs,
 			createdAt: Date.now(),
 		});
 
@@ -472,6 +532,7 @@ export const insertGalleryVideo = internalMutation({
 			openRouterJobId: args.video.openRouterJobId,
 			openRouterGenerationId: args.video.openRouterGenerationId,
 			actualCostUsd: args.video.actualCostUsd,
+			timeTakenMs: args.video.timeTakenMs,
 			videoParams: args.video.videoParams,
 			videoPrompt: args.video.videoPrompt,
 			warnings: args.video.warnings,
@@ -557,6 +618,7 @@ export const wipeAllStudioData = internalMutation({
 		runsDeleted: v.number(),
 		filesDeleted: v.number(),
 		cachesDeleted: v.number(),
+		jobsDeleted: v.number(),
 	}),
 	handler: async (ctx) => {
 		const keysToDelete: string[] = [];
@@ -587,6 +649,11 @@ export const wipeAllStudioData = internalMutation({
 			await ctx.db.delete(run._id);
 		}
 
+		const videoJobs = await ctx.db.query("openRouterVideoJobs").collect();
+		for (const job of videoJobs) {
+			await ctx.db.delete(job._id);
+		}
+
 		await scheduleObjectDeletes(ctx, keysToDelete);
 
 		const caches = await ctx.db.query("catalogCache").collect();
@@ -603,6 +670,7 @@ export const wipeAllStudioData = internalMutation({
 			runsDeleted: runs.length + modelRuns.length + plans.length,
 			filesDeleted: keysToDelete.length,
 			cachesDeleted: caches.length,
+			jobsDeleted: videoJobs.length,
 		};
 	},
 });

@@ -10,6 +10,7 @@ export function galleryImageToRef(doc: Doc<"galleryImages">) {
 		meta: doc.meta,
 		source: doc.source,
 		revisedImagePrompt: doc.revisedImagePrompt,
+		timeTakenMs: doc.timeTakenMs,
 		createdAt: doc.createdAt,
 	};
 }
@@ -22,6 +23,7 @@ export function galleryVideoToResult(doc: Doc<"galleryVideos">) {
 		openRouterJobId: doc.openRouterJobId,
 		openRouterGenerationId: doc.openRouterGenerationId,
 		actualCostUsd: doc.actualCostUsd,
+		timeTakenMs: doc.timeTakenMs,
 		videoParams: doc.videoParams,
 		videoPrompt: doc.videoPrompt,
 		warnings: doc.warnings,

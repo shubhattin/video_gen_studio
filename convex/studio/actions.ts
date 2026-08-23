@@ -9,6 +9,7 @@ import { requireAdmin } from "../lib/auth";
 import {
 	MODEL_CAPABILITY_PROFILES,
 	PLANNER_MODEL_ID,
+	POLL_RETRY_EVENT_MS,
 	TITLE_MODEL_ID,
 	VIDEO_MODEL_IDS,
 	VIDEO_POLLING_INTERVAL,
@@ -25,6 +26,8 @@ import {
 	fetchOpenRouterVideoModels,
 	submitOpenRouterVideoJob,
 	waitForOpenRouterVideoJob,
+	OpenRouterPollTimeoutError,
+	type OpenRouterVideoJob,
 } from "../lib/openrouterVideo";
 import {
 	imageConfigSchema,
@@ -32,6 +35,7 @@ import {
 	videoParamsSchema,
 	type ImageConfig,
 	type LastModelParamsUsed,
+	type VideoParams,
 } from "../lib/schemas";
 import { buildShlokaPlannerSystemPrompt } from "../lib/plannerPrompt";
 import {
@@ -206,6 +210,138 @@ async function signedReadUrl(objectKey: string) {
 	return await createPresignedGetUrl({ objectKey });
 }
 
+// ── OpenRouter poll continuation (10-minute Node action limit) ──────────
+
+type VideoJobTarget = {
+	runId?: Id<"generationRuns">;
+	planId?: Id<"shlokaPlans">;
+	modelStudioRunId?: Id<"modelStudioRuns">;
+};
+
+type PollChunkOutcome =
+	| { kind: "completed"; job: OpenRouterVideoJob }
+	| { kind: "deferred" };
+
+/**
+ * Poll an OpenRouter video job for at most POLL_RETRY_EVENT_MS within THIS
+ * action. An AbortController bounds the whole loop so in-flight fetches and
+ * sleeps are cut off promptly at the budget edge. On expiry callers schedule
+ * internal.studio.actions.continueVideoPoll and exit, letting the
+ * continuation run with a fresh Convex action budget instead of dying at the
+ * 10-minute limit with an expensive generation still pending.
+ */
+async function pollForOneActionBudget(
+	apiKey: string,
+	job: OpenRouterVideoJob,
+): Promise<PollChunkOutcome> {
+	const controller = new AbortController();
+	const budgetTimer = setTimeout(() => controller.abort(), POLL_RETRY_EVENT_MS);
+	try {
+		const completed = await waitForOpenRouterVideoJob(apiKey, job, {
+			intervalMs: VIDEO_POLLING_INTERVAL,
+			timeoutMs: POLL_RETRY_EVENT_MS,
+			signal: controller.signal,
+		});
+		return { kind: "completed", job: completed };
+	} catch (error) {
+		if (error instanceof OpenRouterPollTimeoutError) {
+			return { kind: "deferred" };
+		}
+		throw error;
+	} finally {
+		clearTimeout(budgetTimer);
+	}
+}
+
+/**
+ * Download a completed job, store it in R2, commit the gallery row (which
+ * atomically links plan/run status), and close out the job record.
+ * `generationStartedAt` is the submit-time timestamp (job record creation for
+ * continuations) — OpenRouter exposes cost on the final poll response but no
+ * generation-duration field, so wall-clock time is measured on our side.
+ */
+async function completeVideoJob(
+	ctx: ActionCtx,
+	args: {
+		apiKey: string;
+		jobRecordId: Id<"openRouterVideoJobs">;
+		completed: OpenRouterVideoJob;
+		generationStartedAt: number;
+		target: VideoJobTarget;
+		videoParams: VideoParams;
+		videoPrompt?: string;
+		warnings?: string[];
+	},
+): Promise<void> {
+	const downloaded = await downloadOpenRouterVideo(args.apiKey, args.completed);
+	const objectKey = await storeBytes({
+		kind: "videos",
+		bytes: downloaded.bytes,
+		mimeType: downloaded.mimeType,
+	});
+	const warnings =
+		args.warnings && args.warnings.length > 0 ? args.warnings : undefined;
+	await ctx.runMutation(internal.studio.internal.insertGalleryVideo, {
+		runId: args.target.runId,
+		planId: args.target.planId,
+		modelStudioRunId: args.target.modelStudioRunId,
+		video: {
+			objectKey,
+			meta: {
+				mimeType: downloaded.mimeType,
+				durationSeconds: args.videoParams.durationSeconds,
+				bytes: downloaded.bytes.byteLength,
+			},
+			openRouterJobId: args.completed.id,
+			openRouterGenerationId: args.completed.generation_id,
+			actualCostUsd:
+				typeof args.completed.usage?.cost === "number"
+					? args.completed.usage.cost
+					: undefined,
+			timeTakenMs: Date.now() - args.generationStartedAt,
+			videoParams: args.videoParams,
+			videoPrompt: args.videoPrompt,
+			warnings,
+			createdAt: Date.now(),
+		},
+		warnings,
+	});
+	await ctx.runMutation(internal.studio.internal.setVideoJobStatus, {
+		jobRecordId: args.jobRecordId,
+		status: "completed",
+		generationId: args.completed.generation_id,
+	});
+}
+
+/** Mark a job failed in both the provider-job record and its owning pipeline. */
+async function failVideoJob(
+	ctx: ActionCtx,
+	args: {
+		jobRecordId: Id<"openRouterVideoJobs">;
+		message: string;
+		target: VideoJobTarget;
+	},
+): Promise<void> {
+	await ctx.runMutation(internal.studio.internal.setVideoJobStatus, {
+		jobRecordId: args.jobRecordId,
+		status: "failed",
+		errorMessage: args.message,
+	});
+	if (args.target.planId) {
+		// Also flips the owning run to failed inside the same transaction.
+		await ctx.runMutation(internal.studio.internal.failPlanVideoGeneration, {
+			planId: args.target.planId,
+			message: args.message,
+		});
+	} else if (args.target.modelStudioRunId) {
+		await ctx.runMutation(internal.studio.internal.setModelStudioStatus, {
+			runId: args.target.modelStudioRunId,
+			status: "failed",
+			lastError: args.message,
+		});
+	}
+}
+
 // ── Shloka planning ─────────────────────────────────────────────────────
 
 export const planShlokaRun = action({
@@ -352,6 +488,7 @@ export const generateReferenceImage = action({
 
 		try {
 			const openai = getOpenAIProvider();
+			const imageStartedAt = Date.now();
 			const result = await generateImage({
 				model: openai.image("gpt-image-2"),
 				prompt: imagePrompt.trim(),
@@ -362,6 +499,7 @@ export const generateReferenceImage = action({
 					},
 				},
 			});
+			const timeTakenMs = Date.now() - imageStartedAt;
 
 			const image = result.image;
 			const objectKey = await storeBytes({
@@ -388,6 +526,7 @@ export const generateReferenceImage = action({
 				revisedImagePrompt: openaiMeta?.revisedPrompt,
 				setAsFirstFrame: false,
 				warnings: warnings.length > 0 ? warnings : undefined,
+				timeTakenMs,
 			});
 		} catch (error) {
 			const message =
@@ -505,57 +644,61 @@ export const generateVideoForRun = action({
 			status: "video_generating",
 		});
 
+		const genWarnings = [
+			...adapted.warnings,
+			...(resolved.usedSummary
+				? [
+						`Provider prompt was summarized to fit ${used.maxPromptChars} characters.`,
+					]
+				: []),
+		];
+
 		try {
 			const apiKey = getOpenRouterApiKey();
+			const generationStartedAt = Date.now();
 			const submitted = await submitOpenRouterVideoJob(apiKey, adapted.body);
-			const completed = await waitForOpenRouterVideoJob(apiKey, submitted, {
-				intervalMs: VIDEO_POLLING_INTERVAL,
-				timeoutMs: 540_000,
-			});
-			const downloaded = await downloadOpenRouterVideo(apiKey, completed);
-			const objectKey = await storeBytes({
-				kind: "videos",
-				bytes: downloaded.bytes,
-				mimeType: downloaded.mimeType,
-			});
-
-			const genWarnings = [
-				...adapted.warnings,
-				...(resolved.usedSummary
-					? [
-							`Provider prompt was summarized to fit ${used.maxPromptChars} characters.`,
-						]
-					: []),
-			];
-
-			await ctx.runMutation(
-				internal.studio.internal.insertGalleryVideo,
+			const videoPrompt = videoScenesToMarkdown(
+				normalizeVideoScenes(plan.videoScenes),
+			);
+			const jobRecordId = await ctx.runMutation(
+				internal.studio.internal.createVideoJobRecord,
 				{
+					jobId: submitted.id,
+					pollingUrl: submitted.polling_url,
+					status: submitted.status,
+					generationId: submitted.generation_id,
+					errorMessage: submitted.error,
 					runId: args.runId,
 					planId: args.planId,
-					video: {
-						objectKey,
-						meta: {
-							mimeType: downloaded.mimeType,
-							durationSeconds: adapted.body.duration,
-							bytes: downloaded.bytes.byteLength,
-						},
-						openRouterJobId: completed.id,
-						openRouterGenerationId: completed.generation_id,
-						actualCostUsd:
-							typeof completed.usage?.cost === "number"
-								? completed.usage.cost
-								: undefined,
-						videoParams: parsedParams,
-						videoPrompt: videoScenesToMarkdown(
-							normalizeVideoScenes(plan.videoScenes),
-						),
-						warnings: genWarnings.length > 0 ? genWarnings : undefined,
-						createdAt: Date.now(),
-					},
+					videoParams: parsedParams,
+					videoPrompt,
 					warnings: genWarnings.length > 0 ? genWarnings : undefined,
 				},
 			);
+
+			const outcome = await pollForOneActionBudget(apiKey, submitted);
+			if (outcome.kind === "deferred") {
+				// Job still in progress and this action is at its poll budget —
+				// hand it to a continuation action with a fresh runtime budget
+				// instead of failing. Run stays "video_generating" for the UI.
+				await ctx.scheduler.runAfter(
+					0,
+					internal.studio.actions.continueVideoPoll,
+					{ jobRecordId },
+				);
+				return null;
+			}
+
+			await completeVideoJob(ctx, {
+				apiKey,
+				jobRecordId,
+				completed: outcome.job,
+				generationStartedAt,
+				target: { runId: args.runId, planId: args.planId },
+				videoParams: parsedParams,
+				videoPrompt,
+				warnings: genWarnings,
+			});
 		} catch (error) {
 			const message =
 				error instanceof Error ? error.message : "Video generation failed.";
@@ -668,6 +811,7 @@ export const generateModelStudioImage = action({
 
 		try {
 			const openai = getOpenAIProvider();
+			const imageStartedAt = Date.now();
 			const result = await generateImage({
 				model: openai.image("gpt-image-2"),
 				prompt: imagePrompt.trim(),
@@ -678,6 +822,7 @@ export const generateModelStudioImage = action({
 					},
 				},
 			});
+			const timeTakenMs = Date.now() - imageStartedAt;
 
 			const image = result.image;
 			const objectKey = await storeBytes({
@@ -704,6 +849,7 @@ export const generateModelStudioImage = action({
 				revisedImagePrompt: openaiMeta?.revisedPrompt,
 				setAsFirstFrame: false,
 				warnings: warnings.length > 0 ? warnings : undefined,
+				timeTakenMs,
 			});
 			await ctx.runMutation(internal.studio.internal.setModelStudioStatus, {
 				runId: args.runId,
@@ -797,46 +943,44 @@ export const generateModelStudioVideo = action({
 
 		try {
 			const apiKey = getOpenRouterApiKey();
+			const generationStartedAt = Date.now();
 			const submitted = await submitOpenRouterVideoJob(apiKey, adapted.body);
-			const completed = await waitForOpenRouterVideoJob(apiKey, submitted, {
-				intervalMs: VIDEO_POLLING_INTERVAL,
-				timeoutMs: 540_000,
-			});
-			const downloaded = await downloadOpenRouterVideo(apiKey, completed);
-			const objectKey = await storeBytes({
-				kind: "videos",
-				bytes: downloaded.bytes,
-				mimeType: downloaded.mimeType,
-			});
-
-			const videoId = await ctx.runMutation(
-				internal.studio.internal.insertGalleryVideo,
+			const jobRecordId = await ctx.runMutation(
+				internal.studio.internal.createVideoJobRecord,
 				{
+					jobId: submitted.id,
+					pollingUrl: submitted.polling_url,
+					status: submitted.status,
+					generationId: submitted.generation_id,
+					errorMessage: submitted.error,
 					modelStudioRunId: args.runId,
-					video: {
-						objectKey,
-						meta: {
-							mimeType: downloaded.mimeType,
-							durationSeconds: adapted.body.duration,
-							bytes: downloaded.bytes.byteLength,
-						},
-						openRouterJobId: completed.id,
-						openRouterGenerationId: completed.generation_id,
-						actualCostUsd:
-							typeof completed.usage?.cost === "number"
-								? completed.usage.cost
-								: undefined,
-						videoParams: parsedParams,
-						videoPrompt: adapted.body.prompt,
-						warnings:
-							adapted.warnings.length > 0 ? adapted.warnings : undefined,
-						createdAt: Date.now(),
-					},
+					videoParams: parsedParams,
+					videoPrompt: adapted.body.prompt,
 					warnings:
 						adapted.warnings.length > 0 ? adapted.warnings : undefined,
 				},
 			);
-			void videoId;
+
+			const outcome = await pollForOneActionBudget(apiKey, submitted);
+			if (outcome.kind === "deferred") {
+				await ctx.scheduler.runAfter(
+					0,
+					internal.studio.actions.continueVideoPoll,
+					{ jobRecordId },
+				);
+				return null;
+			}
+
+			await completeVideoJob(ctx, {
+				apiKey,
+				jobRecordId,
+				completed: outcome.job,
+				generationStartedAt,
+				target: { modelStudioRunId: args.runId },
+				videoParams: parsedParams,
+				videoPrompt: adapted.body.prompt,
+				warnings: adapted.warnings,
+			});
 		} catch (error) {
 			const message =
 				error instanceof Error ? error.message : "Video generation failed.";
@@ -848,6 +992,93 @@ export const generateModelStudioVideo = action({
 			throw error;
 		}
 
+		return null;
+	},
+});
+
+// ── Poll continuation (self-rescheduling until terminal) ────────────────
+
+/**
+ * Continuation of an OpenRouter video job whose previous action exhausted
+ * its POLL_RETRY_EVENT_MS budget. Scheduler-invoked (no user auth), so it
+ * trusts the job record persisted by the submitting action. Polls for one
+ * more chunk; on completion downloads + commits the gallery row; otherwise
+ * reschedules itself with a fresh action budget until the provider reports
+ * a terminal state.
+ */
+export const continueVideoPoll = internalAction({
+	args: {
+		jobRecordId: v.id("openRouterVideoJobs"),
+	},
+	returns: v.null(),
+	handler: async (ctx, args) => {
+		const record = (await ctx.runQuery(
+			internal.studio.queries.getOpenRouterVideoJobDoc,
+			{ jobRecordId: args.jobRecordId },
+		)) as Doc<"openRouterVideoJobs"> | null;
+		if (!record) {
+			return null;
+		}
+		if (
+			record.status === "completed" ||
+			record.status === "failed" ||
+			record.status === "cancelled" ||
+			record.status === "expired"
+		) {
+			return null;
+		}
+
+		const apiKey = getOpenRouterApiKey();
+		const current: OpenRouterVideoJob = {
+			id: record.jobId,
+			polling_url: record.pollingUrl,
+			status: record.status,
+		};
+
+		let outcome: PollChunkOutcome;
+		try {
+			outcome = await pollForOneActionBudget(apiKey, current);
+		} catch (error) {
+			const message =
+				error instanceof Error ? error.message : "Video polling failed.";
+			await failVideoJob(ctx, {
+				jobRecordId: args.jobRecordId,
+				message,
+				target: record,
+			});
+			return null;
+		}
+
+		if (outcome.kind === "deferred") {
+			await ctx.scheduler.runAfter(
+				0,
+				internal.studio.actions.continueVideoPoll,
+				{ jobRecordId: args.jobRecordId },
+			);
+			return null;
+		}
+
+		try {
+			await completeVideoJob(ctx, {
+				apiKey,
+				jobRecordId: args.jobRecordId,
+				completed: outcome.job,
+				// Job record was created right after submit — spans continuations.
+				generationStartedAt: record.createdAt,
+				target: record,
+				videoParams: record.videoParams,
+				videoPrompt: record.videoPrompt,
+				warnings: record.warnings ?? undefined,
+			});
+		} catch (error) {
+			const message =
+				error instanceof Error ? error.message : "Video generation failed.";
+			await failVideoJob(ctx, {
+				jobRecordId: args.jobRecordId,
+				message,
+				target: record,
+			});
+		}
 		return null;
 	},
 });
