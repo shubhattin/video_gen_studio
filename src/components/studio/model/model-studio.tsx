@@ -1,9 +1,10 @@
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { useAction, useMutation, useQuery } from "convex/react";
-import { AlertTriangle, Info } from "lucide-react";
+import { AlertTriangle, Info, Sparkles } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useState } from "react";
+import { MessageResponse } from "#/components/ai-elements/message";
 import { AutosaveStatus } from "#/components/studio/shell/autosave-status";
 import { GenerationProgressDock } from "#/components/studio/video/generation-progress-dock";
 import { ReferenceImagePanel } from "#/components/studio/video/reference-image-panel";
@@ -15,9 +16,32 @@ import { VideoGenerateConfirm } from "#/components/studio/video/video-generate-c
 import { VideoModelSelector } from "#/components/studio/video/video-model-selector";
 import { VideoResult } from "#/components/studio/video/video-result";
 import { Alert, AlertDescription, AlertTitle } from "#/components/ui/alert";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogMedia,
+	AlertDialogTitle,
+} from "#/components/ui/alert-dialog";
 import { Badge } from "#/components/ui/badge";
+import { Button } from "#/components/ui/button";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "#/components/ui/dialog";
 import { Label } from "#/components/ui/label";
 import { MarkdownTextarea } from "#/components/ui/markdown-textarea";
+import { RadioGroup, RadioGroupItem } from "#/components/ui/radio-group";
+import { ScrollArea } from "#/components/ui/scroll-area";
+import { Spinner } from "#/components/ui/spinner";
 import {
 	useSignedMediaUrls,
 	withSignedUrl,
@@ -66,6 +90,9 @@ export function ModelStudio({ runId }: ModelStudioProps) {
 	const generateVideoAction = useAction(
 		api.studio.actions.generateModelStudioVideo,
 	);
+	const summarizeAction = useAction(
+		api.studio.actions.summarizeModelStudioPrompt,
+	);
 
 	const [prompt, setPrompt] = useState("");
 	const [selectedModel, setSelectedModel] = useState<VideoModelId>(
@@ -96,6 +123,66 @@ export function ModelStudio({ runId }: ModelStudioProps) {
 			? "warn"
 			: "ok";
 	const showPromptMeter = promptPercent >= 80 && promptTrimmedLength > 0;
+
+	// Manual summarizer (reuses luna compressor via convex/lib/promptSummarizer.ts)
+	const [confirmSummarizeOpen, setConfirmSummarizeOpen] = useState(false);
+	const [summarizerOpen, setSummarizerOpen] = useState(false);
+	const [summarizerPhase, setSummarizerPhase] = useState<
+		"loading" | "preview" | "error"
+	>("loading");
+	const [summarizedText, setSummarizedText] = useState<string | null>(null);
+	const [summarizerMeta, setSummarizerMeta] = useState<{
+		originalLength: number;
+		summarizedLength: number;
+	} | null>(null);
+	const [summarizerError, setSummarizerError] = useState<string | null>(null);
+	const [applyChoice, setApplyChoice] = useState<"yes" | "no">("no");
+
+	const handleRequestSummarize = () => setConfirmSummarizeOpen(true);
+
+	const handleConfirmSummarize = async () => {
+		setConfirmSummarizeOpen(false);
+		setSummarizerOpen(true);
+		setSummarizerPhase("loading");
+		setSummarizedText(null);
+		setSummarizerMeta(null);
+		setSummarizerError(null);
+		setApplyChoice("no");
+		try {
+			const result = await summarizeAction({
+				prompt,
+				maxPromptChars: promptLimit,
+			});
+			setSummarizedText(result.summarized);
+			setSummarizerMeta({
+				originalLength: result.originalLength,
+				summarizedLength: result.summarizedLength,
+			});
+			setSummarizerPhase("preview");
+		} catch (error) {
+			setSummarizerError(
+				error instanceof Error ? error.message : "Summarization failed.",
+			);
+			setSummarizerPhase("error");
+		}
+	};
+
+	const handleApplySummarized = () => {
+		if (applyChoice !== "yes" || !summarizedText) {
+			setSummarizerOpen(false);
+			return;
+		}
+		const next = summarizedText;
+		setPrompt(next);
+		setSummarizerOpen(false);
+		void updateDraft({ runId, prompt: next }).catch((error) =>
+			notifyStudioError("Could not save summarized prompt", error),
+		);
+		notifyStudioSuccess(
+			"Prompt replaced",
+			`Compressed ${promptTrimmedLength.toLocaleString()} → ${next.trim().length.toLocaleString()} chars for ${profile.displayName}.`,
+		);
+	};
 
 	useEffect(() => {
 		if (!catalog) {
@@ -373,6 +460,18 @@ export function ModelStudio({ runId }: ModelStudioProps) {
 										transition={{ duration: 0.35, ease: "easeOut" }}
 									/>
 								</div>
+								<div className="flex justify-start pt-0.5">
+									<Button
+										variant="outline"
+										size="sm"
+										onClick={handleRequestSummarize}
+										disabled={anyBusy || !prompt.trim()}
+										className="h-8 gap-1.5 text-xs"
+									>
+										<Sparkles className="size-3.5" />
+										Summarise Under {promptLimit.toLocaleString()} chars
+									</Button>
+								</div>
 								<AnimatePresence initial={false}>
 									{isPromptOverLimit ? (
 										<motion.div
@@ -618,6 +717,155 @@ export function ModelStudio({ runId }: ModelStudioProps) {
 				warnings={run?.warnings}
 				contextLabel={profile?.displayName ?? null}
 			/>
+
+			{/* Step 1: confirm summarization (alert dialog with spinner concept gated here) */}
+			<AlertDialog
+				open={confirmSummarizeOpen}
+				onOpenChange={setConfirmSummarizeOpen}
+			>
+				<AlertDialogContent size="default">
+					<AlertDialogHeader>
+						<AlertDialogMedia>
+							<Sparkles className="size-8" />
+						</AlertDialogMedia>
+						<AlertDialogTitle>
+							Summarise Under {promptLimit.toLocaleString()} chars?
+						</AlertDialogTitle>
+						<AlertDialogDescription>
+							Your prompt is {promptTrimmedLength.toLocaleString()} chars for{" "}
+							{profile.displayName} ({promptLimit.toLocaleString()} max
+							{isPromptOverLimit
+								? `, ${promptOverBy.toLocaleString()} over`
+								: `, ${Math.round(promptPercent)}% used`}
+							). This will compress it with the same Luna summarizer used in
+							Shloka Studio to fit the limit without losing key shots.
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel>Cancel</AlertDialogCancel>
+						<AlertDialogAction onClick={() => void handleConfirmSummarize()}>
+							Summarise
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
+
+			{/* Step 2: loading spinner → markdown preview with radio (default No) */}
+			<Dialog open={summarizerOpen} onOpenChange={setSummarizerOpen}>
+				<DialogContent className="flex max-h-[85vh] max-w-xl flex-col gap-4 overflow-hidden sm:max-w-xl [&>button]:shrink-0">
+					<DialogHeader>
+						<DialogTitle className="flex items-center gap-2">
+							<Sparkles className="size-4" />
+							Summarized prompt
+						</DialogTitle>
+						<DialogDescription>
+							{summarizerPhase === "loading"
+								? `Compressing ${promptTrimmedLength.toLocaleString()} → ${promptLimit.toLocaleString()} chars for ${profile.displayName}…`
+								: summarizerMeta
+									? `${summarizerMeta.originalLength.toLocaleString()} → ${summarizerMeta.summarizedLength.toLocaleString()} chars · saved ${(summarizerMeta.originalLength - summarizerMeta.summarizedLength).toLocaleString()} chars`
+									: `${promptLimit.toLocaleString()} char limit`}
+						</DialogDescription>
+					</DialogHeader>
+
+					{summarizerPhase === "loading" ? (
+						<div className="flex flex-col items-center justify-center gap-3 py-14">
+							<Spinner className="size-8" />
+							<p className="text-sm text-muted-foreground">
+								Summarising with Luna…
+							</p>
+						</div>
+					) : summarizerPhase === "error" ? (
+						<Alert variant="destructive">
+							<AlertTriangle className="size-4" />
+							<AlertTitle>Summarization failed</AlertTitle>
+							<AlertDescription className="text-xs">
+								{summarizerError ?? "Could not compress the prompt."}
+							</AlertDescription>
+						</Alert>
+					) : (
+						<>
+							<ScrollArea className="max-h-[50vh] min-h-[120px] shrink-0 overflow-auto rounded-lg border bg-muted/20 overscroll-contain">
+								<div className="min-h-0 p-4">
+									<MessageResponse className="prose prose-sm max-w-none text-sm leading-relaxed break-words prose-strong:font-semibold prose-code:rounded prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:font-mono prose-code:text-xs dark:prose-invert">
+										{summarizedText ?? ""}
+									</MessageResponse>
+								</div>
+							</ScrollArea>
+
+							<RadioGroup
+								value={applyChoice}
+								onValueChange={(value) => setApplyChoice(value as "yes" | "no")}
+								className="gap-2"
+							>
+								<label
+									htmlFor="summarizer-no"
+									className={cn(
+										"flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors",
+										applyChoice === "no"
+											? "border-primary bg-primary/5"
+											: "border-border/70 hover:bg-muted/40",
+									)}
+								>
+									<RadioGroupItem value="no" id="summarizer-no" />
+									<span className="flex flex-col gap-0.5">
+										<span className="text-sm font-medium">
+											No, keep original
+										</span>
+										<span className="text-xs text-muted-foreground">
+											Keep your current prompt unchanged.
+										</span>
+									</span>
+								</label>
+								<label
+									htmlFor="summarizer-yes"
+									className={cn(
+										"flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors",
+										applyChoice === "yes"
+											? "border-primary bg-primary/5"
+											: "border-border/70 hover:bg-muted/40",
+									)}
+								>
+									<RadioGroupItem value="yes" id="summarizer-yes" />
+									<span className="flex flex-col gap-0.5">
+										<span className="text-sm font-medium">
+											Yes, replace my prompt
+										</span>
+										<span className="text-xs text-muted-foreground">
+											Replace the editor with the summarized version (
+											{summarizerMeta?.summarizedLength.toLocaleString()}{" "}
+											chars).
+										</span>
+									</span>
+								</label>
+							</RadioGroup>
+						</>
+					)}
+
+					<DialogFooter>
+						<Button variant="outline" onClick={() => setSummarizerOpen(false)}>
+							Cancel
+						</Button>
+						{summarizerPhase === "preview" ? (
+							<Button
+								onClick={handleApplySummarized}
+								disabled={applyChoice !== "yes" || !summarizedText}
+							>
+								Replace prompt
+							</Button>
+						) : summarizerPhase === "error" ? (
+							<Button
+								variant="outline"
+								onClick={() => {
+									setSummarizerOpen(false);
+									setConfirmSummarizeOpen(true);
+								}}
+							>
+								Try again
+							</Button>
+						) : null}
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 		</>
 	);
 }

@@ -10,7 +10,6 @@ import {
 	MODEL_CAPABILITY_PROFILES,
 	PLANNER_MODEL_ID,
 	TITLE_MODEL_ID,
-	VIDEO_PROMPT_SUMMARIZER_MODEL_ID,
 	VIDEO_MODEL_IDS,
 	type VideoModelId,
 	isVideoModelId,
@@ -33,10 +32,7 @@ import {
 	type ImageConfig,
 	type LastModelParamsUsed,
 } from "../lib/schemas";
-import {
-	VIDEO_PROMPT_SUMMARIZER_SYSTEM_PROMPT,
-	buildShlokaPlannerSystemPrompt,
-} from "../lib/plannerPrompt";
+import { buildShlokaPlannerSystemPrompt } from "../lib/plannerPrompt";
 import {
 	buildVideoPromptFromScenes,
 	hashVideoPromptSource,
@@ -133,50 +129,7 @@ function planBudgetFromConfig(config: {
 	};
 }
 
-const MAX_SUMMARIZE_ATTEMPTS = 3;
-
-async function summarizeVideoPromptToLimit(
-	prompt: string,
-	maxChars: number,
-): Promise<string> {
-	const openrouter = getOpenRouterProvider();
-	let current = prompt.trim();
-	for (let attempt = 1; attempt <= MAX_SUMMARIZE_ATTEMPTS; attempt++) {
-		const result = await generateText({
-			model: openrouter(VIDEO_PROMPT_SUMMARIZER_MODEL_ID),
-			reasoning: "none",
-			instructions: VIDEO_PROMPT_SUMMARIZER_SYSTEM_PROMPT,
-			prompt: [
-				`Character limit: ${maxChars}`,
-				`Current length: ${current.length}`,
-				attempt > 1
-					? `Previous attempt was still ${current.length} chars — compress more aggressively. Prefer shorter clauses; keep beat order.`
-					: "Compress the following video prompt to fit the limit.",
-				"",
-				"PROMPT:",
-				current,
-			].join("\n"),
-		});
-		const next = result.text.replace(/^["'`\s]+|["'`\s]+$/g, "").trim();
-		if (!next) {
-			continue;
-		}
-		if (next.length <= maxChars && next.length < current.length) {
-			return next;
-		}
-		// Accept if under limit even if not much shorter (edge: already near limit).
-		if (next.length <= maxChars) {
-			return next;
-		}
-		current = next.length < current.length ? next : current;
-	}
-	// Last resort: hard truncate at a word boundary.
-	const fitted = current.slice(0, Math.max(1, maxChars - 1));
-	const lastSpace = fitted.lastIndexOf(" ");
-	const sliced =
-		lastSpace > Math.floor(maxChars * 0.6) ? fitted.slice(0, lastSpace) : fitted;
-	return `${sliced.trimEnd()}…`;
-}
+import { summarizePromptToLimit } from "../lib/promptSummarizer";
 
 /**
  * Resolve the prompt that should be sent to the video provider.
@@ -209,7 +162,7 @@ async function resolveProviderVideoPrompt(
 		return { prompt: args.cachedSummary.trim(), usedSummary: true };
 	}
 
-	const summarized = await summarizeVideoPromptToLimit(
+	const summarized = await summarizePromptToLimit(
 		full,
 		args.maxPromptChars,
 	);
@@ -643,6 +596,40 @@ export const refreshPlanPromptSummary = internalAction({
 			cachedHash: plan.videoPromptSourceHash,
 		});
 		return null;
+	},
+});
+
+// ── Model studio prompt summarizer (reuses luna compressor) ─────────────────
+
+export const summarizeModelStudioPrompt = action({
+	args: {
+		prompt: v.string(),
+		maxPromptChars: v.number(),
+	},
+	returns: v.object({
+		summarized: v.string(),
+		originalLength: v.number(),
+		summarizedLength: v.number(),
+	}),
+	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
+		const original = args.prompt.trim();
+		if (!original) throw new Error("Prompt is empty.");
+		if (!Number.isFinite(args.maxPromptChars) || args.maxPromptChars < 100) {
+			throw new Error("Invalid character limit.");
+		}
+		if (original.length > 20_000) {
+			throw new Error("Prompt is too long to summarize (max 20,000).");
+		}
+		const summarized = await summarizePromptToLimit(
+			original,
+			Math.floor(args.maxPromptChars),
+		);
+		return {
+			summarized,
+			originalLength: original.length,
+			summarizedLength: summarized.length,
+		};
 	},
 });
 
