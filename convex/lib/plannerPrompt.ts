@@ -55,7 +55,8 @@ Rules:
 - Never invent new scenes, deities, scripture, or photoreal people.
 `;
 
-export const SINGLE_CLIP_PLANNER_INSTRUCTIONS = `## Output shape
+export const SINGLE_CLIP_PLANNER_INSTRUCTIONS = `
+## Output shape
 Always return \`kind: "single-clip"\` with:
 - \`imagePrompt\`: one portrait-friendly reference still prompt. No character limit applies here — the reference-image generator (gpt-image-2) accepts long prompts, so write it as richly as needed;
 - \`videoScenes\`: ordered cinematic beats using the Seedance six-part fields.
@@ -74,7 +75,7 @@ Always return \`kind: "single-clip"\` with:
 - \`scene\`: environment / setting (optional; use "" if unused)
 - \`style\`: visual style, lighting, palette (optional; use "" if unused)
 - \`camera\`: camera move / cut (optional; use "" if unused)
-- \`audio\`: sound / music / SFX direction. ONLY include this field when the user prompt explicitly says "Generate Audio Plans: Yes"; otherwise omit it entirely from every beat.
+- \`audio\`: sound / music / SFX direction. ONLY include this field when the user prompt explicitly says "Generate Audio Plans: Yes"; otherwise omit it entirely from every beat (null value).
 
 Keep each field concise (one tight sentence or less). Do not pad optional fields.
 
@@ -92,7 +93,9 @@ Respect the aspect ratio given in the user prompt when planning and composing sc
 
 ## Provider text budget
 The videoScenes JSON will later be flattened into a single provider text prompt with the hard character limit given in the user prompt.
-Write fields so the flattened prompt stays useful within that budget. Prefer density over long prose. Never request text overlays, logos, watermarks, real live-action people or public figures.`;
+Write fields so the flattened prompt stays useful within that budget. Prefer density over long prose.
+Never request text overlays, logos, watermarks, real live-action people or public figures.
+`;
 
 /** @deprecated Use SINGLE_CLIP_PLANNER_INSTRUCTIONS — kept for backwards compat, now constant. */
 export function singleClipPlannerInstructions(

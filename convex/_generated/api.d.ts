@@ -13,6 +13,7 @@ import type * as lib_auth from "../lib/auth.js";
 import type * as lib_modelCatalog from "../lib/modelCatalog.js";
 import type * as lib_openrouterVideo from "../lib/openrouterVideo.js";
 import type * as lib_plannerPrompt from "../lib/plannerPrompt.js";
+import type * as lib_promptSummarizer from "../lib/promptSummarizer.js";
 import type * as lib_providers from "../lib/providers.js";
 import type * as lib_r2 from "../lib/r2.js";
 import type * as lib_schemas from "../lib/schemas.js";
@@ -37,6 +38,7 @@ declare const fullApi: ApiFromModules<{
   "lib/modelCatalog": typeof lib_modelCatalog;
   "lib/openrouterVideo": typeof lib_openrouterVideo;
   "lib/plannerPrompt": typeof lib_plannerPrompt;
+  "lib/promptSummarizer": typeof lib_promptSummarizer;
   "lib/providers": typeof lib_providers;
   "lib/r2": typeof lib_r2;
   "lib/schemas": typeof lib_schemas;

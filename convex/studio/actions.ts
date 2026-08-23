@@ -11,6 +11,7 @@ import {
 	PLANNER_MODEL_ID,
 	TITLE_MODEL_ID,
 	VIDEO_MODEL_IDS,
+	VIDEO_POLLING_INTERVAL,
 	type VideoModelId,
 	isVideoModelId,
 } from "../lib/modelCatalog";
@@ -508,7 +509,7 @@ export const generateVideoForRun = action({
 			const apiKey = getOpenRouterApiKey();
 			const submitted = await submitOpenRouterVideoJob(apiKey, adapted.body);
 			const completed = await waitForOpenRouterVideoJob(apiKey, submitted, {
-				intervalMs: 8000,
+				intervalMs: VIDEO_POLLING_INTERVAL,
 				timeoutMs: 540_000,
 			});
 			const downloaded = await downloadOpenRouterVideo(apiKey, completed);
@@ -798,7 +799,7 @@ export const generateModelStudioVideo = action({
 			const apiKey = getOpenRouterApiKey();
 			const submitted = await submitOpenRouterVideoJob(apiKey, adapted.body);
 			const completed = await waitForOpenRouterVideoJob(apiKey, submitted, {
-				intervalMs: 8000,
+				intervalMs: VIDEO_POLLING_INTERVAL,
 				timeoutMs: 540_000,
 			});
 			const downloaded = await downloadOpenRouterVideo(apiKey, completed);

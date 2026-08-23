@@ -4,6 +4,8 @@
  * Kept explicit (not AI SDK video wrapper) for reliable job IDs, timeouts, and Convex Node actions.
  */
 
+import { VIDEO_POLLING_INTERVAL } from "./modelCatalog";
+
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
 
 export type OpenRouterVideoStatus =
@@ -117,7 +119,7 @@ export async function waitForOpenRouterVideoJob(
 		onStatus?: (job: OpenRouterVideoJob) => void | Promise<void>;
 	},
 ): Promise<OpenRouterVideoJob> {
-	const intervalMs = options?.intervalMs ?? 8000;
+	const intervalMs = options?.intervalMs ?? VIDEO_POLLING_INTERVAL;
 	const timeoutMs = options?.timeoutMs ?? 540_000;
 	const started = Date.now();
 	let job = initial;

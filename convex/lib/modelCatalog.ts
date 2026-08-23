@@ -37,6 +37,7 @@ export const TITLE_MODEL_ID = "openai/gpt-5.6-luna";
 /** Same luna model — compress over-limit provider video prompts. */
 export const VIDEO_PROMPT_SUMMARIZER_MODEL_ID = TITLE_MODEL_ID;
 export const REFERENCE_IMAGE_MODEL_ID = "gpt-image-2";
+export const VIDEO_POLLING_INTERVAL = 4000;
 
 export type AspectRatio =
 	| "16:9"
