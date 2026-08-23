@@ -37,6 +37,8 @@ export const TITLE_MODEL_ID = "openai/gpt-5.6-luna";
 /** Same luna model — compress over-limit provider video prompts. */
 export const VIDEO_PROMPT_SUMMARIZER_MODEL_ID = TITLE_MODEL_ID;
 export const REFERENCE_IMAGE_MODEL_ID = "gpt-image-2";
+/** Show character counter/meter in Model Studio when prompt usage >= this % of model limit. */
+export const PROMPT_METER_THRESHOLD_PERCENT = 93;
 /** video polling attempts for Openrouter Video API */
 export const VIDEO_POLLING_INTERVAL = 4000;
 /**

@@ -50,6 +50,7 @@ import {
 	defaultVideoParams,
 	isVideoModelId,
 	MODEL_CAPABILITY_PROFILES,
+	PROMPT_METER_THRESHOLD_PERCENT,
 	type VideoModelId,
 } from "#/lib/model-catalog";
 import type { StudioBusyStage } from "#/lib/studio-run-status";
@@ -116,13 +117,15 @@ export function ModelStudio({ runId }: ModelStudioProps) {
 	const promptPercent =
 		promptLimit > 0 ? (promptTrimmedLength / promptLimit) * 100 : 0;
 	const isPromptOverLimit = promptTrimmedLength > promptLimit;
-	const isPromptNearLimit = !isPromptOverLimit && promptPercent >= 80;
+	const isPromptNearLimit =
+		!isPromptOverLimit && promptPercent >= PROMPT_METER_THRESHOLD_PERCENT;
 	const promptLimitState: "ok" | "warn" | "over" = isPromptOverLimit
 		? "over"
 		: isPromptNearLimit
 			? "warn"
 			: "ok";
-	const showPromptMeter = promptPercent >= 80 && promptTrimmedLength > 0;
+	const showPromptMeter =
+		promptPercent >= PROMPT_METER_THRESHOLD_PERCENT && promptTrimmedLength > 0;
 
 	// Manual summarizer (reuses luna compressor via convex/lib/promptSummarizer.ts)
 	const [confirmSummarizeOpen, setConfirmSummarizeOpen] = useState(false);
@@ -469,7 +472,7 @@ export function ModelStudio({ runId }: ModelStudioProps) {
 										className="h-8 gap-1.5 text-xs"
 									>
 										<Sparkles className="size-3.5" />
-										Summarise Under {promptLimit.toLocaleString()} chars
+										Summarise Prompt to fit
 									</Button>
 								</div>
 								<AnimatePresence initial={false}>
@@ -770,9 +773,7 @@ export function ModelStudio({ runId }: ModelStudioProps) {
 					{summarizerPhase === "loading" ? (
 						<div className="flex flex-col items-center justify-center gap-3 py-14">
 							<Spinner className="size-8" />
-							<p className="text-sm text-muted-foreground">
-								Summarising with Luna…
-							</p>
+							<p className="text-sm text-muted-foreground">Summarising…</p>
 						</div>
 					) : summarizerPhase === "error" ? (
 						<Alert variant="destructive">
