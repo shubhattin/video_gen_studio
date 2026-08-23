@@ -1,9 +1,9 @@
+import { Badge } from "#/components/ui/badge";
+import { Button } from "#/components/ui/button";
 import {
 	MODEL_CAPABILITY_PROFILES,
 	type VideoModelId,
 } from "#/lib/model-catalog";
-import { Badge } from "#/components/ui/badge";
-import { Button } from "#/components/ui/button";
 import { cn } from "#/lib/utils";
 
 type ModelCardProps = {
@@ -51,6 +51,9 @@ export function ModelCard({
 					{durations[0]}–{durations[durations.length - 1]}s
 				</span>
 				{profile.supportsAudio ? <span>audio</span> : null}
+				<span className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/30 px-2 py-0.5 font-mono text-[11px]">
+					{profile.maxPromptChars.toLocaleString()} chars max
+				</span>
 			</div>
 			<p className="mt-3 text-xs text-muted-foreground">
 				{gatewayPricing?.output

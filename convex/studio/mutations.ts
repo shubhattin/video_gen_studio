@@ -687,7 +687,13 @@ export const updateModelStudioDraft = mutation({
 		}
 		let prompt = run.prompt;
 		if (args.prompt !== undefined) {
-			prompt = args.prompt.trim() || undefined;
+			const raw = args.prompt.trim();
+			if (raw.length > 20_000) {
+				throw new Error(
+					"Prompt is too long (max 20,000 characters). Shorten it before saving.",
+				);
+			}
+			prompt = raw || undefined;
 		}
 		const selectedModelId =
 			args.selectedModelId !== undefined

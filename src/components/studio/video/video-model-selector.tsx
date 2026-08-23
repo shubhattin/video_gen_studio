@@ -1,5 +1,5 @@
-import { CheckIcon, CaretUpDownIcon } from "@phosphor-icons/react";
-import { useMemo, useState, type ReactNode } from "react";
+import { CaretUpDownIcon, CheckIcon } from "@phosphor-icons/react";
+import { type ReactNode, useMemo, useState } from "react";
 import {
 	ModelSelectorLogo,
 	ModelSelectorName,
@@ -20,11 +20,11 @@ import {
 	PopoverTrigger,
 } from "#/components/ui/popover";
 import {
-	MODEL_CAPABILITY_PROFILES,
-	VIDEO_MODEL_FAMILY_META,
 	groupVideoModelsByFamily,
+	MODEL_CAPABILITY_PROFILES,
 	resolveVideoModelSortPrice,
 	sortVideoModelsByPrice,
+	VIDEO_MODEL_FAMILY_META,
 	type VideoModelId,
 } from "#/lib/model-catalog";
 import { cn } from "#/lib/utils";
@@ -68,6 +68,7 @@ function capabilityChips(modelId: VideoModelId) {
 	if (!profile.supportsAudio) chips.push("Video only");
 	if (profile.supportsNegativePrompt) chips.push("Neg. prompt");
 	if (profile.requiresFirstFrame) chips.push("Requires frame");
+	chips.push(`${profile.maxPromptChars.toLocaleString()} chars`);
 	return chips;
 }
 
