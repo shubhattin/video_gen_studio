@@ -7,6 +7,7 @@ export const VIDEO_MODEL_IDS = [
 	"google/veo-3.1-lite",
 	"kwaivgi/kling-v3.0-pro",
 	"kwaivgi/kling-v3.0-std",
+	"minimax/hailuo-3-max",
 	"runway/gen-4.5",
 ] as const;
 
@@ -17,6 +18,7 @@ export type VideoModelFamily =
 	| "bytedance"
 	| "kling"
 	| "alibaba"
+	| "minimax"
 	| "runway";
 
 export const VIDEO_MODEL_FAMILY_META: Record<
@@ -27,7 +29,8 @@ export const VIDEO_MODEL_FAMILY_META: Record<
 	bytedance: { label: "ByteDance", order: 2 },
 	kling: { label: "Kling", order: 3 },
 	alibaba: { label: "Alibaba", order: 4 },
-	runway: { label: "Runway", order: 5 },
+	minimax: { label: "MiniMax", order: 5 },
+	runway: { label: "Runway", order: 6 },
 };
 
 export const PLANNER_MODEL_ID = "openai/gpt-5.6-sol";
@@ -329,6 +332,31 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 		pricingNotes: "$0.10/s on OpenRouter (flat).",
 		fallbackEstimateUsdPerSecond: 0.1,
 		fallbackEstimateUsdPerSecondWithAudio: 0.1,
+	},
+	"minimax/hailuo-3-max": {
+		id: "minimax/hailuo-3-max",
+		displayName: "Hailuo 3 Max",
+		description:
+			"MiniMax H3 Max — fast text/image-to-video at 480p/768p; jointly optimised with fal.ai for high-speed generation.",
+		family: "minimax",
+		requiresFirstFrame: false,
+		supportsTextToVideo: true,
+		supportsFirstFrame: true,
+		supportsLastFrame: true,
+		supportsInputReferences: true,
+		maxInputReferences: 9,
+		aspectRatios: ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"],
+		resolutions: ["480p", "720p"],
+		supportedDurations: range(5, 15),
+		supportsAudio: false,
+		supportsSeed: false,
+		supportsNegativePrompt: false,
+		passthroughParams: [],
+		// MiniMax API reference: prompt ≤ 7,000 characters.
+		// https://platform.minimax.io/docs/guides/video-generation.md
+		maxPromptChars: 7000,
+		pricingNotes: "Check OpenRouter for live $/s pricing.",
+		fallbackEstimateUsdPerSecond: 0.05,
 	},
 	"runway/gen-4.5": {
 		id: "runway/gen-4.5",
