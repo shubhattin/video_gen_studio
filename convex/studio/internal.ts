@@ -317,6 +317,8 @@ export const failPlanVideoGeneration = internalMutation({
 	args: {
 		planId: v.id("shlokaPlans"),
 		message: v.string(),
+		/** Run status to return to. In-progress statuses are ignored. */
+		restoreRunStatus: v.optional(runStatusValidator),
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
@@ -329,8 +331,18 @@ export const failPlanVideoGeneration = internalMutation({
 			lastError: args.message,
 			updatedAt: now,
 		});
+		const inProgress =
+			args.restoreRunStatus === "planning" ||
+			args.restoreRunStatus === "image_generating" ||
+			args.restoreRunStatus === "video_generating";
+		const restoreRunStatus =
+			args.restoreRunStatus && !inProgress
+				? args.restoreRunStatus
+				: (plan.videoOutputIds?.length ?? 0) > 0
+					? "completed"
+					: "plan_ready";
 		await ctx.db.patch(plan.runId, {
-			status: "failed",
+			status: restoreRunStatus,
 			lastError: args.message,
 			updatedAt: now,
 		});

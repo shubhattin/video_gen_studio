@@ -292,6 +292,47 @@ async function completeVideoJob(
 	});
 }
 
+const PLANNER_TIMEOUT_MS = 4 * 60 * 1000;
+
+const IN_PROGRESS_RUN_STATUSES = new Set([
+	"planning",
+	"image_generating",
+	"video_generating",
+]);
+
+/** Status to put back after a failed in-flight stage so the studio is usable. */
+function restoredRunStatus(
+	previous: string | undefined,
+	planHasContent: boolean,
+): "draft" | "plan_ready" | "image_ready" | "completed" | "failed" {
+	if (
+		previous === "draft" ||
+		previous === "plan_ready" ||
+		previous === "image_ready" ||
+		previous === "completed" ||
+		previous === "failed"
+	) {
+		if (!IN_PROGRESS_RUN_STATUSES.has(previous)) {
+			return previous;
+		}
+	}
+	return planHasContent ? "plan_ready" : "draft";
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const timeout = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => {
+			reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s.`));
+		}, ms);
+	});
+	return Promise.race([promise, timeout]).finally(() => {
+		if (timer !== undefined) {
+			clearTimeout(timer);
+		}
+	});
+}
+
 /** Mark a job failed in both the provider-job record and its owning pipeline. */
 async function failVideoJob(
 	ctx: ActionCtx,
@@ -307,7 +348,7 @@ async function failVideoJob(
 		errorMessage: args.message,
 	});
 	if (args.target.planId) {
-		// Also flips the owning run to failed inside the same transaction.
+		// Plan stays ready. The run returns to the status it had before generation.
 		await ctx.runMutation(internal.studio.internal.failPlanVideoGeneration, {
 			planId: args.target.planId,
 			message: args.message,
@@ -354,6 +395,10 @@ export const planShlokaRun = action({
 		// confirmed in the UI, so an already-"ready" plan is always overwritten
 		// (image prompt + scenes + lastModelParamsUsed). The action also
 		// re-establishes the "planning" status so progress UI updates.
+		const previousRunStatus = run.status;
+		const planHasContent = Boolean(
+			plan.imagePrompt?.trim() || plan.videoScenes?.length,
+		);
 
 		await ctx.runMutation(internal.studio.internal.setPlanStatus, {
 			planId: args.planId,
@@ -380,30 +425,34 @@ export const planShlokaRun = action({
 				Boolean(budget.generateAudio) &&
 				Boolean(MODEL_CAPABILITY_PROFILES[modelId]?.supportsAudio);
 
-			const result = await generateText({
-				model: getOpenRouterProvider()(PLANNER_MODEL_ID),
-				reasoning: "medium",
-				instructions: buildShlokaPlannerSystemPrompt({
-					stored: resolvedPrompt.content,
+			const result = await withTimeout(
+				generateText({
+					model: getOpenRouterProvider()(PLANNER_MODEL_ID),
+					reasoning: "medium",
+					instructions: buildShlokaPlannerSystemPrompt({
+						stored: resolvedPrompt.content,
+					}),
+					prompt: buildPlannerPrompt({
+						shlokaText: run.shlokaText,
+						customInstructions: run.customInstructions,
+						generateDuration,
+						maxDurationSeconds: generateDuration
+							? Math.max(
+									...MODEL_CAPABILITY_PROFILES[modelId].supportedDurations,
+								)
+							: undefined,
+						durationSeconds: generateDuration
+							? undefined
+							: budget.durationSeconds,
+						maxPromptChars: budget.maxPromptChars,
+						aspectRatio: budget.aspectRatio,
+						generateAudio,
+					}),
+					output: Output.object({ schema: normalPlannerOutputSchema }),
 				}),
-				prompt: buildPlannerPrompt({
-					shlokaText: run.shlokaText,
-					customInstructions: run.customInstructions,
-					generateDuration,
-					maxDurationSeconds: generateDuration
-						? Math.max(
-								...MODEL_CAPABILITY_PROFILES[modelId].supportedDurations,
-							)
-						: undefined,
-					durationSeconds: generateDuration
-						? undefined
-						: budget.durationSeconds,
-					maxPromptChars: budget.maxPromptChars,
-					aspectRatio: budget.aspectRatio,
-					generateAudio,
-				}),
-				output: Output.object({ schema: normalPlannerOutputSchema }),
-			});
+				PLANNER_TIMEOUT_MS,
+				"Plan generation",
+			);
 			const planOutput = result.output;
 			const warnings = warningMessages(result.warnings ?? []);
 			const videoScenes = normalizeVideoScenes(planOutput.videoScenes);
@@ -450,12 +499,12 @@ export const planShlokaRun = action({
 				error instanceof Error ? error.message : "Planning failed.";
 			await ctx.runMutation(internal.studio.internal.setPlanStatus, {
 				planId: args.planId,
-				status: "failed",
+				status: planHasContent ? "ready" : "draft",
 				lastError: message,
 			});
 			await ctx.runMutation(internal.studio.internal.setRunStatus, {
 				runId: args.runId,
-				status: "failed",
+				status: restoredRunStatus(previousRunStatus, planHasContent),
 				lastError: message,
 			});
 			throw error;
@@ -491,6 +540,7 @@ export const generateReferenceImage = action({
 			size: run.imageSize ?? "1024x1536",
 			quality: run.imageQuality ?? "medium",
 		});
+		const previousRunStatus = run.status;
 
 		await ctx.runMutation(internal.studio.internal.setRunStatus, {
 			runId: args.runId,
@@ -544,7 +594,10 @@ export const generateReferenceImage = action({
 				error instanceof Error ? error.message : "Image generation failed.";
 			await ctx.runMutation(internal.studio.internal.setRunStatus, {
 				runId: args.runId,
-				status: "failed",
+				status: restoredRunStatus(
+					previousRunStatus,
+					Boolean(run.activePlan?.imagePrompt?.trim()),
+				),
 				lastError: message,
 			});
 			throw error;
@@ -653,6 +706,7 @@ export const generateVideoForRun = action({
 			referenceUrls,
 		});
 
+		const previousRunStatus = run.status;
 		await ctx.runMutation(internal.studio.internal.setRunStatus, {
 			runId: args.runId,
 			status: "video_generating",
@@ -719,11 +773,7 @@ export const generateVideoForRun = action({
 			await ctx.runMutation(internal.studio.internal.failPlanVideoGeneration, {
 				planId: args.planId,
 				message,
-			});
-			await ctx.runMutation(internal.studio.internal.setRunStatus, {
-				runId: args.runId,
-				status: "failed",
-				lastError: message,
+				restoreRunStatus: restoredRunStatus(previousRunStatus, true),
 			});
 			throw error;
 		}

@@ -713,6 +713,13 @@ function ShlokaStudioPage() {
 											) : null}
 										</div>
 
+										{activePlan.lastError &&
+										activePlan.status !== "planning" ? (
+											<p className="text-xs text-destructive">
+												{activePlan.lastError}
+											</p>
+										) : null}
+
 										{showRegenerate ? null : (
 											<div className="flex flex-wrap items-center gap-3 border-t border-border/80 pt-5">
 												<Button
@@ -730,11 +737,6 @@ function ShlokaStudioPage() {
 													<p className="text-xs text-amber-700 dark:text-amber-300">
 														Select a system prompt template above to enable
 														Generate plan.
-													</p>
-												) : null}
-												{activePlan.status === "failed" ? (
-													<p className="text-xs text-destructive">
-														{activePlan.lastError ?? "Planning failed."}
 													</p>
 												) : null}
 											</div>
