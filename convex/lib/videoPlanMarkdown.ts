@@ -3,6 +3,8 @@
  * Scenes are strictly the current eight-field shape.
  */
 
+import { EXTRA_STUB_FINAL_VIDEO_SCENE } from "./prompts/main_video_scene";
+
 export type EditableVideoScene = {
 	sceneNumber: number;
 	intent: string;
@@ -62,32 +64,41 @@ export function normalizeVideoScenes(
 		}));
 }
 
-function compactSceneLine(scene: EditableVideoScene, index: number): string {
-	const chunks: string[] = [
-		`${index + 1}.${scene.intent}`,
-		`Subject:${scene.subject}`,
-		`Action:${scene.action}`,
+/** One scene as labeled lines (title, then Subject/Action/…). */
+function formatSceneBlock(scene: EditableVideoScene, index: number): string {
+	const lines: string[] = [
+		`${index + 1}. ${scene.intent}`,
+		`Subject: ${scene.subject}`,
+		`Action: ${scene.action}`,
 	];
-	if (scene.scene.trim()) chunks.push(`Scene:${scene.scene.trim()}`);
-	if (scene.style.trim()) chunks.push(`Style:${scene.style.trim()}`);
-	if (scene.camera.trim()) chunks.push(`Camera:${scene.camera.trim()}`);
-	if (scene.audio?.trim()) chunks.push(`Audio:${scene.audio.trim()}`);
-	return chunks.join(" ");
+	if (scene.scene.trim()) lines.push(`Scene: ${scene.scene.trim()}`);
+	if (scene.style.trim()) lines.push(`Style: ${scene.style.trim()}`);
+	if (scene.camera.trim()) lines.push(`Camera: ${scene.camera.trim()}`);
+	if (scene.audio?.trim()) lines.push(`Audio: ${scene.audio.trim()}`);
+	return lines.join("\n");
 }
 
 /**
- * Compact provider prompt from structured scenes (Seedance-oriented).
+ * Provider prompt from structured scenes (Seedance-oriented).
+ * Newlines separate title / fields; blank line between scenes.
+ * Optional general video instructions are appended before the closing style stub.
  * No scene-count truncation — full plan is included; summarization handles limits.
  */
 export function buildVideoPromptFromScenes(
 	scenes: EditableVideoScene[],
+	generalVideoInstructions?: string | null,
 ): string {
 	const normalized = normalizeVideoScenes(scenes);
-	if (normalized.length === 0) {
-		return "stylized illustrated characters, not photoreal people";
+	const general = generalVideoInstructions?.trim() || "";
+	const parts: string[] = [];
+	if (normalized.length > 0) {
+		parts.push(normalized.map((s, i) => formatSceneBlock(s, i)).join("\n\n"));
 	}
-	const body = normalized.map((s, i) => compactSceneLine(s, i)).join("|");
-	return `${body}|stylized illustrated characters, not photoreal people`;
+	if (general) {
+		parts.push(`General video instructions:\n${general}`);
+	}
+	parts.push(EXTRA_STUB_FINAL_VIDEO_SCENE);
+	return parts.join("\n\n");
 }
 
 /** Compact markdown for UI edit — omit blank optional slots; single blank line between scenes. */

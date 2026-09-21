@@ -48,10 +48,10 @@ import { z } from "zod";
 
 // actual schema used by ai to generate video scenes
 export const videoSceneSchema = z.object({
-	sceneNumber: z.number().int().positive(),
-	intent: z.string().min(1).describe("Short scene title (what this scene conveys), also have a rough duration range in here at the start here eg. 0-5s. Keep in continous as the scene numeber progresses. And this is also generated in accordance with the provided total duration by the user for video"),
-	subject: z.string().min(1),
-	action: z.string().min(1),
+	sceneNumber: z.int().positive(),
+	intent: z.string().describe("Short scene title (what this scene conveys), also have a rough duration range in here at the start here eg. 0-5s. Keep in continous as the scene numeber progresses. And this is also generated in accordance with the provided total duration by the user for video"),
+	subject: z.string(),
+	action: z.string(),
 	scene: z.string(),
 	style: z.string(),
 	camera: z.string(),
@@ -62,3 +62,5 @@ export const videoSceneSchema = z.object({
 			"Sound / music / SFX direction for this beat. Return null unless the user prompt explicitly says Generate Audio Plans: Yes.",
 		),
 });
+
+export const EXTRA_STUB_FINAL_VIDEO_SCENE = "stylized illustrated characters, not photoreal people, also do not have text overlay or any other text in the video";

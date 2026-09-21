@@ -584,7 +584,10 @@ export const generateVideoForRun = action({
 			cfgScale: used.cfgScale,
 		});
 
-		const fullPrompt = buildVideoPromptFromScenes(plan.videoScenes);
+		const fullPrompt = buildVideoPromptFromScenes(
+			plan.videoScenes,
+			plan.generalVideoInstructions,
+		);
 		const resolved = await resolveProviderVideoPrompt(ctx, {
 			planId: args.planId,
 			fullPrompt,
@@ -702,7 +705,10 @@ export const refreshPlanPromptSummary = internalAction({
 		if (!plan?.videoScenes?.length || !plan.lastModelParamsUsed) {
 			return null;
 		}
-		const fullPrompt = buildVideoPromptFromScenes(plan.videoScenes);
+		const fullPrompt = buildVideoPromptFromScenes(
+			plan.videoScenes,
+			plan.generalVideoInstructions,
+		);
 		await resolveProviderVideoPrompt(ctx, {
 			planId: args.planId,
 			fullPrompt,

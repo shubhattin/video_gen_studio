@@ -201,7 +201,13 @@ export function SystemPromptPicker({
 					</a>
 				) : null}
 			</div>
-			<p className="text-sm text-muted-foreground">
+			<p
+				className={
+					selection
+						? "text-sm text-muted-foreground"
+						: "text-sm text-amber-700 dark:text-amber-300"
+				}
+			>
 				{selection
 					? "This template is required for planning and is saved with the run."
 					: "Select a system prompt template before generating a plan."}

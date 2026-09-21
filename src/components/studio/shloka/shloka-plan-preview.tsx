@@ -19,6 +19,7 @@ import {
 	PopoverTrigger,
 } from "#/components/ui/popover";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs";
+import { Textarea } from "#/components/ui/textarea";
 import {
 	markdownToVideoScenes,
 	type NormalizedVideoScene,
@@ -31,6 +32,8 @@ type VideoScene = NormalizedVideoScene;
 type ShlokaPlanPreviewProps = {
 	imagePrompt?: string;
 	videoScenes?: VideoScene[];
+	/** Optional directives embedded into the provider video prompt. */
+	generalVideoInstructions?: string;
 	/** Provider prompt built from scenes (may exceed model limit). */
 	videoPrompt?: string;
 	/** Cached compressed prompt when over the model character limit. */
@@ -40,6 +43,9 @@ type ShlokaPlanPreviewProps = {
 	actions?: ReactNode;
 	onSaveImagePrompt?: (imagePrompt: string) => Promise<void> | void;
 	onSaveVideoScenes?: (videoScenes: VideoScene[]) => Promise<void> | void;
+	onSaveGeneralVideoInstructions?: (
+		generalVideoInstructions: string,
+	) => Promise<void> | void;
 };
 
 const markdownViewClassName =
@@ -318,16 +324,23 @@ function PlanEditor({
 export function ShlokaPlanPreview({
 	imagePrompt,
 	videoScenes,
+	generalVideoInstructions = "",
 	videoPrompt,
 	summarizedVideoPrompt,
 	disabled,
 	actions,
 	onSaveImagePrompt,
 	onSaveVideoScenes,
+	onSaveGeneralVideoInstructions,
 }: ShlokaPlanPreviewProps) {
 	const [copied, setCopied] = useState<string | null>(null);
 	const [savingImage, setSavingImage] = useState(false);
 	const [savingScenes, setSavingScenes] = useState(false);
+	const [savingGeneralInstructions, setSavingGeneralInstructions] =
+		useState(false);
+	const [generalInstructionsDraft, setGeneralInstructionsDraft] = useState(
+		generalVideoInstructions,
+	);
 	const [activeTab, setActiveTab] = useState<"image-prompt" | "video-scenes">(
 		"image-prompt",
 	);
@@ -339,8 +352,19 @@ export function ShlokaPlanPreview({
 	const scenesMarkdown = normalizedScenes.length
 		? videoScenesToMarkdown(normalizedScenes)
 		: "";
-	const showSummarizedPrompt = Boolean(summarizedVideoPrompt?.trim());
 	const videoPlanMarkdown = normalizedScenes.length ? scenesMarkdown : "";
+	// Same resolution as resolveProviderVideoPrompt in convex/studio/actions.ts:
+	// use the Luna summary when present, otherwise the scenes-derived compact prompt.
+	const fullProviderPrompt = videoPrompt?.trim() || "";
+	const summarizedProviderPrompt = summarizedVideoPrompt?.trim() || "";
+	const usedSummary = Boolean(summarizedProviderPrompt);
+	const finalVideoPrompt = usedSummary
+		? summarizedProviderPrompt
+		: fullProviderPrompt;
+
+	useEffect(() => {
+		setGeneralInstructionsDraft(generalVideoInstructions);
+	}, [generalVideoInstructions]);
 
 	if (!imagePrompt && !hasScenes) {
 		return null;
@@ -368,6 +392,18 @@ export function ShlokaPlanPreview({
 
 	const editMode = editing ? "edit" : "view";
 	const setEditMode = (mode: "view" | "edit") => setEditing(mode === "edit");
+	const generalInstructionsDirty =
+		generalInstructionsDraft.trim() !== generalVideoInstructions.trim();
+
+	const saveGeneralInstructions = async () => {
+		if (!onSaveGeneralVideoInstructions || !generalInstructionsDirty) return;
+		setSavingGeneralInstructions(true);
+		try {
+			await onSaveGeneralVideoInstructions(generalInstructionsDraft);
+		} finally {
+			setSavingGeneralInstructions(false);
+		}
+	};
 
 	return (
 		<section className="space-y-4 border-t border-border/80 pt-5">
@@ -385,47 +421,61 @@ export function ShlokaPlanPreview({
 							{copied === activeCopy.key ? "Copied" : activeCopy.label}
 						</Button>
 					) : null}
-					{showSummarizedPrompt && activeTab === "video-scenes" ? (
+					{finalVideoPrompt ? (
 						<Popover>
 							<PopoverTrigger
 								render={
 									<Button variant="outline" size="sm" className="min-h-11" />
 								}
 							>
-								Summarized prompt
+								Final Video Prompt sent
 							</PopoverTrigger>
 							<PopoverContent
 								align="start"
 								className="w-[min(28rem,90vw)] gap-3 p-4"
 							>
 								<PopoverHeader>
-									<PopoverTitle>Summarized provider prompt</PopoverTitle>
+									<PopoverTitle>Final Video Prompt sent</PopoverTitle>
 									<PopoverDescription>
-										Compressed to fit the video model character limit
-										{videoPrompt
-											? ` (${videoPrompt.length} → ${summarizedVideoPrompt?.length} chars)`
-											: ""}
-										.
+										{usedSummary
+											? `Compressed provider text sent to the video model (${fullProviderPrompt.length} → ${finalVideoPrompt.length} chars).`
+											: `Raw provider text sent to the video model (${finalVideoPrompt.length} chars) — scenes flattened without markdown.`}
 									</PopoverDescription>
 								</PopoverHeader>
 								<pre className="max-h-64 overflow-auto whitespace-pre-wrap wrap-break-word rounded-md bg-muted/50 p-3 font-mono text-xs leading-relaxed">
-									{summarizedVideoPrompt}
+									{finalVideoPrompt}
 								</pre>
 								<Button
 									variant="ghost"
 									size="sm"
 									className="self-start"
 									onClick={() =>
-										summarizedVideoPrompt &&
-										void copyText("summarized", summarizedVideoPrompt)
+										void copyText("final-video-prompt", finalVideoPrompt)
 									}
 								>
 									<Copy className="size-3.5" />
-									{copied === "summarized" ? "Copied" : "Copy"}
+									{copied === "final-video-prompt" ? "Copied" : "Copy"}
 								</Button>
 							</PopoverContent>
 						</Popover>
 					) : null}
+				</div>
+			</div>
+
+			<Tabs
+				value={activeTab}
+				onValueChange={(value) => {
+					if (value === "image-prompt" || value === "video-scenes") {
+						setActiveTab(value);
+						setEditing(false);
+					}
+				}}
+			>
+				<div className="flex flex-wrap items-center gap-2">
+					<TabsList>
+						<TabsTrigger value="image-prompt">Reference image prompt</TabsTrigger>
+						<TabsTrigger value="video-scenes">Video scenes</TabsTrigger>
+					</TabsList>
 					{canEdit ? (
 						<Button
 							variant={editing ? "default" : "ghost"}
@@ -439,20 +489,6 @@ export function ShlokaPlanPreview({
 						</Button>
 					) : null}
 				</div>
-			</div>
-
-			<Tabs
-				value={activeTab}
-				onValueChange={(value) => {
-					if (value === "image-prompt" || value === "video-scenes") {
-						setActiveTab(value);
-					}
-				}}
-			>
-				<TabsList>
-					<TabsTrigger value="image-prompt">Reference image prompt</TabsTrigger>
-					<TabsTrigger value="video-scenes">Video scenes</TabsTrigger>
-				</TabsList>
 				<TabsContent value="image-prompt" className="space-y-3">
 					{onSaveImagePrompt && imagePrompt ? (
 						<PlanEditor
@@ -489,8 +525,8 @@ export function ShlokaPlanPreview({
 							disabled={disabled}
 							saving={savingScenes}
 							ariaLabel="Edit video plan markdown"
-							editorClassName="min-h-64 border-border shadow-sm"
-							viewClassName="max-h-[min(28rem,55vh)] overflow-y-auto overscroll-contain rounded-lg border border-border bg-background/40 p-4"
+							editorClassName="min-h-40 border-border shadow-sm"
+							viewClassName="max-h-[min(16rem,32vh)] overflow-y-auto overscroll-contain rounded-lg border border-border bg-background/40 p-4"
 							showFormatNote
 							previewBeforeSave
 							editMode={editMode}
@@ -513,7 +549,7 @@ export function ShlokaPlanPreview({
 							}}
 						/>
 					) : (
-						<div className="max-h-[min(28rem,55vh)] space-y-3 overflow-y-auto overscroll-contain pr-1">
+						<div className="max-h-[min(16rem,32vh)] space-y-3 overflow-y-auto overscroll-contain pr-1">
 							{normalizedScenes.map((scene) => (
 								<div
 									key={scene.sceneNumber}
@@ -560,6 +596,85 @@ export function ShlokaPlanPreview({
 							))}
 						</div>
 					)}
+
+					{onSaveGeneralVideoInstructions ? (
+						<div className="space-y-2 border-t border-border/60 pt-3">
+							<div className="flex items-center gap-1.5">
+								<p className="font-heading text-sm font-semibold">
+									General Video Instructions
+								</p>
+								<Popover>
+									<PopoverTrigger
+										render={
+											<Button
+												type="button"
+												variant="ghost"
+												size="icon-xs"
+												className="shrink-0 text-muted-foreground"
+												aria-label="About general video instructions"
+												disabled={disabled}
+											/>
+										}
+									>
+										<Info />
+									</PopoverTrigger>
+									<PopoverContent align="start" className="w-72 gap-2 p-4">
+										<PopoverHeader>
+											<PopoverTitle>General Video Instructions</PopoverTitle>
+											<PopoverDescription>
+												Optional notes appended into the final prompt sent to
+												the video model (alongside the flattened scenes). Use
+												for style tweaks, pacing, or constraints you want the
+												model to follow.
+											</PopoverDescription>
+										</PopoverHeader>
+									</PopoverContent>
+								</Popover>
+							</div>
+							<Textarea
+								value={generalInstructionsDraft}
+								onChange={(event) =>
+									setGeneralInstructionsDraft(event.target.value)
+								}
+								placeholder="Optional — e.g. keep camera slow, warm diya glow, no text overlays…"
+								className="min-h-24"
+								aria-label="General video instructions"
+								disabled={disabled || savingGeneralInstructions}
+							/>
+							{generalInstructionsDirty ? (
+								<div className="flex items-center gap-2">
+									<Button
+										size="sm"
+										className="min-h-11"
+										disabled={disabled || savingGeneralInstructions}
+										onClick={() => void saveGeneralInstructions()}
+									>
+										{savingGeneralInstructions ? "Saving…" : "Save"}
+									</Button>
+									<Button
+										variant="ghost"
+										size="sm"
+										className="min-h-11"
+										disabled={savingGeneralInstructions}
+										onClick={() =>
+											setGeneralInstructionsDraft(generalVideoInstructions)
+										}
+									>
+										Cancel
+									</Button>
+								</div>
+							) : null}
+						</div>
+					) : generalVideoInstructions.trim() ? (
+						<div className="space-y-1 border-t border-border/60 pt-3">
+							<p className="font-heading text-sm font-semibold">
+								General Video Instructions
+							</p>
+							<p className="rounded-lg border border-border/80 bg-muted/30 p-3 text-sm leading-relaxed whitespace-pre-wrap">
+								{generalVideoInstructions}
+							</p>
+						</div>
+					) : null}
 				</TabsContent>
 			</Tabs>
 		</section>

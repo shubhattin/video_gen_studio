@@ -25,6 +25,7 @@ export type PlanPatch = {
 	videoParams?: VideoConfigState;
 	imagePrompt?: string;
 	videoScenes?: NormalizedVideoScene[];
+	generalVideoInstructions?: string;
 };
 
 export type SaveMode = "debounced" | "immediate";

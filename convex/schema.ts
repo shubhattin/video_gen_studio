@@ -204,6 +204,8 @@ export default defineSchema({
 		// Planner output — absent until generated (status "draft").
 		imagePrompt: v.optional(v.string()),
 		videoScenes: v.optional(v.array(videoSceneValidator)),
+		/** Optional free-text directives appended into the provider video prompt. */
+		generalVideoInstructions: v.optional(v.string()),
 		plannerSystemPrompt: v.optional(v.string()),
 		plannerSystemPromptTemplateId: v.optional(v.id("systemPromptTemplates")),
 		plannerModel: v.optional(v.string()),

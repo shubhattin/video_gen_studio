@@ -705,6 +705,12 @@ function ShlokaStudioPage() {
 												>
 													Generate plan
 												</Button>
+												{!plannerPromptSelection ? (
+													<p className="text-xs text-amber-700 dark:text-amber-300">
+														Select a system prompt template above to enable
+														Generate plan.
+													</p>
+												) : null}
 												{activePlan.status === "failed" ? (
 													<p className="text-xs text-destructive">
 														{activePlan.lastError ?? "Planning failed."}
@@ -718,10 +724,14 @@ function ShlokaStudioPage() {
 												<ShlokaPlanPreview
 													imagePrompt={activePlan.imagePrompt}
 													videoScenes={activePlan.videoScenes}
+													generalVideoInstructions={
+														activePlan.generalVideoInstructions
+													}
 													videoPrompt={
 														activePlan.videoScenes?.length
 															? buildVideoPromptFromScenes(
 																	activePlan.videoScenes,
+																	activePlan.generalVideoInstructions,
 																)
 															: undefined
 													}
@@ -752,6 +762,20 @@ function ShlokaStudioPage() {
 														notifyStudioSuccess(
 															"Video plan saved",
 															"Video generation will use the updated scenes.",
+														);
+													}}
+													onSaveGeneralVideoInstructions={async (
+														generalVideoInstructions,
+													) => {
+														if (!runId || !activePlanId) return;
+														await updatePlanContent({
+															runId,
+															planId: activePlanId,
+															generalVideoInstructions,
+														});
+														notifyStudioSuccess(
+															"General video instructions saved",
+															"They will be embedded in the prompt sent to the video model.",
 														);
 													}}
 												/>

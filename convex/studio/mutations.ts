@@ -387,6 +387,7 @@ export const updatePlanContent = mutation({
 		planId: v.id("shlokaPlans"),
 		imagePrompt: v.optional(v.string()),
 		videoScenes: v.optional(v.array(videoSceneValidator)),
+		generalVideoInstructions: v.optional(v.string()),
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
@@ -419,19 +420,34 @@ export const updatePlanContent = mutation({
 			}
 			videoScenes = normalizeVideoScenes(args.videoScenes);
 		}
+		let generalVideoInstructions = plan.generalVideoInstructions;
+		if (args.generalVideoInstructions !== undefined) {
+			const trimmed = args.generalVideoInstructions.trim();
+			generalVideoInstructions = trimmed || undefined;
+		}
+		const promptSourceChanged =
+			args.videoScenes !== undefined ||
+			args.generalVideoInstructions !== undefined;
 		await ctx.db.patch(args.planId, {
 			imagePrompt,
 			videoScenes,
-			// Prompt source changed — invalidate the Luna summary cache.
-			summarizedVideoPrompt: undefined,
-			videoPromptSourceHash: undefined,
+			generalVideoInstructions,
+			...(promptSourceChanged
+				? {
+						// Prompt source changed — invalidate the Luna summary cache.
+						summarizedVideoPrompt: undefined,
+						videoPromptSourceHash: undefined,
+					}
+				: {}),
 			updatedAt: Date.now(),
 		});
-		await ctx.scheduler.runAfter(
-			0,
-			internal.studio.actions.refreshPlanPromptSummary,
-			{ planId: args.planId },
-		);
+		if (promptSourceChanged) {
+			await ctx.scheduler.runAfter(
+				0,
+				internal.studio.actions.refreshPlanPromptSummary,
+				{ planId: args.planId },
+			);
+		}
 		return null;
 	},
 });
