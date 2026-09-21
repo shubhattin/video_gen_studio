@@ -6,26 +6,8 @@ import {
 	type ResolutionLabel,
 	type VideoModelId,
 } from "./modelCatalog";
-
-/**
- * Seedance six-part scene beat.
- * Required: subject + action. Optional slots may be empty strings.
- */
-export const videoSceneSchema = z.object({
-	sceneNumber: z.number().int().positive(),
-	intent: z.string().min(1),
-	subject: z.string().min(1),
-	action: z.string().min(1),
-	scene: z.string(),
-	style: z.string(),
-	camera: z.string(),
-	audio: z
-		.string()
-		.nullable()
-		.describe(
-			"Sound / music / SFX direction for this beat. Return null unless the user prompt explicitly says Generate Audio Plans: Yes.",
-		),
-});
+import { videoSceneSchema } from "./prompts/main_video_scene";
+export { videoSceneSchema };
 
 export const normalPlannerOutputSchema = z.object({
 	kind: z.literal("single-clip"),

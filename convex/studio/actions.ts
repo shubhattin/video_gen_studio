@@ -2,6 +2,7 @@
 
 import { generateImage, generateText, Output } from "ai";
 import { v } from "convex/values";
+import Handlebars from "handlebars";
 import { internal } from "../_generated/api";
 import { action, internalAction, type ActionCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
@@ -29,6 +30,7 @@ import {
 	OpenRouterPollTimeoutError,
 	type OpenRouterVideoJob,
 } from "../lib/openrouterVideo";
+import { USER_BASE_PROMPT_TEMPLATE } from "../lib/prompts/user_base_prompt";
 import {
 	imageConfigSchema,
 	normalPlannerOutputSchema,
@@ -51,6 +53,11 @@ import {
 	putObjectBytes,
 } from "../lib/r2";
 
+const renderPlannerPrompt = Handlebars.compile(USER_BASE_PROMPT_TEMPLATE, {
+	noEscape: true,
+	strict: true,
+});
+
 function buildPlannerPrompt(args: {
 	shlokaText: string;
 	customInstructions?: string;
@@ -59,51 +66,15 @@ function buildPlannerPrompt(args: {
 	aspectRatio?: string;
 	generateAudio?: boolean;
 }) {
-	const sections: string[] = [
-		[
-			"## Shloka",
-			"Preserve meaning; do not replace with an invented translation unless asked.",
-			`"""`,
-			args.shlokaText.trim(),
-			`"""`,
-		].join("\n"),
-	];
-
-	if (args.customInstructions?.trim()) {
-		sections.push(
-			[
-				"## Custom instructions (hard constraints)",
-				`"""`,
-				args.customInstructions.trim(),
-				`"""`,
-			].join("\n"),
-		);
-	} else {
-		sections.push(
-			"## Custom instructions\nnone — default to warm Indian devotional atmosphere.",
-		);
-	}
-
-	const meta: string[] = [];
-	if (args.aspectRatio) {
-		meta.push(`- Aspect ratio: ${args.aspectRatio}`);
-	}
-	if (args.durationSeconds != null) {
-		meta.push(
-			`- Target video length: ${args.durationSeconds} seconds (modulate beat count to fit).`,
-		);
-	}
-	if (args.maxPromptChars != null) {
-		meta.push(
-			`- Provider video prompt character limit: ${args.maxPromptChars} (videoScenes will be flattened into one text prompt; stay concise and pricise but details that would enrich video scene should not be cut down either).`,
-		);
-	}
-	meta.push(`- Generate Audio Plans: ${args.generateAudio ? "Yes" : "No"}`);
-	if (meta.length > 0) {
-		sections.push(["## Generation constraints", ...meta].join("\n"));
-	}
-
-	return sections.join("\n\n");
+	const customInstructions = args.customInstructions?.trim();
+	return renderPlannerPrompt({
+		shlokaText: args.shlokaText.trim(),
+		customInstructions: customInstructions || undefined,
+		aspectRatio: args.aspectRatio,
+		durationSeconds: args.durationSeconds,
+		maxPromptChars: args.maxPromptChars,
+		generateAudio: args.generateAudio === true,
+	}).trim();
 }
 
 function planBudgetFromConfig(config: {
@@ -917,7 +888,7 @@ export const generateModelStudioVideo = action({
 		}
 
 		const parsedParams = videoParamsSchema.parse({
-			...(run.videoParams ?? {}),
+			...run.videoParams,
 			modelId,
 			prompt,
 		});
