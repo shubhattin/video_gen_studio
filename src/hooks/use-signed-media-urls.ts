@@ -2,6 +2,12 @@ import { useQueries } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { type ViewUrlRecord, viewUrlQueryOptions } from "#/lib/view-url-query";
 
+export type SignedMediaUrlState = {
+	urls: ViewUrlRecord;
+	/** Keys whose signed URL has not resolved yet. */
+	pendingKeys: ReadonlySet<string>;
+};
+
 /**
  * Resolve short-lived R2 read URLs for gallery object keys.
  *
@@ -14,7 +20,7 @@ import { type ViewUrlRecord, viewUrlQueryOptions } from "#/lib/view-url-query";
  */
 export function useSignedMediaUrls(
 	objectKeys: Array<string | undefined | null>,
-): ViewUrlRecord {
+): SignedMediaUrlState {
 	// Callers typically rebuild the array inline; memoize off its joined
 	// signature so the per-key query list stays stable across renders.
 	const signature = objectKeys.join("\0");
@@ -29,11 +35,16 @@ export function useSignedMediaUrls(
 	return useQueries({
 		queries: keys.map((objectKey) => viewUrlQueryOptions(objectKey)),
 		combine: (results) => {
-			const record: ViewUrlRecord = {};
+			const urls: ViewUrlRecord = {};
+			const pendingKeys = new Set<string>();
 			for (const [index, objectKey] of keys.entries()) {
-				record[objectKey] = results[index]?.data ?? null;
+				const result = results[index];
+				urls[objectKey] = result?.data ?? null;
+				if (result?.isPending) {
+					pendingKeys.add(objectKey);
+				}
 			}
-			return record;
+			return { urls, pendingKeys };
 		},
 	});
 }

@@ -206,7 +206,7 @@ export function ModelStudio({ runId }: ModelStudioProps) {
 		setImageQuality(run.imageQuality ?? "medium");
 		setVideoConfig({
 			...defaultVideoParams(modelId),
-			...(run.videoParams ?? {}),
+			...run.videoParams,
 			modelId,
 			prompt: undefined,
 		} as VideoConfigState);
@@ -248,7 +248,7 @@ export function ModelStudio({ runId }: ModelStudioProps) {
 		...rawImages.map((image) => image.objectKey),
 		...rawVideos.map((video) => video.objectKey),
 	];
-	const urlsByKey = useSignedMediaUrls(mediaObjectKeys);
+	const { urls: urlsByKey } = useSignedMediaUrls(mediaObjectKeys);
 	const images = rawImages.map((image) => withSignedUrl(image, urlsByKey));
 	const videos = rawVideos.map((video) => withSignedUrl(video, urlsByKey));
 
@@ -785,9 +785,9 @@ export function ModelStudio({ runId }: ModelStudioProps) {
 						</Alert>
 					) : (
 						<>
-							<ScrollArea className="max-h-[50vh] min-h-[120px] shrink-0 overflow-auto rounded-lg border bg-muted/20 overscroll-contain">
+							<ScrollArea className="max-h-[50vh] min-h-30 shrink-0 overflow-auto rounded-lg border bg-muted/20 overscroll-contain">
 								<div className="min-h-0 p-4">
-									<MessageResponse className="prose prose-sm max-w-none text-sm leading-relaxed break-words prose-strong:font-semibold prose-code:rounded prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:font-mono prose-code:text-xs dark:prose-invert">
+									<MessageResponse className="prose prose-sm max-w-none text-sm leading-relaxed wrap-break-word prose-strong:font-semibold prose-code:rounded prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:font-mono prose-code:text-xs dark:prose-invert">
 										{summarizedText ?? ""}
 									</MessageResponse>
 								</div>

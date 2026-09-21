@@ -107,10 +107,12 @@ function aspectRatioValue(video: GalleryVideo): string | undefined {
 
 function GalleryVideoCard({
 	video,
+	urlPending,
 	onDelete,
 	busy,
 }: {
 	video: GalleryVideo;
+	urlPending?: boolean;
 	onDelete: () => void;
 	busy: boolean;
 }) {
@@ -168,6 +170,14 @@ function GalleryVideoCard({
 					>
 						<track kind="captions" />
 					</video>
+				) : urlPending ? (
+					<Skeleton
+						className={cn(
+							"w-full rounded-none bg-muted/40",
+							ratio ? "max-h-[min(75vh,42rem)]" : "h-56",
+						)}
+						style={ratio ? { aspectRatio: ratio } : undefined}
+					/>
 				) : (
 					<div className="flex h-56 items-center justify-center text-sm text-muted-foreground">
 						Video unavailable
@@ -351,7 +361,7 @@ export function VideoGallery() {
 	const objectKeys = (videos ?? []).map(
 		(video: { objectKey?: string }) => video.objectKey,
 	);
-	const urlsByKey = useSignedMediaUrls(objectKeys);
+	const { urls: urlsByKey, pendingKeys } = useSignedMediaUrls(objectKeys);
 	const withUrls = (videos ?? []).map((video: GalleryVideo) =>
 		withSignedUrl(video, urlsByKey),
 	);
@@ -431,6 +441,9 @@ export function VideoGallery() {
 						<GalleryVideoCard
 							key={video.id}
 							video={video}
+							urlPending={Boolean(
+								video.objectKey && pendingKeys.has(video.objectKey),
+							)}
 							busy={deleting}
 							onDelete={() => setPendingDeleteId(video.id)}
 						/>

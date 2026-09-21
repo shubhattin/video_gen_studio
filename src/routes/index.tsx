@@ -184,7 +184,7 @@ function ShlokaStudioPage() {
 		...rawImages.map((image) => image.objectKey),
 		...rawVideos.map((video) => video.objectKey),
 	];
-	const urlsByKey = useSignedMediaUrls(mediaObjectKeys);
+	const { urls: urlsByKey } = useSignedMediaUrls(mediaObjectKeys);
 	const images = rawImages.map((image) => withSignedUrl(image, urlsByKey));
 	const videos = rawVideos.map((video) => withSignedUrl(video, urlsByKey));
 

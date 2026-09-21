@@ -477,7 +477,7 @@ export function ReferenceImagePanel({
 		() => (gallery ?? []).map((item: { objectKey?: string }) => item.objectKey),
 		[gallery],
 	);
-	const galleryUrls = useSignedMediaUrls(galleryKeys);
+	const { urls: galleryUrls } = useSignedMediaUrls(galleryKeys);
 	const estimate =
 		GPT_IMAGE_ESTIMATES_USD[
 			(imageSize as keyof typeof GPT_IMAGE_ESTIMATES_USD) ?? "1024x1536"

@@ -103,10 +103,12 @@ async function downloadImageFile(image: GalleryImage): Promise<void> {
 
 function GalleryImageCard({
 	image,
+	urlPending,
 	onDelete,
 	busy,
 }: {
 	image: GalleryImage;
+	urlPending?: boolean;
 	onDelete: () => void;
 	busy: boolean;
 }) {
@@ -153,6 +155,8 @@ function GalleryImageCard({
 						alt=""
 						className="h-full w-full object-contain"
 					/>
+				) : urlPending ? (
+					<Skeleton className="absolute inset-0 size-full rounded-none" />
 				) : (
 					<div className="text-sm text-muted-foreground">Image unavailable</div>
 				)}
@@ -326,7 +330,7 @@ const IMAGE_SKELETON_KEYS = Array.from(
 function GalleryImageCardSkeleton() {
 	return (
 		<article className="mb-4 break-inside-avoid overflow-hidden rounded-2xl border border-border/70 bg-card">
-			<Skeleton className="aspect-[3/4] max-h-64 w-full rounded-none" />
+			<Skeleton className="aspect-3/4 max-h-64 w-full rounded-none" />
 			<div className="flex items-center gap-2 px-3 py-2.5">
 				<div className="flex min-w-0 flex-1 flex-col gap-1.5">
 					<Skeleton className="h-5 w-20" />
@@ -350,7 +354,7 @@ export function ImageGallery() {
 	const objectKeys = (images ?? []).map(
 		(image: { objectKey?: string }) => image.objectKey,
 	);
-	const urlsByKey = useSignedMediaUrls(objectKeys);
+	const { urls: urlsByKey, pendingKeys } = useSignedMediaUrls(objectKeys);
 	const withUrls = (images ?? []).map((image: GalleryImage) =>
 		withSignedUrl(image, urlsByKey),
 	);
@@ -428,6 +432,9 @@ export function ImageGallery() {
 						<GalleryImageCard
 							key={image.id}
 							image={image}
+							urlPending={Boolean(
+								image.objectKey && pendingKeys.has(image.objectKey),
+							)}
 							busy={deleting}
 							onDelete={() => setPendingDeleteId(image.id)}
 						/>
