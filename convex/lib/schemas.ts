@@ -6,13 +6,41 @@ import {
 	type ResolutionLabel,
 	type VideoModelId,
 } from "./modelCatalog";
-import { videoSceneSchema } from "./prompts/main_video_scene";
-export { videoSceneSchema };
+
+// actual schema used by ai to generate video scenes
+export const videoSceneSchema = z.object({
+	sceneNumber: z.int().positive(),
+	intent: z.string().describe("Short scene title (what this scene conveys), also have a rough duration range in here at the start here eg. 0-5s. Keep in continous as the scene numeber progresses. And this is also generated in accordance with the provided total duration by the user for video"),
+	subject: z.string(),
+	action: z.string(),
+	scene: z.string(),
+	style: z.string(),
+	camera: z.string(),
+	audio: z
+		.string()
+		.nullable()
+		.describe(
+			"Sound / music / SFX direction for this beat. Return null unless the user prompt explicitly says Generate Audio Plans: Yes.",
+		),
+});
 
 export const normalPlannerOutputSchema = z.object({
 	kind: z.literal("single-clip"),
+	expectedIdealVideoDuration: z
+		.number()
+		.positive()
+		.nullable()
+		.describe(
+			"Ideal clip length in seconds when the user did not specify one. Null when the user prompt gives an exact target length.",
+		),
 	imagePrompt: z.string().min(20),
 	videoScenes: z.array(videoSceneSchema).min(1).max(12),
+	generalVideoInstructions: z
+		.string()
+		.min(1)
+		.describe(
+			"Direct video-model instructions prepended to the provider prompt. By default forbid text overlays, logos, watermarks, and photoreal people unless the user asked for them.",
+		),
 });
 
 export type VideoScene = z.infer<typeof videoSceneSchema>;
@@ -32,7 +60,10 @@ export const videoParamsSchema = z.object({
 export type VideoParams = z.infer<typeof videoParamsSchema>;
 
 /** Video config stored per plan — no raw prompt slot. */
-export type PlanVideoConfig = Omit<VideoParams, "prompt">;
+export type PlanVideoConfig = Omit<VideoParams, "prompt"> & {
+	/** When true, the planner chooses duration (expectedIdealVideoDuration). */
+	generateDuration?: boolean;
+};
 
 export function planConfigFromParams(params: VideoParams): PlanVideoConfig {
 	const { prompt: _prompt, ...rest } = params;
@@ -49,7 +80,32 @@ export type LastModelParamsUsed = {
 	negativePrompt?: string;
 	cfgScale?: number;
 	maxPromptChars: number;
+	/** True when the planner chose the duration instead of the user. */
+	generateDuration?: boolean;
 };
+
+/** Nearest supported clip length. Ties prefer the longer option. */
+export function snapDurationToSupported(
+	requested: number,
+	supported: readonly number[],
+): number {
+	if (supported.length === 0 || !Number.isFinite(requested)) {
+		return requested;
+	}
+	if (supported.includes(requested)) {
+		return requested;
+	}
+	let best = supported[0]!;
+	let bestDist = Math.abs(requested - best);
+	for (const duration of supported) {
+		const dist = Math.abs(requested - duration);
+		if (dist < bestDist || (dist === bestDist && duration > best)) {
+			best = duration;
+			bestDist = dist;
+		}
+	}
+	return best;
+}
 
 /**
  * True when the user's current plan config diverges from the config the plan
@@ -66,6 +122,7 @@ export function planConfigDiverges(
 				| "resolution"
 				| "durationSeconds"
 				| "generateAudio"
+				| "generateDuration"
 		  >
 		| null
 		| undefined,
@@ -76,7 +133,8 @@ export function planConfigDiverges(
 		current.aspectRatio !== used.aspectRatio ||
 		current.resolution !== used.resolution ||
 		current.durationSeconds !== used.durationSeconds ||
-		Boolean(current.generateAudio) !== Boolean(used.generateAudio)
+		Boolean(current.generateAudio) !== Boolean(used.generateAudio) ||
+		Boolean(current.generateDuration) !== Boolean(used.generateDuration)
 	);
 }
 

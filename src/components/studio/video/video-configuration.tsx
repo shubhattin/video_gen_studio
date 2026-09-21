@@ -28,6 +28,8 @@ export type VideoConfigState = {
 	resolution: string;
 	durationSeconds: number;
 	generateAudio?: boolean;
+	/** When true, the planner chooses the clip length. */
+	generateDuration?: boolean;
 	negativePrompt?: string;
 	cfgScale?: number;
 	prompt?: string;
@@ -38,6 +40,10 @@ type VideoConfigurationProps = {
 	onChange: (value: VideoConfigState) => void;
 	disabled?: boolean;
 	showPrompt?: boolean;
+	/** Shloka studio: planner can choose duration. */
+	showGenerateDuration?: boolean;
+	/** Duration the planner already chose for this plan, if any. */
+	generatedDurationSeconds?: number | null;
 };
 
 export function VideoConfiguration({
@@ -45,11 +51,25 @@ export function VideoConfiguration({
 	onChange,
 	disabled,
 	showPrompt,
+	showGenerateDuration,
+	generatedDurationSeconds,
 }: VideoConfigurationProps) {
 	const profile = MODEL_CAPABILITY_PROFILES[value.modelId as VideoModelId];
 	if (!profile) {
 		return null;
 	}
+
+	const generateDuration =
+		showGenerateDuration && value.generateDuration === true;
+	const hasGeneratedDuration =
+		generatedDurationSeconds != null &&
+		profile.supportedDurations.includes(generatedDurationSeconds);
+	const lockDuration = generateDuration;
+	const durationValue = lockDuration
+		? hasGeneratedDuration
+			? String(generatedDurationSeconds)
+			: null
+		: String(value.durationSeconds);
 
 	return (
 		<section className="space-y-3 border-t border-border/80 pt-5">
@@ -133,17 +153,41 @@ export function VideoConfiguration({
 						</Select>
 					</div>
 					<div className="flex min-w-32 flex-1 flex-col gap-1.5">
-						<Label className="text-xs">Duration</Label>
+						<div className="flex items-center gap-4 sm:gap-6 md:gap-8">
+							<Label className="text-xs">
+								{lockDuration && !hasGeneratedDuration
+									? "Duration —"
+									: "Duration"}
+							</Label>
+							{showGenerateDuration ? (
+								<div className="flex items-center gap-1.5">
+									<Switch
+										id="generate-duration"
+										checked={value.generateDuration === true}
+										onCheckedChange={(checked) =>
+											onChange({ ...value, generateDuration: checked })
+										}
+										disabled={disabled}
+									/>
+									<Label
+										htmlFor="generate-duration"
+										className="text-xs font-medium"
+									>
+										Generate duration
+									</Label>
+								</div>
+							) : null}
+						</div>
 						<Select
-							value={String(value.durationSeconds)}
+							value={durationValue}
 							onValueChange={(duration) =>
 								duration &&
 								onChange({ ...value, durationSeconds: Number(duration) })
 							}
-							disabled={disabled}
+							disabled={disabled || lockDuration}
 						>
 							<SelectTrigger className="h-9 min-h-9 w-full">
-								<SelectValue />
+								<SelectValue placeholder="—" />
 							</SelectTrigger>
 							<SelectContent>
 								{profile.supportedDurations.map((duration) => (

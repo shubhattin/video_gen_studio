@@ -34,6 +34,7 @@ import { USER_BASE_PROMPT_TEMPLATE } from "../lib/prompts/user_base_prompt";
 import {
 	imageConfigSchema,
 	normalPlannerOutputSchema,
+	snapDurationToSupported,
 	videoParamsSchema,
 	type ImageConfig,
 	type LastModelParamsUsed,
@@ -62,16 +63,21 @@ function buildPlannerPrompt(args: {
 	shlokaText: string;
 	customInstructions?: string;
 	durationSeconds?: number;
+	generateDuration?: boolean;
+	maxDurationSeconds?: number;
 	maxPromptChars?: number;
 	aspectRatio?: string;
 	generateAudio?: boolean;
 }) {
 	const customInstructions = args.customInstructions?.trim();
+	const generateDuration = args.generateDuration === true;
 	return renderPlannerPrompt({
 		shlokaText: args.shlokaText.trim(),
 		customInstructions: customInstructions || undefined,
 		aspectRatio: args.aspectRatio,
-		durationSeconds: args.durationSeconds,
+		generateDuration,
+		maxDurationSeconds: generateDuration ? args.maxDurationSeconds : undefined,
+		durationSeconds: generateDuration ? undefined : args.durationSeconds,
 		maxPromptChars: args.maxPromptChars,
 		generateAudio: args.generateAudio === true,
 	}).trim();
@@ -83,6 +89,7 @@ function planBudgetFromConfig(config: {
 	resolution: string;
 	durationSeconds: number;
 	generateAudio?: boolean;
+	generateDuration?: boolean;
 	negativePrompt?: string;
 	cfgScale?: number;
 }): { budget: LastModelParamsUsed; modelId: VideoModelId } {
@@ -98,6 +105,7 @@ function planBudgetFromConfig(config: {
 			resolution: config.resolution,
 			durationSeconds: config.durationSeconds,
 			generateAudio: config.generateAudio,
+			generateDuration: config.generateDuration,
 			negativePrompt: config.negativePrompt,
 			cfgScale: config.cfgScale,
 			maxPromptChars: profile.maxPromptChars,
@@ -361,15 +369,16 @@ export const planShlokaRun = action({
 				internal.studio.queries.resolvePlannerPromptSelectionForRun,
 				{ selection: run.plannerPromptSelection },
 			);
-			const { budget } = planBudgetFromConfig(plan.videoParams);
+			const generateDuration = plan.videoParams.generateDuration === true;
+			const { budget, modelId } = planBudgetFromConfig({
+				...plan.videoParams,
+				generateDuration,
+			});
 			// Audio planning only when the model can generate audio AND the
 			// user turned it on for this plan.
 			const generateAudio =
 				Boolean(budget.generateAudio) &&
-				Boolean(
-					MODEL_CAPABILITY_PROFILES[budget.modelId as VideoModelId]
-						?.supportsAudio,
-				);
+				Boolean(MODEL_CAPABILITY_PROFILES[modelId]?.supportsAudio);
 
 			const result = await generateText({
 				model: getOpenRouterProvider()(PLANNER_MODEL_ID),
@@ -380,7 +389,15 @@ export const planShlokaRun = action({
 				prompt: buildPlannerPrompt({
 					shlokaText: run.shlokaText,
 					customInstructions: run.customInstructions,
-					durationSeconds: budget.durationSeconds,
+					generateDuration,
+					maxDurationSeconds: generateDuration
+						? Math.max(
+								...MODEL_CAPABILITY_PROFILES[modelId].supportedDurations,
+							)
+						: undefined,
+					durationSeconds: generateDuration
+						? undefined
+						: budget.durationSeconds,
 					maxPromptChars: budget.maxPromptChars,
 					aspectRatio: budget.aspectRatio,
 					generateAudio,
@@ -391,10 +408,29 @@ export const planShlokaRun = action({
 			const warnings = warningMessages(result.warnings ?? []);
 			const videoScenes = normalizeVideoScenes(planOutput.videoScenes);
 
+			let durationSeconds = budget.durationSeconds;
+			let expectedIdealVideoDuration: number | undefined;
+			if (generateDuration) {
+				const chosen = planOutput.expectedIdealVideoDuration;
+				if (chosen != null && Number.isFinite(chosen)) {
+					durationSeconds = snapDurationToSupported(
+						chosen,
+						MODEL_CAPABILITY_PROFILES[modelId].supportedDurations,
+					);
+					expectedIdealVideoDuration = durationSeconds;
+				} else {
+					warnings.push(
+						"Planner did not return a duration; using the stored clip length.",
+					);
+				}
+			}
+
 			await ctx.runMutation(internal.studio.internal.commitPlanContent, {
 				planId: args.planId,
 				imagePrompt: planOutput.imagePrompt,
 				videoScenes,
+				generalVideoInstructions: planOutput.generalVideoInstructions,
+				expectedIdealVideoDuration: expectedIdealVideoDuration ?? null,
 				plannerModel: PLANNER_MODEL_ID,
 				plannerReasoning: "medium",
 				plannerSystemPrompt: resolvedPrompt.content,
@@ -402,7 +438,11 @@ export const planShlokaRun = action({
 					resolvedPrompt.source === "template"
 						? resolvedPrompt.templateId
 						: undefined,
-				lastModelParamsUsed: budget,
+				lastModelParamsUsed: {
+					...budget,
+					durationSeconds,
+					generateDuration,
+				},
 				warnings: warnings.length > 0 ? warnings : undefined,
 			});
 		} catch (error) {

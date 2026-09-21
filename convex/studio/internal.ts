@@ -191,6 +191,8 @@ export const commitPlanContent = internalMutation({
 		planId: v.id("shlokaPlans"),
 		imagePrompt: v.string(),
 		videoScenes: v.array(videoSceneValidator),
+		generalVideoInstructions: v.optional(v.string()),
+		expectedIdealVideoDuration: v.optional(v.union(v.number(), v.null())),
 		plannerModel: v.string(),
 		plannerReasoning: v.string(),
 		/** Resolved prompt text actually sent to the planner. */
@@ -206,14 +208,26 @@ export const commitPlanContent = internalMutation({
 			throw new Error("Plan not found.");
 		}
 		const now = Date.now();
+		const generalVideoInstructions = args.generalVideoInstructions?.trim();
+		const expectedIdealVideoDuration =
+			args.expectedIdealVideoDuration == null
+				? undefined
+				: args.expectedIdealVideoDuration;
 		await ctx.db.patch(args.planId, {
 			status: "ready",
 			imagePrompt: args.imagePrompt,
 			videoScenes: args.videoScenes,
+			generalVideoInstructions: generalVideoInstructions || undefined,
+			expectedIdealVideoDuration,
 			plannerSystemPrompt: args.plannerSystemPrompt,
 			plannerSystemPromptTemplateId: args.plannerSystemPromptTemplateId,
 			plannerModel: args.plannerModel,
 			plannerReasoning: args.plannerReasoning,
+			videoParams: {
+				...plan.videoParams,
+				durationSeconds: args.lastModelParamsUsed.durationSeconds,
+				generateDuration: args.lastModelParamsUsed.generateDuration,
+			},
 			lastModelParamsUsed: args.lastModelParamsUsed,
 			summarizedVideoPrompt: undefined,
 			videoPromptSourceHash: undefined,

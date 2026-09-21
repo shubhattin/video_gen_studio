@@ -75,7 +75,12 @@ export const openRouterVideoJobStatusValidator = v.union(
 );
 
 /** Video config stored per plan — no raw prompt slot (that's model-studio's job). */
-export const planVideoConfigValidator = videoParamsValidator.omit("prompt");
+export const planVideoConfigValidator = videoParamsValidator
+	.omit("prompt")
+	.extend({
+		/** When true, the planner chooses duration instead of the user. */
+		generateDuration: v.optional(v.boolean()),
+	});
 
 /**
  * Snapshot of the config a plan was GENERATED with (+ derived provider limit).
@@ -90,6 +95,7 @@ export const lastModelParamsUsedValidator = v.object({
 	negativePrompt: v.optional(v.string()),
 	cfgScale: v.optional(v.number()),
 	maxPromptChars: v.number(),
+	generateDuration: v.optional(v.boolean()),
 });
 
 /** System prompt selection for a Shloka run; absent means "not chosen yet". */
@@ -204,8 +210,10 @@ export default defineSchema({
 		// Planner output — absent until generated (status "draft").
 		imagePrompt: v.optional(v.string()),
 		videoScenes: v.optional(v.array(videoSceneValidator)),
-		/** Optional free-text directives appended into the provider video prompt. */
+		/** Optional free-text directives prepended to the provider video prompt. */
 		generalVideoInstructions: v.optional(v.string()),
+		/** Planner-chosen clip length when generateDuration was on. Absent otherwise. */
+		expectedIdealVideoDuration: v.optional(v.number()),
 		plannerSystemPrompt: v.optional(v.string()),
 		plannerSystemPromptTemplateId: v.optional(v.id("systemPromptTemplates")),
 		plannerModel: v.optional(v.string()),

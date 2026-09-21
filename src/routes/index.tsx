@@ -88,9 +88,10 @@ function ShlokaStudioPage() {
 		useState<PlannerPromptSelection | null>(null);
 	const [imageSize, setImageSize] = useState("1024x1536");
 	const [imageQuality, setImageQuality] = useState("medium");
-	const [videoConfig, setVideoConfig] = useState<VideoConfigState>(
-		defaultVideoParams("bytedance/seedance-2.5"),
-	);
+	const [videoConfig, setVideoConfig] = useState<VideoConfigState>(() => ({
+		...defaultVideoParams("bytedance/seedance-2.5"),
+		generateDuration: false,
+	}));
 	const [busyStage, setBusyStage] = useState<StudioBusyStage>(null);
 	const [creatingPlan, setCreatingPlan] = useState(false);
 
@@ -220,7 +221,10 @@ function ShlokaStudioPage() {
 			setCustomInstructions("");
 			setImageSize("1024x1536");
 			setImageQuality("medium");
-			setVideoConfig(defaultVideoParams("bytedance/seedance-2.5"));
+			setVideoConfig({
+				...defaultVideoParams("bytedance/seedance-2.5"),
+				generateDuration: false,
+			});
 			setBusyStage(null);
 			return;
 		}
@@ -267,6 +271,7 @@ function ShlokaStudioPage() {
 			resolution: params.resolution ?? "720p",
 			durationSeconds: params.durationSeconds ?? 8,
 			generateAudio: params.generateAudio,
+			generateDuration: params.generateDuration === true,
 			negativePrompt: params.negativePrompt,
 			cfgScale: params.cfgScale,
 		});
@@ -326,7 +331,10 @@ function ShlokaStudioPage() {
 	};
 
 	const onModelChange = (modelId: VideoModelId) => {
-		const next = defaultVideoParams(modelId);
+		const next = {
+			...defaultVideoParams(modelId),
+			generateDuration: videoConfig.generateDuration,
+		};
 		setVideoConfig(next);
 		planAutosave.save({ videoParams: next }, "immediate");
 	};
@@ -494,6 +502,15 @@ function ShlokaStudioPage() {
 				label: "duration",
 				current: `${videoConfig.durationSeconds}s`,
 				used: `${used.durationSeconds}s`,
+			});
+		}
+		if (
+			Boolean(videoConfig.generateDuration) !== Boolean(used.generateDuration)
+		) {
+			fields.push({
+				label: "generate duration",
+				current: videoConfig.generateDuration ? "on" : "off",
+				used: used.generateDuration ? "on" : "off",
 			});
 		}
 		if (Boolean(videoConfig.generateAudio) !== Boolean(used.generateAudio)) {
@@ -683,6 +700,10 @@ function ShlokaStudioPage() {
 												value={videoConfig}
 												onChange={onVideoConfigChange}
 												disabled={anyBusy}
+												showGenerateDuration
+												generatedDurationSeconds={
+													activePlan?.expectedIdealVideoDuration
+												}
 											/>
 											{hasDivergence ? (
 												<DivergenceWarning

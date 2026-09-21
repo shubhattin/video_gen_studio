@@ -473,7 +473,9 @@ export function ShlokaPlanPreview({
 			>
 				<div className="flex flex-wrap items-center gap-2">
 					<TabsList>
-						<TabsTrigger value="image-prompt">Reference image prompt</TabsTrigger>
+						<TabsTrigger value="image-prompt">
+							Reference image prompt
+						</TabsTrigger>
 						<TabsTrigger value="video-scenes">Video scenes</TabsTrigger>
 					</TabsList>
 					{canEdit ? (

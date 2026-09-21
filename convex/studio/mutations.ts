@@ -80,7 +80,10 @@ export const createShlokaDraft = mutation({
 			runId,
 			attemptNumber: 1,
 			status: "draft",
-			videoParams: defaultVideoParams(defaultModel),
+			videoParams: {
+				...defaultVideoParams(defaultModel),
+				generateDuration: false,
+			},
 			videoOutputIds: [],
 			createdAt: now,
 			updatedAt: now,
@@ -241,9 +244,10 @@ export const createPlan = mutation({
 			runId: args.runId,
 			attemptNumber,
 			status: "draft",
-			videoParams:
-				activePlan?.videoParams ??
-				defaultVideoParams("bytedance/seedance-2.5"),
+			videoParams: activePlan?.videoParams ?? {
+				...defaultVideoParams("bytedance/seedance-2.5"),
+				generateDuration: false,
+			},
 			videoOutputIds: [],
 			createdAt: now,
 			updatedAt: now,
@@ -348,6 +352,7 @@ export const updatePlanConfig = mutation({
 			resolution: v.string(),
 			durationSeconds: v.number(),
 			generateAudio: v.optional(v.boolean()),
+			generateDuration: v.optional(v.boolean()),
 			negativePrompt: v.optional(v.string()),
 			cfgScale: v.optional(v.number()),
 		}),

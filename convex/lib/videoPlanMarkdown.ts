@@ -3,8 +3,6 @@
  * Scenes are strictly the current eight-field shape.
  */
 
-import { EXTRA_STUB_FINAL_VIDEO_SCENE } from "./prompts/main_video_scene";
-
 export type EditableVideoScene = {
 	sceneNumber: number;
 	intent: string;
@@ -80,8 +78,7 @@ function formatSceneBlock(scene: EditableVideoScene, index: number): string {
 
 /**
  * Provider prompt from structured scenes (Seedance-oriented).
- * Newlines separate title / fields; blank line between scenes.
- * Optional general video instructions are appended before the closing style stub.
+ * General video instructions lead; then each scene as labeled lines.
  * No scene-count truncation — full plan is included; summarization handles limits.
  */
 export function buildVideoPromptFromScenes(
@@ -91,13 +88,12 @@ export function buildVideoPromptFromScenes(
 	const normalized = normalizeVideoScenes(scenes);
 	const general = generalVideoInstructions?.trim() || "";
 	const parts: string[] = [];
+	if (general) {
+		parts.push(general);
+	}
 	if (normalized.length > 0) {
 		parts.push(normalized.map((s, i) => formatSceneBlock(s, i)).join("\n\n"));
 	}
-	if (general) {
-		parts.push(`General video instructions:\n${general}`);
-	}
-	parts.push(EXTRA_STUB_FINAL_VIDEO_SCENE);
 	return parts.join("\n\n");
 }
 
