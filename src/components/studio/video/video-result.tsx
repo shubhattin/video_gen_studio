@@ -13,6 +13,7 @@ import {
 	PopoverTitle,
 	PopoverTrigger,
 } from "#/components/ui/popover";
+import { Skeleton } from "#/components/ui/skeleton";
 import {
 	MODEL_CAPABILITY_PROFILES,
 	type VideoModelId,
@@ -58,6 +59,8 @@ export type VideoResultItem = {
 type VideoResultProps = {
 	runId?: Id<"generationRuns"> | null;
 	videos: VideoResultItem[];
+	/** Object keys whose signed R2 URL is still loading. */
+	pendingKeys?: ReadonlySet<string>;
 };
 
 export function extensionForMime(mimeType?: string) {
@@ -147,11 +150,13 @@ function VideoClipCard({
 	video,
 	versionLabel,
 	isLatest,
+	urlPending,
 }: {
 	runId?: Id<"generationRuns"> | null;
 	video: VideoResultItem;
 	versionLabel: string;
 	isLatest: boolean;
+	urlPending?: boolean;
 }) {
 	const [downloading, setDownloading] = useState(false);
 	const canDownload = Boolean(video.objectKey || video.url);
@@ -183,6 +188,16 @@ function VideoClipCard({
 					>
 						<track kind="captions" />
 					</video>
+				) : urlPending ? (
+					<Skeleton
+						className={cn(
+							"w-full rounded-none bg-muted/40",
+							ratio
+								? "max-h-[min(75vh,42rem)]"
+								: "h-56 max-h-[min(70vh,560px)]",
+						)}
+						style={ratio ? { aspectRatio: ratio } : undefined}
+					/>
 				) : (
 					<div className="flex h-56 items-center justify-center text-sm text-muted-foreground">
 						Video unavailable
@@ -360,7 +375,7 @@ function VideoClipCard({
 	);
 }
 
-export function VideoResult({ runId, videos }: VideoResultProps) {
+export function VideoResult({ runId, videos, pendingKeys }: VideoResultProps) {
 	if (!videos.length) {
 		return null;
 	}
@@ -386,6 +401,9 @@ export function VideoResult({ runId, videos }: VideoResultProps) {
 						video={video}
 						versionLabel={`Clip ${videos.length - index}`}
 						isLatest={index === 0}
+						urlPending={Boolean(
+							video.objectKey && pendingKeys?.has(video.objectKey),
+						)}
 					/>
 				))}
 			</div>

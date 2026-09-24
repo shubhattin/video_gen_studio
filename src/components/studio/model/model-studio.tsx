@@ -248,7 +248,7 @@ export function ModelStudio({ runId }: ModelStudioProps) {
 		...rawImages.map((image) => image.objectKey),
 		...rawVideos.map((video) => video.objectKey),
 	];
-	const { urls: urlsByKey } = useSignedMediaUrls(mediaObjectKeys);
+	const { urls: urlsByKey, pendingKeys } = useSignedMediaUrls(mediaObjectKeys);
 	const images = rawImages.map((image) => withSignedUrl(image, urlsByKey));
 	const videos = rawVideos.map((video) => withSignedUrl(video, urlsByKey));
 
@@ -586,6 +586,7 @@ export function ModelStudio({ runId }: ModelStudioProps) {
 					generating={busyStage === "image"}
 					uploading={busyStage === "upload"}
 					images={images}
+					pendingKeys={pendingKeys}
 					firstFrameImageId={run?.firstFrameImageId}
 					lastFrameImageId={run?.lastFrameImageId}
 					extraReferenceImageIds={extraIds}
@@ -703,7 +704,11 @@ export function ModelStudio({ runId }: ModelStudioProps) {
 						}
 						onConfirm={() => void onGenerateVideo()}
 					/>
-					<VideoResult runId={null} videos={videos} />
+					<VideoResult
+						runId={null}
+						videos={videos}
+						pendingKeys={pendingKeys}
+					/>
 				</div>
 			</div>
 			<GenerationProgressDock

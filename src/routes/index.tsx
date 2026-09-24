@@ -184,7 +184,7 @@ function ShlokaStudioPage() {
 		...rawImages.map((image) => image.objectKey),
 		...rawVideos.map((video) => video.objectKey),
 	];
-	const { urls: urlsByKey } = useSignedMediaUrls(mediaObjectKeys);
+	const { urls: urlsByKey, pendingKeys } = useSignedMediaUrls(mediaObjectKeys);
 	const images = rawImages.map((image) => withSignedUrl(image, urlsByKey));
 	const videos = rawVideos.map((video) => withSignedUrl(video, urlsByKey));
 
@@ -826,6 +826,7 @@ function ShlokaStudioPage() {
 													generating={busyStage === "image"}
 													uploading={busyStage === "upload"}
 													images={images}
+													pendingKeys={pendingKeys}
 													firstFrameImageId={run?.firstFrameImageId}
 													lastFrameImageId={run?.lastFrameImageId}
 													extraReferenceImageIds={extraIds}
@@ -948,7 +949,11 @@ function ShlokaStudioPage() {
 														triggerLabel="Generate video"
 														onConfirm={onGenerateVideo}
 													/>
-													<VideoResult runId={runId} videos={videos} />
+													<VideoResult
+														runId={runId}
+														videos={videos}
+														pendingKeys={pendingKeys}
+													/>
 												</div>
 											</div>
 										) : null}

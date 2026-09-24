@@ -35,6 +35,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "#/components/ui/select";
+import { Skeleton } from "#/components/ui/skeleton";
 import {
 	useSignedMediaUrls,
 	withSignedUrl,
@@ -45,6 +46,7 @@ import { cn } from "#/lib/utils";
 
 export type ReferenceImageItem = {
 	id: string;
+	objectKey?: string;
 	url?: string | null;
 	source?: "generated" | "uploaded" | "terminal_frame";
 	revisedImagePrompt?: string;
@@ -66,6 +68,8 @@ type ReferenceImagePanelProps = {
 	generating?: boolean;
 	uploading?: boolean;
 	images: ReferenceImageItem[];
+	/** Object keys whose signed R2 URL is still loading. */
+	pendingKeys?: ReadonlySet<string>;
 	firstFrameImageId?: string;
 	lastFrameImageId?: string;
 	extraReferenceImageIds: string[];
@@ -192,6 +196,7 @@ function sourceLabelFor(source?: ReferenceImageItem["source"]): string | null {
 
 function ReferenceImageCard({
 	image,
+	urlPending,
 	isFirst,
 	isLast,
 	isExtra,
@@ -202,6 +207,7 @@ function ReferenceImageCard({
 	onRemoveImage,
 }: {
 	image: ReferenceImageItem;
+	urlPending?: boolean;
 	isFirst: boolean;
 	isLast: boolean;
 	isExtra: boolean;
@@ -259,8 +265,13 @@ function ReferenceImageCard({
 				type="button"
 				disabled={!image.url}
 				onClick={() => image.url && setPreviewOpen(true)}
-				className="flex w-full justify-center overflow-hidden bg-muted/30 not-disabled:cursor-zoom-in disabled:cursor-default"
+				className="relative flex w-full justify-center overflow-hidden bg-muted/30 not-disabled:cursor-zoom-in disabled:cursor-default"
 				aria-label={image.url ? "View full size" : undefined}
+				style={
+					ratio
+						? { aspectRatio: ratio, maxHeight: "18rem" }
+						: { minHeight: "10rem" }
+				}
 			>
 				{image.url ? (
 					<img
@@ -274,6 +285,8 @@ function ReferenceImageCard({
 						style={ratio ? { aspectRatio: ratio } : undefined}
 						loading="lazy"
 					/>
+				) : urlPending ? (
+					<Skeleton className="absolute inset-0 size-full rounded-none" />
 				) : (
 					<div className="flex h-40 w-full items-center justify-center text-sm text-muted-foreground">
 						Image unavailable
@@ -451,6 +464,7 @@ export function ReferenceImagePanel({
 	generating,
 	uploading,
 	images,
+	pendingKeys,
 	firstFrameImageId,
 	lastFrameImageId,
 	extraReferenceImageIds,
@@ -477,7 +491,8 @@ export function ReferenceImagePanel({
 		() => (gallery ?? []).map((item: { objectKey?: string }) => item.objectKey),
 		[gallery],
 	);
-	const { urls: galleryUrls } = useSignedMediaUrls(galleryKeys);
+	const { urls: galleryUrls, pendingKeys: galleryPendingKeys } =
+		useSignedMediaUrls(galleryKeys);
 	const estimate =
 		GPT_IMAGE_ESTIMATES_USD[
 			(imageSize as keyof typeof GPT_IMAGE_ESTIMATES_USD) ?? "1024x1536"
@@ -699,6 +714,9 @@ export function ReferenceImagePanel({
 						<ReferenceImageCard
 							key={image.id}
 							image={image}
+							urlPending={Boolean(
+								image.objectKey && pendingKeys?.has(image.objectKey),
+							)}
 							isFirst={firstFrameImageId === image.id}
 							isLast={lastFrameImageId === image.id}
 							isExtra={extraReferenceImageIds.includes(image.id)}
@@ -741,6 +759,7 @@ export function ReferenceImagePanel({
 									};
 								}) => {
 									const withUrl = withSignedUrl(item, galleryUrls);
+									const urlPending = galleryPendingKeys.has(item.objectKey);
 									const attached = attachedIds.has(item.id);
 									const itemWidth = item.meta?.width;
 									const itemHeight = item.meta?.height;
@@ -789,6 +808,15 @@ export function ReferenceImagePanel({
 														loading="lazy"
 													/>
 												</div>
+											) : urlPending ? (
+												<Skeleton
+													className="w-full rounded-none"
+													style={
+														itemRatio
+															? { aspectRatio: itemRatio, maxHeight: "15rem" }
+															: { height: "10rem" }
+													}
+												/>
 											) : (
 												<div className="flex h-40 items-center justify-center text-xs text-muted-foreground">
 													Preview unavailable
