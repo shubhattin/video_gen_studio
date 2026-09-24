@@ -1,6 +1,10 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { env } from "../_generated/server";
+import {
+	LLM_REASONING_LEVEL,
+	type LlmReasoningLevel,
+} from "./modelCatalog";
 
 function normalizeSecret(value: string | undefined): string | undefined {
 	if (!value) {
@@ -40,4 +44,32 @@ export function getOpenRouterProvider() {
 	return createOpenRouter({
 		apiKey: getOpenRouterApiKey(),
 	});
+}
+
+/**
+ * OpenRouter chat model with reasoning.effort set.
+ *
+ * The AI SDK top-level `reasoning: "low"` option is NOT forwarded by
+ * `@openrouter/ai-sdk-provider` — only model settings / providerOptions
+ * `openrouter.reasoning` reach the API. Use this helper for every
+ * OpenRouter LLM call so Anthropic + OpenAI both get the same effort.
+ */
+export function openRouterChatModel(
+	modelId: string,
+	effort: LlmReasoningLevel = LLM_REASONING_LEVEL,
+) {
+	return getOpenRouterProvider()(modelId, {
+		reasoning: { effort },
+	});
+}
+
+/** `providerOptions` form of the same OpenRouter reasoning.effort setting. */
+export function openRouterReasoningProviderOptions(
+	effort: LlmReasoningLevel = LLM_REASONING_LEVEL,
+) {
+	return {
+		openrouter: {
+			reasoning: { effort },
+		},
+	} as const;
 }

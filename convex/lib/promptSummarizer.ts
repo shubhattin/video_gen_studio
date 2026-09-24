@@ -1,9 +1,12 @@
 "use node";
 
 import { generateText } from "ai";
-import { VIDEO_PROMPT_SUMMARIZER_MODEL_ID } from "./modelCatalog";
+import {
+	LLM_NO_REASONING_LEVEL,
+	VIDEO_PROMPT_SUMMARIZER_MODEL_ID,
+} from "./modelCatalog";
 import { VIDEO_PROMPT_SUMMARIZER_SYSTEM_PROMPT } from "./plannerPrompt";
-import { getOpenRouterProvider } from "./providers";
+import { openRouterChatModel } from "./providers";
 
 const MAX_SUMMARIZE_ATTEMPTS = 3;
 
@@ -19,12 +22,13 @@ export async function summarizePromptToLimit(
 	const trimmed = prompt.trim();
 	if (!trimmed) return trimmed;
 	if (trimmed.length <= maxChars) return trimmed;
-	const openrouter = getOpenRouterProvider();
 	let current = trimmed;
 	for (let attempt = 1; attempt <= MAX_SUMMARIZE_ATTEMPTS; attempt++) {
 		const result = await generateText({
-			model: openrouter(VIDEO_PROMPT_SUMMARIZER_MODEL_ID),
-			reasoning: "none",
+			model: openRouterChatModel(
+				VIDEO_PROMPT_SUMMARIZER_MODEL_ID,
+				LLM_NO_REASONING_LEVEL,
+			),
 			instructions: VIDEO_PROMPT_SUMMARIZER_SYSTEM_PROMPT,
 			prompt: [
 				`Character limit: ${maxChars}`,

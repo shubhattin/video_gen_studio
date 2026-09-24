@@ -33,13 +33,34 @@ export const VIDEO_MODEL_FAMILY_META: Record<
 	runway: { label: "Runway", order: 6 },
 };
 
-export const PLANNER_MODEL_ID = "openai/gpt-5.6-sol";
+// export const PLANNER_MODEL_ID = "openai/gpt-5.6-sol";
 // export const PLANNER_MODEL_ID = "anthropic/claude-fable-5";
+export const PLANNER_MODEL_ID = "anthropic/claude-opus-5.5";
+/**
+ * OpenRouter unified reasoning effort for planner / reasoning LLM calls.
+ * Sent as `reasoning.effort` — OpenRouter maps this for both OpenAI
+ * (native effort) and Anthropic (budget_tokens / output_config.effort).
+ * @see https://openrouter.ai/docs/guides/best-practices/reasoning-tokens
+ */
+export type LlmReasoningLevel =
+	| "none"
+	| "minimal"
+	| "low"
+	| "medium"
+	| "high"
+	| "xhigh";
+export const LLM_REASONING_LEVEL: LlmReasoningLevel = "low";
 /** Fast, no-reasoning model used to summarize a run into a short title. */
-export const TITLE_MODEL_ID = "openai/gpt-5.6-luna";
+export const TITLE_MODEL_ID = "openai/gpt-6-luna";
 /** Same luna model — compress over-limit provider video prompts. */
 export const VIDEO_PROMPT_SUMMARIZER_MODEL_ID = TITLE_MODEL_ID;
-export const REFERENCE_IMAGE_MODEL_ID = "gpt-image-2";
+/** Title / prompt-compression calls: keep reasoning off. */
+export const LLM_NO_REASONING_LEVEL: LlmReasoningLevel = "none";
+
+// Image Gen 
+// export const REFERENCE_IMAGE_MODEL_ID = "gpt-image-2";
+export const REFERENCE_IMAGE_MODEL_ID = "gpt-image-2.5-sunburst";
+
 /** Show character counter/meter in Model Studio when prompt usage >= this % of model limit. */
 export const PROMPT_METER_THRESHOLD_PERCENT = 93;
 /** video polling attempts for Openrouter Video API */

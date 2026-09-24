@@ -8,6 +8,8 @@ import { action, internalAction, type ActionCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
 import { requireAdmin } from "../lib/auth";
 import {
+	LLM_NO_REASONING_LEVEL,
+	LLM_REASONING_LEVEL,
 	MODEL_CAPABILITY_PROFILES,
 	PLANNER_MODEL_ID,
 	POLL_RETRY_EVENT_MS,
@@ -20,7 +22,7 @@ import {
 import {
 	getOpenAIProvider,
 	getOpenRouterApiKey,
-	getOpenRouterProvider,
+	openRouterChatModel,
 } from "../lib/providers";
 import {
 	downloadOpenRouterVideo,
@@ -427,8 +429,7 @@ export const planShlokaRun = action({
 
 			const result = await withTimeout(
 				generateText({
-					model: getOpenRouterProvider()(PLANNER_MODEL_ID),
-					reasoning: "medium",
+					model: openRouterChatModel(PLANNER_MODEL_ID, LLM_REASONING_LEVEL),
 					instructions: buildShlokaPlannerSystemPrompt({
 						stored: resolvedPrompt.content,
 					}),
@@ -1182,8 +1183,7 @@ async function modelStudioTitleGeneration(
 
 	try {
 		const result = await generateText({
-			model: getOpenRouterProvider()(TITLE_MODEL_ID),
-			reasoning: "none",
+			model: openRouterChatModel(TITLE_MODEL_ID, LLM_NO_REASONING_LEVEL),
 			instructions:
 				"You write short, clear titles for video-generation runs (under 60 characters). No quotes, emoji, hashtags, or trailing punctuation.",
 			prompt: `Write a short title for this run.\n\n${context}`,
@@ -1281,8 +1281,7 @@ async function runTitleGeneration(
 
 	try {
 		const result = await generateText({
-			model: getOpenRouterProvider()(TITLE_MODEL_ID),
-			reasoning: "none",
+			model: openRouterChatModel(TITLE_MODEL_ID, LLM_NO_REASONING_LEVEL),
 			instructions:
 				"You write short, clear titles for video-generation runs (under 60 characters). No quotes, emoji, hashtags, or trailing punctuation.",
 			prompt: `Write a short title for this run.\n\n${context}`,
