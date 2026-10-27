@@ -18,3 +18,10 @@ Convex agent skills for common tasks can be installed by running
 `npx convex ai-files install`.
 
 <!-- convex-ai-end -->
+
+# Remote / harness
+
+- Never add `Co-authored-by` / `Made by <harness>` lines to commits or PRs, ever.
+- Node/npm are preinstalled; bun often isn't — reuse bun if present, else npm/npx.
+- Skip Convex backend setup in remote envs; validate with `check`, `lint`, `test` instead.
+- If harness supports `.worktreeinclude`, use it; else symlink each listed file from main checkout into worktree.
