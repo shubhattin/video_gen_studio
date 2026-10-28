@@ -19,6 +19,10 @@ Convex agent skills for common tasks can be installed by running
 
 <!-- convex-ai-end -->
 
+# PR
+
+- Squash-merge PRs with 1-3 commits.
+
 # Remote / harness
 
 - Never add `Co-authored-by` / `Made by <harness>` lines to commits or PRs, ever.
