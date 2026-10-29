@@ -7,6 +7,16 @@ import { buildAudioProviderPrompt } from "../lib/audioPrompt";
 import schema from "../schema";
 import { modules } from "../test.setup";
 
+const generateTextMock = vi.hoisted(() => vi.fn());
+vi.mock("ai", async (importOriginal) => ({
+	...(await importOriginal<typeof import("ai")>()),
+	generateText: generateTextMock,
+}));
+vi.mock("../lib/providers", () => ({
+	openRouterChatModel: () => ({}),
+	getOpenRouterApiKey: () => "test-key",
+}));
+
 vi.mock("../lib/r2", () => ({
 	buildStudioObjectKey: ({ kind }: { kind: string }) =>
 		`studio/gallery/${kind}/test.bin`,
@@ -140,27 +150,103 @@ describe("audio runs", () => {
 		).rejects.toThrow(/busy/);
 	});
 
-	it("commits and edits the guided script", async () => {
+	it("commits, revises, switches, and edits the guided script", async () => {
 		const t = adminConvex();
 		const runId = await t.mutation(api.audio.mutations.createAudioRun, {
 			mode: "guided",
 			modelId: "google/lyria-3-pro-preview",
 		});
-		await t.mutation(internal.audio.internal.commitAudioScript, {
+		const turn = {
 			runId,
+			userMessage: "## Instructions",
 			script: SCRIPT,
 			scriptParamsUsed: { modelId: "google/lyria-3-pro-preview" },
 			scriptModel: "anthropic/claude-opus-5.5",
+			status: "draft" as const,
+		};
+		await t.mutation(internal.audio.internal.commitAudioScriptRevision, {
+			...turn,
 			scriptSystemPrompt: "system",
-			status: "draft",
+		});
+		await t.mutation(internal.audio.internal.commitAudioScriptRevision, {
+			...turn,
+			parentIndex: 0,
+			revisionPrompt: "Slower tempo",
+			script: { ...SCRIPT, title: "Slower" },
+			scriptSystemPrompt: "ignored on revise",
+		});
+		let run = await getRun(t, runId);
+		expect(run.scriptRevisions).toHaveLength(2);
+		expect(run.activeScriptRevisionIndex).toBe(1);
+		expect(run.activeScriptRevision?.script.title).toBe("Slower");
+		expect(run.scriptSystemPrompt).toBe("system");
+
+		await t.mutation(api.audio.mutations.selectAudioScriptRevision, {
+			runId,
+			revisionIndex: 0,
 		});
 		await t.mutation(api.audio.mutations.updateAudioScript, {
 			runId,
+			revisionIndex: 0,
 			script: { ...SCRIPT, title: "  Edited  ", pronunciationNotes: " " },
 		});
+		run = await getRun(t, runId);
+		expect(run.activeScriptRevision?.script.title).toBe("Edited");
+		expect(run.activeScriptRevision?.script.pronunciationNotes).toBeUndefined();
+		expect(run.scriptRevisions[1].script.title).toBe("Slower");
+
+		// Regenerate starts a fresh conversation.
+		await t.mutation(internal.audio.internal.commitAudioScriptRevision, {
+			...turn,
+			scriptSystemPrompt: "fresh",
+		});
+		run = await getRun(t, runId);
+		expect(run.scriptRevisions).toHaveLength(1);
+		expect(run.scriptSystemPrompt).toBe("fresh");
+	});
+
+	it("revises the script from the shown revision's conversation", async () => {
+		const t = adminConvex();
+		const runId = await t.mutation(api.audio.mutations.createAudioRun, {
+			mode: "guided",
+			modelId: "google/lyria-3-pro-preview",
+		});
+		await t.mutation(internal.audio.internal.commitAudioScriptRevision, {
+			runId,
+			userMessage: "ROOT BRIEF",
+			script: SCRIPT,
+			scriptParamsUsed: { modelId: "google/lyria-3-pro-preview" },
+			scriptModel: "anthropic/claude-opus-5.5",
+			scriptSystemPrompt: "SONG SYSTEM PROMPT",
+			status: "draft",
+		});
+		generateTextMock.mockResolvedValue({
+			output: { ...SCRIPT, title: "Slower", pronunciationNotes: null },
+			warnings: [],
+		});
+
+		await t.action(api.audio.actions.reviseAudioScript, {
+			runId,
+			baseRevisionIndex: 0,
+			prompt: "Slower tempo",
+		});
+
+		const call = generateTextMock.mock.calls[0]![0];
+		expect(call.instructions).toContain("SONG SYSTEM PROMPT");
+		expect(call.messages.map((m: { role: string }) => m.role)).toEqual([
+			"user",
+			"assistant",
+			"user",
+		]);
+		expect(call.messages[0].content).toBe("ROOT BRIEF");
+		expect(JSON.parse(call.messages[1].content).title).toBe(SCRIPT.title);
+		expect(call.messages[2].content).toContain("Slower tempo");
+
 		const run = await getRun(t, runId);
-		expect(run.script?.title).toBe("Edited");
-		expect(run.script?.pronunciationNotes).toBeUndefined();
+		expect(run.status).toBe("draft");
+		expect(run.scriptRevisions).toHaveLength(2);
+		expect(run.activeScriptRevision?.script.title).toBe("Slower");
+		expect(run.scriptRevisions[1].parentIndex).toBe(0);
 	});
 
 	it("links takes to the run and lists them in history", async () => {

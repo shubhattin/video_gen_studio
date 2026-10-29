@@ -53,12 +53,16 @@ export type VideoResultItem = {
 	};
 	videoPrompt?: string;
 	warnings?: string[];
+	/** 0-based plan revision the clip was generated from. */
+	planRevisionIndex?: number;
 	createdAt: number;
 };
 
 type VideoResultProps = {
 	runId?: Id<"generationRuns"> | null;
 	videos: VideoResultItem[];
+	/** Label clips with their plan revision (plans with several revisions). */
+	showRevision?: boolean;
 	/** Object keys whose signed R2 URL is still loading. */
 	pendingKeys?: ReadonlySet<string>;
 };
@@ -151,12 +155,14 @@ function VideoClipCard({
 	versionLabel,
 	isLatest,
 	urlPending,
+	showRevision,
 }: {
 	runId?: Id<"generationRuns"> | null;
 	video: VideoResultItem;
 	versionLabel: string;
 	isLatest: boolean;
 	urlPending?: boolean;
+	showRevision?: boolean;
 }) {
 	const [downloading, setDownloading] = useState(false);
 	const canDownload = Boolean(video.objectKey || video.url);
@@ -211,6 +217,11 @@ function VideoClipCard({
 					{isLatest ? (
 						<Badge variant="secondary" className="font-normal">
 							Latest
+						</Badge>
+					) : null}
+					{showRevision && video.planRevisionIndex !== undefined ? (
+						<Badge variant="outline" className="font-normal tabular-nums">
+							Rev {video.planRevisionIndex + 1}
 						</Badge>
 					) : null}
 					{duration != null ? (
@@ -375,7 +386,12 @@ function VideoClipCard({
 	);
 }
 
-export function VideoResult({ runId, videos, pendingKeys }: VideoResultProps) {
+export function VideoResult({
+	runId,
+	videos,
+	pendingKeys,
+	showRevision,
+}: VideoResultProps) {
 	if (!videos.length) {
 		return null;
 	}
@@ -401,6 +417,7 @@ export function VideoResult({ runId, videos, pendingKeys }: VideoResultProps) {
 						video={video}
 						versionLabel={`Clip ${videos.length - index}`}
 						isLatest={index === 0}
+						showRevision={showRevision}
 						urlPending={Boolean(
 							video.objectKey && pendingKeys?.has(video.objectKey),
 						)}

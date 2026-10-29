@@ -1,6 +1,7 @@
 "use node";
 
-import { generateText, Output } from "ai";
+import { generateText, type ModelMessage, Output } from "ai";
+import type { FunctionReturnType } from "convex/server";
 import { v } from "convex/values";
 import Handlebars from "handlebars";
 import { internal } from "../_generated/api";
@@ -14,11 +15,19 @@ import {
 } from "../lib/audioCatalog";
 import {
 	AUDIO_USER_PROMPT_TEMPLATE,
+	type AudioScriptOutput,
 	audioScriptOutputSchema,
 	buildAudioProviderPrompt,
 	buildAudioScripterSystemPrompt,
 } from "../lib/audioPrompt";
 import { requireAdmin } from "../lib/auth";
+import {
+	assertCanAddRevision,
+	buildRevisionUserMessage,
+	cleanRevisionPrompt,
+	requireRevision,
+	revisionChain,
+} from "../lib/revisions";
 import {
 	LLM_NO_REASONING_LEVEL,
 	LLM_REASONING_LEVEL,
@@ -75,8 +84,186 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string) {
 	return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-// ── Guided: write the song script ───────────────────────────────────────
+// ── Guided: write / revise the song script ─────────────────────────────
 
+type ScriptRevision = NonNullable<Doc<"audioRuns">["scriptRevisions"]>[number];
+
+type ScripterTurn =
+	| { kind: "regenerate" }
+	| { kind: "revise"; baseIndex: number; request: string };
+
+/** A revision as the assistant turn the scripter would have returned. */
+function revisionAsScriptOutput(revision: ScriptRevision): AudioScriptOutput {
+	return {
+		title: revision.script.title,
+		styleDirection: revision.script.styleDirection,
+		lyrics: revision.script.lyrics,
+		pronunciationNotes: revision.script.pronunciationNotes ?? null,
+	};
+}
+
+/**
+ * One scripter turn. Regenerate starts a fresh conversation from the run's
+ * current brief and template. Revise continues the conversation that
+ * produced `baseIndex` (edited scripts as the assistant turns) and appends.
+ */
+async function runScripterTurn(
+	ctx: ActionCtx,
+	runId: Id<"audioRuns">,
+	turn: ScripterTurn,
+): Promise<void> {
+	const run = await loadRun(ctx, runId);
+	if (run.mode !== "guided") {
+		throw new Error("Only guided runs have a song script.");
+	}
+	if (run.status === "scripting" || run.status === "generating") {
+		throw new Error("Run is busy. Wait for the current step to finish.");
+	}
+	const revisions = run.scriptRevisions ?? [];
+	const instructions = run.customInstructions?.trim();
+	if (turn.kind === "revise") {
+		requireRevision(revisions, turn.baseIndex);
+		assertCanAddRevision(revisions);
+	} else {
+		if (!instructions) {
+			throw new Error("Write instructions before generating a script.");
+		}
+		if (!run.promptSelection) {
+			throw new Error("Select a system prompt template before writing a script.");
+		}
+	}
+
+	const params = resolveAudioParams(run.audioParams);
+	const profile =
+		AUDIO_MODEL_PROFILES[params.modelId as keyof typeof AUDIO_MODEL_PROFILES];
+	const previousStatus = run.status;
+
+	await ctx.runMutation(internal.audio.internal.setAudioRunStatus, {
+		runId,
+		status: "scripting",
+		lastError: null,
+	});
+
+	try {
+		const imageCount = Math.min(
+			run.referenceImageIds?.length ?? 0,
+			profile.maxInputImages,
+		);
+		const basePromptFor = (used: AudioParams) => {
+			const usedProfile =
+				AUDIO_MODEL_PROFILES[used.modelId as keyof typeof AUDIO_MODEL_PROFILES] ??
+				profile;
+			return renderScripterPrompt({
+				instructions: instructions ?? "",
+				modelName: usedProfile.displayName,
+				fixedDurationSeconds: usedProfile.fixedDurationSeconds,
+				targetDurationSeconds: used.targetDurationSeconds,
+				instrumental: used.instrumental === true,
+				imageCount: imageCount > 0 ? imageCount : undefined,
+			}).trim();
+		};
+
+		let resolved:
+			| FunctionReturnType<typeof internal.audio.queries.resolveAudioPromptSelection>
+			| undefined;
+		let systemPrompt: string;
+		let userMessage: string;
+		const history: ModelMessage[] = [];
+		if (turn.kind === "regenerate") {
+			resolved = await ctx.runQuery(
+				internal.audio.queries.resolveAudioPromptSelection,
+				{ selection: run.promptSelection! },
+			);
+			systemPrompt = resolved.content;
+			userMessage = basePromptFor(params);
+		} else {
+			// The conversation keeps the system prompt it started with.
+			systemPrompt = run.scriptSystemPrompt ?? "";
+			for (const index of revisionChain(revisions, turn.baseIndex)) {
+				const revision = revisions[index]!;
+				history.push(
+					{
+						role: "user",
+						// Migrated roots have no stored turn — re-render it.
+						content:
+							revision.userMessage ?? basePromptFor(revision.scriptParamsUsed),
+					},
+					{
+						role: "assistant",
+						content: JSON.stringify(revisionAsScriptOutput(revision)),
+					},
+				);
+			}
+			userMessage = buildRevisionUserMessage({
+				request: turn.request,
+				subject: "song script",
+				constraints: [
+					`Model: ${profile.displayName}`,
+					profile.fixedDurationSeconds
+						? `Length: fixed at ${profile.fixedDurationSeconds} seconds by the model.`
+						: params.targetDurationSeconds
+							? `Target length: about ${params.targetDurationSeconds} seconds.`
+							: "",
+					params.instrumental
+						? "Instrumental: Yes — no vocals, return empty lyrics"
+						: "Instrumental: No — sung Sanskrit vocals",
+				],
+			});
+		}
+
+		const result = await withTimeout(
+			generateText({
+				model: openRouterChatModel(AUDIO_SCRIPT_MODEL_ID, LLM_REASONING_LEVEL),
+				instructions: buildAudioScripterSystemPrompt(systemPrompt),
+				messages: [...history, { role: "user", content: userMessage }],
+				output: Output.object({ schema: audioScriptOutputSchema }),
+			}),
+			SCRIPTER_TIMEOUT_MS,
+			turn.kind === "revise" ? "Script revision" : "Script generation",
+		);
+		const output = result.output;
+		const warnings = (result.warnings ?? [])
+			.map((warning) =>
+				"message" in warning && warning.message
+					? warning.message
+					: "details" in warning && warning.details
+						? warning.details
+						: undefined,
+			)
+			.filter((value): value is string => Boolean(value));
+
+		await ctx.runMutation(internal.audio.internal.commitAudioScriptRevision, {
+			runId,
+			parentIndex: turn.kind === "revise" ? turn.baseIndex : undefined,
+			revisionPrompt: turn.kind === "revise" ? turn.request : undefined,
+			userMessage,
+			script: {
+				title: output.title.trim(),
+				styleDirection: output.styleDirection.trim(),
+				lyrics: output.lyrics.trim(),
+				pronunciationNotes: output.pronunciationNotes?.trim() || undefined,
+			},
+			scriptParamsUsed: params,
+			scriptModel: AUDIO_SCRIPT_MODEL_ID,
+			scriptSystemPrompt: resolved?.content,
+			scriptSystemPromptTemplateId: resolved?.templateId,
+			status: settledStatus(previousStatus),
+			warnings: warnings.length > 0 ? warnings : undefined,
+		});
+	} catch (error) {
+		await ctx.runMutation(internal.audio.internal.setAudioRunStatus, {
+			runId,
+			status: settledStatus(previousStatus),
+			lastError: errorMessage(
+				error,
+				turn.kind === "revise" ? "Script revision failed." : "Script generation failed.",
+			),
+		});
+		throw error;
+	}
+}
+
+/** Write / regenerate: replaces every revision with a fresh root. */
 export const scriptAudioRun = action({
 	args: {
 		runId: v.id("audioRuns"),
@@ -84,92 +271,26 @@ export const scriptAudioRun = action({
 	returns: v.null(),
 	handler: async (ctx, args) => {
 		await requireAdmin(ctx);
-		const run = await loadRun(ctx, args.runId);
-		if (run.mode !== "guided") {
-			throw new Error("Only guided runs have a song script.");
-		}
-		if (run.status === "scripting" || run.status === "generating") {
-			throw new Error("Run is busy. Wait for the current step to finish.");
-		}
-		const instructions = run.customInstructions?.trim();
-		if (!instructions) {
-			throw new Error("Write instructions before generating a script.");
-		}
-		if (!run.promptSelection) {
-			throw new Error("Select a system prompt template before writing a script.");
-		}
+		await runScripterTurn(ctx, args.runId, { kind: "regenerate" });
+		return null;
+	},
+});
 
-		const params = resolveAudioParams(run.audioParams);
-		const profile =
-			AUDIO_MODEL_PROFILES[params.modelId as keyof typeof AUDIO_MODEL_PROFILES];
-		const previousStatus = run.status;
-
-		await ctx.runMutation(internal.audio.internal.setAudioRunStatus, {
-			runId: args.runId,
-			status: "scripting",
-			lastError: null,
+/** Revise `baseRevisionIndex` with a follow-up instruction; appends a revision. */
+export const reviseAudioScript = action({
+	args: {
+		runId: v.id("audioRuns"),
+		baseRevisionIndex: v.number(),
+		prompt: v.string(),
+	},
+	returns: v.null(),
+	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
+		await runScripterTurn(ctx, args.runId, {
+			kind: "revise",
+			baseIndex: args.baseRevisionIndex,
+			request: cleanRevisionPrompt(args.prompt),
 		});
-
-		try {
-			const resolved = await ctx.runQuery(
-				internal.audio.queries.resolveAudioPromptSelection,
-				{ selection: run.promptSelection },
-			);
-			const imageCount = Math.min(
-				run.referenceImageIds?.length ?? 0,
-				profile.maxInputImages,
-			);
-			const result = await withTimeout(
-				generateText({
-					model: openRouterChatModel(AUDIO_SCRIPT_MODEL_ID, LLM_REASONING_LEVEL),
-					instructions: buildAudioScripterSystemPrompt(resolved.content),
-					prompt: renderScripterPrompt({
-						instructions,
-						modelName: profile.displayName,
-						fixedDurationSeconds: profile.fixedDurationSeconds,
-						targetDurationSeconds: params.targetDurationSeconds,
-						instrumental: params.instrumental === true,
-						imageCount: imageCount > 0 ? imageCount : undefined,
-					}).trim(),
-					output: Output.object({ schema: audioScriptOutputSchema }),
-				}),
-				SCRIPTER_TIMEOUT_MS,
-				"Script generation",
-			);
-			const output = result.output;
-			const warnings = (result.warnings ?? [])
-				.map((warning) =>
-					"message" in warning && warning.message
-						? warning.message
-						: "details" in warning && warning.details
-							? warning.details
-							: undefined,
-				)
-				.filter((value): value is string => Boolean(value));
-
-			await ctx.runMutation(internal.audio.internal.commitAudioScript, {
-				runId: args.runId,
-				script: {
-					title: output.title.trim(),
-					styleDirection: output.styleDirection.trim(),
-					lyrics: output.lyrics.trim(),
-					pronunciationNotes: output.pronunciationNotes?.trim() || undefined,
-				},
-				scriptParamsUsed: params,
-				scriptModel: AUDIO_SCRIPT_MODEL_ID,
-				scriptSystemPrompt: resolved.content,
-				scriptSystemPromptTemplateId: resolved.templateId,
-				status: settledStatus(previousStatus),
-				warnings: warnings.length > 0 ? warnings : undefined,
-			});
-		} catch (error) {
-			await ctx.runMutation(internal.audio.internal.setAudioRunStatus, {
-				runId: args.runId,
-				status: settledStatus(previousStatus),
-				lastError: errorMessage(error, "Script generation failed."),
-			});
-			throw error;
-		}
 		return null;
 	},
 });
@@ -208,7 +329,11 @@ async function loadImageDataUrls(
 	return { urls, warnings };
 }
 
-function resolveProviderPrompt(run: Doc<"audioRuns">, params: AudioParams) {
+function resolveProviderPrompt(
+	run: Doc<"audioRuns">,
+	params: AudioParams,
+	revisionIndex: number | undefined,
+) {
 	if (run.mode === "direct") {
 		const prompt = run.prompt?.trim();
 		if (!prompt) {
@@ -216,15 +341,23 @@ function resolveProviderPrompt(run: Doc<"audioRuns">, params: AudioParams) {
 		}
 		return prompt;
 	}
-	if (!run.script) {
+	if (!run.scriptRevisions?.length) {
 		throw new Error("Write the song script before generating audio.");
 	}
-	return buildAudioProviderPrompt(run.script, params);
+	if (revisionIndex === undefined) {
+		throw new Error("Pick a script revision to generate from.");
+	}
+	return buildAudioProviderPrompt(
+		requireRevision(run.scriptRevisions, revisionIndex).script,
+		params,
+	);
 }
 
 export const generateAudioForRun = action({
 	args: {
 		runId: v.id("audioRuns"),
+		/** Guided runs: script revision the user confirmed in the Generate dialog. */
+		scriptRevisionIndex: v.optional(v.number()),
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
@@ -236,7 +369,9 @@ export const generateAudioForRun = action({
 		const params = resolveAudioParams(run.audioParams);
 		const modelId = params.modelId as keyof typeof AUDIO_MODEL_PROFILES;
 		const profile = AUDIO_MODEL_PROFILES[modelId];
-		const prompt = resolveProviderPrompt(run, params);
+		const scriptRevisionIndex =
+			run.mode === "guided" ? args.scriptRevisionIndex : undefined;
+		const prompt = resolveProviderPrompt(run, params, scriptRevisionIndex);
 
 		await ctx.runMutation(internal.audio.internal.setAudioRunStatus, {
 			runId: args.runId,
@@ -278,6 +413,7 @@ export const generateAudioForRun = action({
 				},
 				audioParams: params,
 				prompt,
+				scriptRevisionIndex,
 				outputText: result.outputText,
 				referenceImageCount: images.urls.length || undefined,
 				openRouterGenerationId: result.generationId,

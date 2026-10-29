@@ -29,6 +29,7 @@ export function galleryVideoToResult(doc: Doc<"galleryVideos">) {
 		warnings: doc.warnings,
 		createdAt: doc.createdAt,
 		sourceRunId: doc.sourceRunId,
+		planRevisionIndex: doc.planRevisionIndex,
 	};
 }
 
@@ -302,6 +303,7 @@ export function galleryAudioToResult(doc: Doc<"galleryAudios">) {
 		timeTakenMs: doc.timeTakenMs,
 		warnings: doc.warnings,
 		audioRunId: doc.audioRunId,
+		scriptRevisionIndex: doc.scriptRevisionIndex,
 		createdAt: doc.createdAt,
 	};
 }

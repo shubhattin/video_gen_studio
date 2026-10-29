@@ -13,8 +13,12 @@ type AudioScriptPanelProps = {
 	/** Flattened prompt that will be sent to the audio model. */
 	providerPrompt: string;
 	disabled?: boolean;
-	/** Regenerate control rendered in the header. */
+	/** Regenerate / revise controls rendered in the header. */
 	actions?: ReactNode;
+	/** Revision stepper, shown beside the actions (hidden while editing). */
+	revisionSwitcher?: ReactNode;
+	/** What produced the shown revision, under the header. */
+	revisionNote?: ReactNode;
 	onSave: (script: AudioScript) => Promise<void>;
 };
 
@@ -43,6 +47,8 @@ export function AudioScriptPanel({
 	providerPrompt,
 	disabled,
 	actions,
+	revisionSwitcher,
+	revisionNote,
 	onSave,
 }: AudioScriptPanelProps) {
 	const [editing, setEditing] = useState(false);
@@ -106,6 +112,7 @@ export function AudioScriptPanel({
 						</>
 					) : (
 						<>
+							{revisionSwitcher}
 							{actions}
 							<Button
 								variant="outline"
@@ -120,6 +127,7 @@ export function AudioScriptPanel({
 					)}
 				</div>
 			</div>
+			{editing ? null : revisionNote}
 
 			{editing ? (
 				<div className="grid gap-4">

@@ -28,6 +28,8 @@ type VideoGenerateConfirmProps = {
 	generatingLabel?: string;
 	/** Brief amber warning shown inside the dialog (e.g. settings divergence). */
 	warning?: string;
+	/** What the clip is generated from, e.g. "Plan 2 · revision 3 of 4". */
+	sourceLabel?: string;
 	className?: string;
 	onConfirm: () => void;
 };
@@ -55,6 +57,7 @@ export function VideoGenerateConfirm({
 	triggerLabel,
 	generatingLabel = "Generating video…",
 	warning,
+	sourceLabel,
 	className,
 	onConfirm,
 }: VideoGenerateConfirmProps) {
@@ -73,7 +76,9 @@ export function VideoGenerateConfirm({
 						/>
 					}
 				>
-					{generating ? generatingLabel : triggerLabel}
+					<span className="truncate">
+						{generating ? generatingLabel : triggerLabel}
+					</span>
 				</AlertDialogTrigger>
 				<AlertDialogContent size="default">
 					<AlertDialogHeader>
@@ -91,6 +96,9 @@ export function VideoGenerateConfirm({
 							<p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-700 dark:text-amber-300">
 								{warning}
 							</p>
+						) : null}
+						{sourceLabel ? (
+							<DetailRow label="Plan" value={sourceLabel} />
 						) : null}
 						<DetailRow
 							label="Model"

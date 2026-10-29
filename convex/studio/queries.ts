@@ -15,6 +15,7 @@ import {
 	DEFAULT_PLANNER_SYSTEM_PROMPT,
 	type PlannerPromptSelection,
 } from "../lib/plannerPrompt";
+import { resolveRevisionIndex } from "../lib/revisions";
 import { normalizeVideoScenes } from "../lib/videoPlanMarkdown";
 import {
 	plannerPromptSelectionValidator,
@@ -33,19 +34,32 @@ import {
 
 type DbCtx = QueryCtx | MutationCtx;
 
-/** Hydrate a plan for clients: normalized scenes + resolved output videos. */
-async function hydratePlan(
-	ctx: QueryCtx,
-	plan: Doc<"shlokaPlans">,
-): Promise<Doc<"shlokaPlans"> & { videos: ReturnType<typeof galleryVideoToResult>[] }> {
-	const videos = await loadVideosByIds(ctx, plan.videoOutputIds ?? []);
+/**
+ * Client view of a plan's revisions: normalized scenes, a resolved active
+ * index (null while the plan has no content), and that revision itself.
+ */
+function withRevisions(plan: Doc<"shlokaPlans">) {
+	const revisions = (plan.revisions ?? []).map((revision) => ({
+		...revision,
+		videoScenes: normalizeVideoScenes(revision.videoScenes),
+	}));
+	const activeRevisionIndex = resolveRevisionIndex(
+		revisions,
+		plan.activeRevisionIndex,
+	);
 	return {
 		...plan,
-		videoScenes: plan.videoScenes
-			? normalizeVideoScenes(plan.videoScenes)
-			: plan.videoScenes,
-		videos,
+		revisions,
+		activeRevisionIndex,
+		activeRevision:
+			activeRevisionIndex === null ? null : revisions[activeRevisionIndex]!,
 	};
+}
+
+/** Hydrate a plan for clients: revisions + resolved output videos. */
+async function hydratePlan(ctx: QueryCtx, plan: Doc<"shlokaPlans">) {
+	const videos = await loadVideosByIds(ctx, plan.videoOutputIds ?? []);
+	return { ...withRevisions(plan), videos };
 }
 
 /**
@@ -70,14 +84,7 @@ async function hydrateRun(ctx: QueryCtx, run: Doc<"generationRuns">) {
 	return {
 		...run,
 		images,
-		activePlan: activePlan
-			? {
-					...activePlan,
-					videoScenes: activePlan.videoScenes
-						? normalizeVideoScenes(activePlan.videoScenes)
-						: activePlan.videoScenes,
-				}
-			: null,
+		activePlan: activePlan ? withRevisions(activePlan) : null,
 	};
 }
 

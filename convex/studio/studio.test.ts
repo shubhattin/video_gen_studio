@@ -5,6 +5,20 @@ import schema from "../schema";
 import { modules } from "../test.setup";
 import { defaultVideoParams, validateVideoParams } from "../lib/schemas";
 import { DEFAULT_PLANNER_SYSTEM_PROMPT } from "../lib/plannerPrompt";
+import { MAX_REVISIONS } from "../lib/revisions";
+
+const generateTextMock = vi.hoisted(() => vi.fn());
+vi.mock("ai", async (importOriginal) => ({
+	...(await importOriginal<typeof import("ai")>()),
+	generateText: generateTextMock,
+}));
+vi.mock("../lib/providers", () => ({
+	openRouterChatModel: () => ({}),
+	getOpenRouterApiKey: () => "test-key",
+	getOpenAIProvider: () => {
+		throw new Error("getOpenAIProvider should not be called in unit tests");
+	},
+}));
 
 vi.mock("../lib/r2", () => ({
 	buildStudioObjectKey: ({
@@ -74,6 +88,25 @@ const PLAN_BUDGET = {
 	maxPromptChars: 4000,
 };
 
+/** commitPlanRevision args for a root turn (planId added per test). */
+const ROOT_TURN = {
+	userMessage: "## Shloka\n...",
+	imagePrompt: "Portrait warm temple courtyard with soft diya glow",
+	videoScenes: [SCENE],
+	plannerModel: "openai/gpt-5.6-terra",
+	plannerReasoning: "medium",
+	lastModelParamsUsed: PLAN_BUDGET,
+} as {
+	userMessage: string;
+	imagePrompt: string;
+	videoScenes: (typeof SCENE)[];
+	plannerModel: string;
+	plannerReasoning: string;
+	plannerSystemPrompt?: string;
+	revisionPrompt?: string;
+	lastModelParamsUsed: typeof PLAN_BUDGET;
+};
+
 async function createRunWithPlan() {
 	const t = adminConvex();
 	const { runId, planId } = await t.mutation(api.studio.mutations.createShlokaDraft, {
@@ -105,30 +138,183 @@ describe("shloka runs and plans", () => {
 		expect(plans[0].status).toBe("draft");
 		expect(plans[0].videoParams.modelId).toBe("bytedance/seedance-2.5");
 		expect(plans[0].videoParams.aspectRatio).toBe("9:16");
-		expect(plans[0].imagePrompt).toBeUndefined();
-		expect(plans[0].videoScenes).toBeUndefined();
+		expect(plans[0].revisions).toEqual([]);
+		expect(plans[0].activeRevision).toBeNull();
 	});
 
-	it("commits plan content with the generation config snapshot", async () => {
+	it("commits a root revision with the generation config snapshot", async () => {
 		const { t, runId, planId } = await createRunWithPlan();
 
-		await t.mutation(internal.studio.internal.commitPlanContent, {
+		await t.mutation(internal.studio.internal.commitPlanRevision, {
+			...ROOT_TURN,
 			planId,
-			imagePrompt: "Portrait warm temple courtyard with soft diya glow",
-			videoScenes: [SCENE],
-			plannerModel: "openai/gpt-5.6-terra",
-			plannerReasoning: "medium",
-			lastModelParamsUsed: PLAN_BUDGET,
 		});
 
 		const run = await t.query(api.studio.queries.getRun, { runId });
 		expect(run?.status).toBe("plan_ready");
-		expect(run?.activePlan?.imagePrompt).toContain("Portrait");
-		expect(run?.activePlan?.lastModelParamsUsed?.maxPromptChars).toBe(4000);
+		expect(run?.activePlan?.activeRevision?.imagePrompt).toContain("Portrait");
+		expect(
+			run?.activePlan?.activeRevision?.lastModelParamsUsed.maxPromptChars,
+		).toBe(4000);
 
 		const plan = await t.query(api.studio.queries.getPlan, { runId, planId });
 		expect(plan?.status).toBe("ready");
-		expect(plan?.videoScenes).toHaveLength(1);
+		expect(plan?.revisions).toHaveLength(1);
+		expect(plan?.activeRevisionIndex).toBe(0);
+		expect(plan?.activeRevision?.videoScenes).toHaveLength(1);
+	});
+
+	it("appends revisions from any base and regenerate wipes them", async () => {
+		const { t, runId, planId } = await createRunWithPlan();
+		const commit = (args: Partial<typeof ROOT_TURN> & { parentIndex?: number }) =>
+			t.mutation(internal.studio.internal.commitPlanRevision, {
+				...ROOT_TURN,
+				...args,
+				planId,
+			});
+
+		await commit({ plannerSystemPrompt: "conversation system prompt" });
+		await commit({
+			parentIndex: 0,
+			revisionPrompt: "Make it dusk",
+			imagePrompt: "A dusk temple courtyard with cooler blue light",
+		});
+		// Branch from the root again — appended as revision 3, not inserted.
+		const branched = await commit({
+			parentIndex: 0,
+			revisionPrompt: "Add a river",
+			imagePrompt: "A riverside temple courtyard at golden hour",
+			plannerSystemPrompt: "ignored on revise",
+		});
+		expect(branched).toBe(2);
+
+		let plan = await t.query(api.studio.queries.getPlan, { runId, planId });
+		expect(plan?.revisions).toHaveLength(3);
+		expect(plan?.activeRevisionIndex).toBe(2);
+		expect(plan?.revisions[2].parentIndex).toBe(0);
+		expect(plan?.revisions[2].revisionPrompt).toBe("Add a river");
+		// The conversation keeps its original system prompt.
+		expect(plan?.plannerSystemPrompt).toBe("conversation system prompt");
+
+		await t.mutation(api.studio.mutations.selectPlanRevision, {
+			runId,
+			planId,
+			revisionIndex: 1,
+		});
+		plan = await t.query(api.studio.queries.getPlan, { runId, planId });
+		expect(plan?.activeRevision?.imagePrompt).toContain("dusk");
+
+		await expect(
+			t.mutation(api.studio.mutations.selectPlanRevision, {
+				runId,
+				planId,
+				revisionIndex: 7,
+			}),
+		).rejects.toThrow("no longer exists");
+		await expect(commit({ parentIndex: 9 })).rejects.toThrow("no longer exists");
+
+		await commit({ plannerSystemPrompt: "fresh conversation" });
+		plan = await t.query(api.studio.queries.getPlan, { runId, planId });
+		expect(plan?.revisions).toHaveLength(1);
+		expect(plan?.revisions[0].parentIndex).toBeUndefined();
+		expect(plan?.plannerSystemPrompt).toBe("fresh conversation");
+	});
+
+	it("revises from the shown revision's conversation, including edits", async () => {
+		const { t, runId, planId } = await createRunWithPlan();
+		await t.mutation(api.studio.mutations.updateDraft, {
+			runId,
+			plannerPromptSelection: { kind: "default" },
+		});
+		await t.mutation(internal.studio.internal.commitPlanRevision, {
+			...ROOT_TURN,
+			planId,
+			userMessage: "ROOT USER TURN",
+			plannerSystemPrompt: "CONVERSATION SYSTEM PROMPT",
+		});
+		// A manual edit must be what the model sees as its previous answer.
+		await t.mutation(api.studio.mutations.updatePlanContent, {
+			runId,
+			planId,
+			revisionIndex: 0,
+			imagePrompt: "Hand-edited image prompt with a moonlit river",
+		});
+
+		const revisedOutput = {
+			kind: "single-clip",
+			expectedIdealVideoDuration: null,
+			imagePrompt: "Revised image prompt with a moonlit river at dusk",
+			videoScenes: [{ ...SCENE, audio: null }],
+			generalVideoInstructions: "No text overlays.",
+		};
+		generateTextMock.mockResolvedValue({ output: revisedOutput, warnings: [] });
+
+		const revise = (baseRevisionIndex: number, prompt: string) =>
+			t.action(api.studio.actions.revisePlan, {
+				runId,
+				planId,
+				baseRevisionIndex,
+				prompt,
+			});
+		await revise(0, "  Make it dusk  ");
+
+		const call = generateTextMock.mock.calls[0]![0];
+		expect(call.instructions).toContain("CONVERSATION SYSTEM PROMPT");
+		expect(call.messages).toHaveLength(3);
+		expect(call.messages[0]).toEqual({ role: "user", content: "ROOT USER TURN" });
+		expect(call.messages[1].role).toBe("assistant");
+		expect(JSON.parse(call.messages[1].content)).toMatchObject({
+			kind: "single-clip",
+			imagePrompt: "Hand-edited image prompt with a moonlit river",
+		});
+		expect(call.messages[2].role).toBe("user");
+		expect(call.messages[2].content).toContain('"""\nMake it dusk\n"""');
+		expect(call.messages[2].content).toContain("Target video length: 8 seconds");
+
+		let plan = await t.query(api.studio.queries.getPlan, { runId, planId });
+		expect(plan?.status).toBe("ready");
+		expect(plan?.revisions).toHaveLength(2);
+		expect(plan?.activeRevisionIndex).toBe(1);
+		expect(plan?.revisions[1]).toMatchObject({
+			parentIndex: 0,
+			revisionPrompt: "Make it dusk",
+			imagePrompt: revisedOutput.imagePrompt,
+		});
+		expect(plan?.revisions[1].userMessage).toBe(call.messages[2].content);
+
+		// Branch: revising revision 1 carries its chain; revising 0 again does not.
+		await revise(1, "Slower camera");
+		expect(generateTextMock.mock.calls[1]![0].messages).toHaveLength(5);
+		await revise(0, "Add a river");
+		expect(generateTextMock.mock.calls[2]![0].messages).toHaveLength(3);
+		plan = await t.query(api.studio.queries.getPlan, { runId, planId });
+		expect(plan?.revisions.map((r: { parentIndex?: number }) => r.parentIndex)).toEqual(
+			[undefined, 0, 1, 0],
+		);
+
+		await expect(revise(0, "   ")).rejects.toThrow("Describe what to change");
+	});
+
+	it("caps revisions per plan", async () => {
+		const { t, planId } = await createRunWithPlan();
+		await t.mutation(internal.studio.internal.commitPlanRevision, {
+			...ROOT_TURN,
+			planId,
+		});
+		for (let i = 1; i < MAX_REVISIONS; i++) {
+			await t.mutation(internal.studio.internal.commitPlanRevision, {
+				...ROOT_TURN,
+				planId,
+				parentIndex: i - 1,
+			});
+		}
+		await expect(
+			t.mutation(internal.studio.internal.commitPlanRevision, {
+				...ROOT_TURN,
+				planId,
+				parentIndex: 0,
+			}),
+		).rejects.toThrow("revision limit");
 	});
 
 	it("creates additional plans that inherit config and become active", async () => {
@@ -187,35 +373,41 @@ describe("shloka runs and plans", () => {
 			t.mutation(api.studio.mutations.updatePlanContent, {
 				runId,
 				planId,
+				revisionIndex: 0,
 				imagePrompt: "A warm illustrated temple courtyard at dawn",
 			}),
 		).rejects.toThrow("Generate the plan");
 
-		await t.mutation(internal.studio.internal.commitPlanContent, {
+		await t.mutation(internal.studio.internal.commitPlanRevision, {
+			...ROOT_TURN,
 			planId,
-			imagePrompt: "Portrait warm temple courtyard with soft diya glow",
-			videoScenes: [SCENE],
-			plannerModel: "openai/gpt-5.6-terra",
-			plannerReasoning: "medium",
 			plannerSystemPrompt: DEFAULT_PLANNER_SYSTEM_PROMPT,
-			lastModelParamsUsed: PLAN_BUDGET,
+		});
+		await t.mutation(internal.studio.internal.commitPlanRevision, {
+			...ROOT_TURN,
+			planId,
+			parentIndex: 0,
 		});
 
+		// Edits land on the named revision only.
 		await t.mutation(api.studio.mutations.updatePlanContent, {
 			runId,
 			planId,
+			revisionIndex: 0,
 			imagePrompt: "A dusk temple courtyard with cooler blue light",
 			videoScenes: [{ ...SCENE, intent: "Dusk" }],
 		});
 
 		const plan = await t.query(api.studio.queries.getPlan, { runId, planId });
-		expect(plan?.imagePrompt).toContain("dusk");
-		expect(plan?.videoScenes?.[0]?.intent).toBe("Dusk");
+		expect(plan?.revisions[0].imagePrompt).toContain("dusk");
+		expect(plan?.revisions[0].videoScenes[0]?.intent).toBe("Dusk");
+		expect(plan?.revisions[1].imagePrompt).toContain("Portrait");
 
 		await expect(
 			t.mutation(api.studio.mutations.updatePlanContent, {
 				runId,
 				planId,
+				revisionIndex: 0,
 				imagePrompt: "short",
 			}),
 		).rejects.toThrow("at least 20 characters");
@@ -269,8 +461,7 @@ describe("shloka runs and plans", () => {
 		expect(run?.imageSize).toBe("1024x1024");
 		// Plan content lives on the plan row, not the run.
 		const plans = await t.query(api.studio.queries.listPlansForRun, { runId });
-		expect(plans[0]!.imagePrompt).toBeUndefined();
-		expect(plans[0]!.videoScenes).toBeUndefined();
+		expect(plans[0]!.revisions).toEqual([]);
 	});
 
 	it("deletes a run and its plans", async () => {

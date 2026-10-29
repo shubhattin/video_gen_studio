@@ -28,6 +28,7 @@ import type * as lib_prompts_scene_summary from "../lib/prompts/scene_summary.js
 import type * as lib_prompts_user_base_prompt from "../lib/prompts/user_base_prompt.js";
 import type * as lib_providers from "../lib/providers.js";
 import type * as lib_r2 from "../lib/r2.js";
+import type * as lib_revisions from "../lib/revisions.js";
 import type * as lib_schemas from "../lib/schemas.js";
 import type * as lib_videoAdapters from "../lib/videoAdapters.js";
 import type * as lib_videoPlanMarkdown from "../lib/videoPlanMarkdown.js";
@@ -65,6 +66,7 @@ declare const fullApi: ApiFromModules<{
   "lib/prompts/user_base_prompt": typeof lib_prompts_user_base_prompt;
   "lib/providers": typeof lib_providers;
   "lib/r2": typeof lib_r2;
+  "lib/revisions": typeof lib_revisions;
   "lib/schemas": typeof lib_schemas;
   "lib/videoAdapters": typeof lib_videoAdapters;
   "lib/videoPlanMarkdown": typeof lib_videoPlanMarkdown;

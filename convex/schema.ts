@@ -148,6 +148,51 @@ export const audioScriptValidator = v.object({
 	pronunciationNotes: v.optional(v.string()),
 });
 
+/**
+ * One planner turn on a Shloka plan. The LLM conversation for a revision is
+ * derived, never stored verbatim: plan.plannerSystemPrompt, then for each
+ * revision on the parentIndex chain (root → this) a user turn (userMessage)
+ * and an assistant turn rebuilt as JSON of that revision's CURRENT content
+ * (so manual edits are what the model sees on the next revise).
+ */
+export const shlokaPlanRevisionValidator = v.object({
+	/** Revision this one was revised from. Absent on the root (generate/regenerate). */
+	parentIndex: v.optional(v.number()),
+	/** Raw instruction typed in the Revise popover. Absent on the root. */
+	revisionPrompt: v.optional(v.string()),
+	/**
+	 * Exact user message sent for this turn. Absent only on revisions migrated
+	 * from pre-revision plans — re-render the base prompt from the run then.
+	 */
+	userMessage: v.optional(v.string()),
+	imagePrompt: v.string(),
+	videoScenes: v.array(videoSceneValidator),
+	/** Optional free-text directives prepended to the provider video prompt. */
+	generalVideoInstructions: v.optional(v.string()),
+	/** Planner-chosen clip length when generateDuration was on. Absent otherwise. */
+	expectedIdealVideoDuration: v.optional(v.number()),
+	/** Config this revision was generated with. Video generation uses THIS. */
+	lastModelParamsUsed: lastModelParamsUsedValidator,
+	plannerModel: v.optional(v.string()),
+	plannerReasoning: v.optional(v.string()),
+	// Luna compression cache (keyed to the scenes-derived provider prompt).
+	summarizedVideoPrompt: v.optional(v.string()),
+	videoPromptSourceHash: v.optional(v.string()),
+	createdAt: v.number(),
+});
+
+/** One scripter turn on a guided audio run. Same derived-history rules as plans. */
+export const audioScriptRevisionValidator = v.object({
+	parentIndex: v.optional(v.number()),
+	revisionPrompt: v.optional(v.string()),
+	userMessage: v.optional(v.string()),
+	script: audioScriptValidator,
+	/** Params the script was written for (model kind / length / vocals). */
+	scriptParamsUsed: audioParamsValidator,
+	scriptModel: v.optional(v.string()),
+	createdAt: v.number(),
+});
+
 export default defineSchema({
 	// ── Protected tables (unchanged) ─────────────────────────────────────
 	galleryImages: defineTable({
@@ -174,6 +219,8 @@ export default defineSchema({
 		videoPrompt: v.optional(v.string()),
 		warnings: v.optional(v.array(v.string())),
 		sourceRunId: v.optional(v.id("generationRuns")),
+		/** 0-based plan revision the video was generated from (display as +1). */
+		planRevisionIndex: v.optional(v.number()),
 		createdAt: v.number(),
 	})
 		.index("by_createdAt", ["createdAt"])
@@ -194,6 +241,8 @@ export default defineSchema({
 		warnings: v.optional(v.array(v.string())),
 		/** Owning run; cleared when the run is deleted without its media. */
 		audioRunId: v.optional(v.id("audioRuns")),
+		/** 0-based script revision a guided take was generated from. */
+		scriptRevisionIndex: v.optional(v.number()),
 		createdAt: v.number(),
 	})
 		.index("by_createdAt", ["createdAt"])
@@ -219,6 +268,8 @@ export default defineSchema({
 		errorMessage: v.optional(v.string()),
 		runId: v.optional(v.id("generationRuns")),
 		planId: v.optional(v.id("shlokaPlans")),
+		/** 0-based plan revision being generated; copied onto the gallery video. */
+		planRevisionIndex: v.optional(v.number()),
 		modelStudioRunId: v.optional(v.id("modelStudioRuns")),
 		videoParams: videoParamsValidator,
 		videoPrompt: v.optional(v.string()),
@@ -269,22 +320,14 @@ export default defineSchema({
 		status: shlokaPlanStatusValidator,
 		/** Current desired config (UI-editable). Used for the NEXT plan generation. */
 		videoParams: planVideoConfigValidator,
-		/** Config actually used when the plan was generated. Generation uses THIS. */
-		lastModelParamsUsed: v.optional(lastModelParamsUsedValidator),
-		// Planner output — absent until generated (status "draft").
-		imagePrompt: v.optional(v.string()),
-		videoScenes: v.optional(v.array(videoSceneValidator)),
-		/** Optional free-text directives prepended to the provider video prompt. */
-		generalVideoInstructions: v.optional(v.string()),
-		/** Planner-chosen clip length when generateDuration was on. Absent otherwise. */
-		expectedIdealVideoDuration: v.optional(v.number()),
+		// Planner output — absent until generated (status "draft"). Regenerate
+		// replaces the whole array with a single fresh root revision.
+		revisions: v.optional(v.array(shlokaPlanRevisionValidator)),
+		/** Revision shown in the <i/n> switcher and used for image/video generation. */
+		activeRevisionIndex: v.optional(v.number()),
+		// System prompt of the conversation — fixed for every revision of a plan.
 		plannerSystemPrompt: v.optional(v.string()),
 		plannerSystemPromptTemplateId: v.optional(v.id("systemPromptTemplates")),
-		plannerModel: v.optional(v.string()),
-		plannerReasoning: v.optional(v.string()),
-		// Luna compression cache (keyed to the scenes-derived provider prompt).
-		summarizedVideoPrompt: v.optional(v.string()),
-		videoPromptSourceHash: v.optional(v.string()),
 		// Outputs — many videos per plan, append-only.
 		videoOutputIds: v.optional(v.array(v.id("galleryVideos"))),
 		warnings: v.optional(v.array(v.string())),
@@ -327,11 +370,12 @@ export default defineSchema({
 		/** Guided mode: the instructions brief the scripter composes from. */
 		customInstructions: v.optional(v.string()),
 		promptSelection: v.optional(plannerPromptSelectionValidator),
-		// Guided mode output — one editable script per run.
-		script: v.optional(audioScriptValidator),
-		/** Params the script was written for (model kind / length / vocals). */
-		scriptParamsUsed: v.optional(audioParamsValidator),
-		scriptModel: v.optional(v.string()),
+		// Guided mode output — one script conversation per run. Regenerate
+		// replaces the whole array with a single fresh root revision.
+		scriptRevisions: v.optional(v.array(audioScriptRevisionValidator)),
+		/** Revision shown in the <i/n> switcher and used for take generation. */
+		activeScriptRevisionIndex: v.optional(v.number()),
+		// System prompt of the conversation — fixed for every revision.
 		scriptSystemPrompt: v.optional(v.string()),
 		scriptSystemPromptTemplateId: v.optional(v.id("systemPromptTemplates")),
 		/** Images sent to image-capable models (Lyria). Bounded by the model max. */
