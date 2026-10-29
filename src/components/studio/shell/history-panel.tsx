@@ -4,9 +4,11 @@ import { Link } from "@tanstack/react-router";
 import { useAction, useConvexAuth, useMutation, useQuery } from "convex/react";
 import { formatDistanceToNow } from "date-fns";
 import {
+	AudioLines,
 	Clapperboard,
 	Info,
 	MoreHorizontal,
+	Music,
 	Pencil,
 	RefreshCw,
 	Sparkles,
@@ -57,24 +59,48 @@ import {
 } from "#/lib/studio-run-status";
 import { cn } from "#/lib/utils";
 
+type HistoryRunId =
+	| Id<"generationRuns">
+	| Id<"modelStudioRuns">
+	| Id<"audioRuns">;
+
+type HistoryRunKind = "shloka" | "model-studio" | "audio";
+
 type HistoryRun = {
-	_id: Id<"generationRuns"> | Id<"modelStudioRuns">;
-	kind: "shloka" | "model-studio";
+	_id: HistoryRunId;
+	kind: HistoryRunKind;
+	audioMode?: "direct" | "guided";
 	status: string;
 	title?: string;
 	subtitle?: string;
 	selectedModelId?: string;
 	createdAt: number;
 	videoCount?: number;
+	audioCount?: number;
 };
 
 type HistoryPanelProps = {
-	selectedRunId?: Id<"generationRuns"> | Id<"modelStudioRuns"> | null;
-	onDeleted?: (runId: Id<"generationRuns"> | Id<"modelStudioRuns">) => void;
+	selectedRunId?: HistoryRunId | null;
+	onDeleted?: (runId: HistoryRunId) => void;
 };
 
-function pathForKind(kind: string): "/" | "/studio" {
-	return kind === "model-studio" ? "/studio" : "/";
+function pathForKind(kind: string): "/" | "/studio" | "/audio" {
+	if (kind === "model-studio") return "/studio";
+	if (kind === "audio") return "/audio";
+	return "/";
+}
+
+/** Badge icon + label + fallback title for a history row. */
+function runKindMeta(run: Pick<HistoryRun, "kind" | "audioMode">) {
+	if (run.kind === "shloka") {
+		return { icon: Sparkles, label: "Shloka", fallback: "Shloka Run" };
+	}
+	if (run.kind === "audio") {
+		return run.audioMode === "guided"
+			? { icon: Music, label: "Song", fallback: "Sanskrit Song" }
+			: { icon: AudioLines, label: "Audio", fallback: "Audio Run" };
+	}
+	return { icon: Clapperboard, label: "Model", fallback: "Model Run" };
 }
 
 export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
@@ -97,12 +123,16 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 	const generateModelStudioTitle = useAction(
 		api.studio.actions.generateModelStudioTitle,
 	);
-	const [pendingDeleteId, setPendingDeleteId] = useState<
-		Id<"generationRuns"> | Id<"modelStudioRuns"> | null
-	>(null);
-	const [pendingDeleteKind, setPendingDeleteKind] = useState<
-		"shloka" | "model-studio" | null
-	>(null);
+	const deleteAudioRun = useMutation(api.audio.mutations.deleteAudioRun);
+	const renameAudioRun = useMutation(api.audio.mutations.renameAudioRun);
+	const generateAudioRunTitle = useAction(
+		api.audio.actions.generateAudioRunTitle,
+	);
+	const [pendingDeleteId, setPendingDeleteId] = useState<HistoryRunId | null>(
+		null,
+	);
+	const [pendingDeleteKind, setPendingDeleteKind] =
+		useState<HistoryRunKind | null>(null);
 	const [deleting, setDeleting] = useState(false);
 	const [deleteMedia, setDeleteMedia] = useState(false);
 	const pendingShlokaDeleteId =
@@ -117,8 +147,9 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 	const [renameValue, setRenameValue] = useState("");
 	const [renaming, setRenaming] = useState(false);
 	const [infoTarget, setInfoTarget] = useState<HistoryRun | null>(null);
-	const [regeneratingId, setRegeneratingId] =
-		useState<Id<"generationRuns"> | null>(null);
+	const [regeneratingId, setRegeneratingId] = useState<HistoryRunId | null>(
+		null,
+	);
 
 	const historyRuns = runs as HistoryRun[] | undefined;
 
@@ -131,6 +162,11 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 			if (pendingDeleteKind === "shloka") {
 				await deleteRun({
 					runId: pendingDeleteId as Id<"generationRuns">,
+					deleteMedia,
+				});
+			} else if (pendingDeleteKind === "audio") {
+				await deleteAudioRun({
+					runId: pendingDeleteId as Id<"audioRuns">,
 					deleteMedia,
 				});
 			} else {
@@ -163,6 +199,11 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 					runId: renameTarget._id as Id<"generationRuns">,
 					title: renameValue,
 				});
+			} else if (renameTarget.kind === "audio") {
+				await renameAudioRun({
+					runId: renameTarget._id as Id<"audioRuns">,
+					title: renameValue,
+				});
 			} else {
 				await renameModelStudioRun({
 					runId: renameTarget._id as Id<"modelStudioRuns">,
@@ -175,13 +216,15 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 		}
 	};
 
-	const regenerateTitle = async (
-		runId: Id<"generationRuns"> | Id<"modelStudioRuns">,
-		kind: "shloka" | "model-studio",
-	) => {
-		setRegeneratingId(runId as Id<"generationRuns">);
+	const regenerateTitle = async (runId: HistoryRunId, kind: HistoryRunKind) => {
+		setRegeneratingId(runId);
 		try {
-			if (kind === "model-studio") {
+			if (kind === "audio") {
+				await generateAudioRunTitle({
+					runId: runId as Id<"audioRuns">,
+					force: true,
+				});
+			} else if (kind === "model-studio") {
 				await generateModelStudioTitle({
 					runId: runId as Id<"modelStudioRuns">,
 					force: true,
@@ -206,16 +249,18 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 			) : (
 				<SidebarMenu className="gap-1">
 					{historyRuns.map((run) => {
-						const shloka = run.kind === "shloka";
+						const kindMeta = runKindMeta(run);
+						const KindIcon = kindMeta.icon;
 						const to = pathForKind(run.kind);
 						const title =
-							run.title?.trim() ||
-							run.subtitle?.trim() ||
-							(shloka ? "Shloka Run" : "Model Run");
+							run.title?.trim() || run.subtitle?.trim() || kindMeta.fallback;
 						const meta = [
 							formatDistanceToNow(run.createdAt, { addSuffix: true }),
 							run.videoCount
 								? `${run.videoCount} video${run.videoCount === 1 ? "" : "s"}`
+								: null,
+							run.audioCount
+								? `${run.audioCount} take${run.audioCount === 1 ? "" : "s"}`
 								: null,
 						]
 							.filter(Boolean)
@@ -243,12 +288,8 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 												variant="outline"
 												className="h-5 shrink-0 gap-1 px-1.5 font-normal"
 											>
-												{shloka ? (
-													<Sparkles className="size-3" />
-												) : (
-													<Clapperboard className="size-3" />
-												)}
-												{shloka ? "Shloka" : "Model"}
+												<KindIcon className="size-3" />
+												{kindMeta.label}
 											</Badge>
 											<span
 												className={cn(
@@ -346,8 +387,9 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 					<AlertDialogHeader>
 						<AlertDialogTitle>Delete this run?</AlertDialogTitle>
 						<AlertDialogDescription>
-							This deletes the run, its plans, and text. By default its images
-							and videos stay in the shared gallery.
+							{pendingDeleteKind === "audio"
+								? "This deletes the run and its script. By default its audio takes and reference images stay in the shared gallery."
+								: "This deletes the run, its plans, and text. By default its images and videos stay in the shared gallery."}
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 
@@ -365,7 +407,9 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 							/>
 							<span className="flex min-w-0 flex-1 flex-col gap-1">
 								<span className="text-sm font-medium leading-tight">
-									Also delete this run’s images and videos
+									{pendingDeleteKind === "audio"
+										? "Also delete this run’s audio takes and images"
+										: "Also delete this run’s images and videos"}
 								</span>
 								<span className="text-xs text-muted-foreground">
 									Removes generated media from the shared gallery.
@@ -375,7 +419,9 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 
 						{deleteMedia ? (
 							<div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-xs leading-relaxed text-amber-900 dark:text-amber-200">
-								{deleteMediaCounts === undefined ? (
+								{pendingDeleteKind !== "shloka" ? (
+									"This permanently deletes this run’s generated files and any reference images no other run uses. This cannot be undone."
+								) : deleteMediaCounts === undefined ? (
 									"Checking which files are safe to delete…"
 								) : deleteMediaCounts.images === 0 &&
 									deleteMediaCounts.videos === 0 ? (
@@ -493,7 +539,7 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 							<div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-2 text-xs">
 								<span className="text-muted-foreground">Kind</span>
 								<span className="capitalize">
-									{infoTarget.kind === "shloka" ? "Shloka" : "Model"}
+									{runKindMeta(infoTarget).label}
 								</span>
 							</div>
 							<div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-2 text-xs">
@@ -521,8 +567,14 @@ export function HistoryPanel({ selectedRunId, onDeleted }: HistoryPanelProps) {
 								<span>{new Date(infoTarget.createdAt).toLocaleString()}</span>
 							</div>
 							<div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-2 text-xs">
-								<span className="text-muted-foreground">Videos</span>
-								<span>{infoTarget.videoCount ?? 0}</span>
+								<span className="text-muted-foreground">
+									{infoTarget.kind === "audio" ? "Takes" : "Videos"}
+								</span>
+								<span>
+									{infoTarget.kind === "audio"
+										? (infoTarget.audioCount ?? 0)
+										: (infoTarget.videoCount ?? 0)}
+								</span>
 							</div>
 						</div>
 					) : null}

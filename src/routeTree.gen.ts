@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AudioRouteImport } from './routes/audio'
 import { Route as PromptTemplatesRouteImport } from './routes/prompt-templates'
 import { Route as StudioRouteImport } from './routes/studio'
 import { Route as GalleryIndexRouteImport } from './routes/gallery/index'
@@ -17,6 +18,11 @@ import { Route as GalleryIndexRouteImport } from './routes/gallery/index'
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AudioRoute = AudioRouteImport.update({
+  id: '/audio',
+  path: '/audio',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PromptTemplatesRoute = PromptTemplatesRouteImport.update({
@@ -37,12 +43,14 @@ const GalleryIndexRoute = GalleryIndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/audio': typeof AudioRoute
   '/prompt-templates': typeof PromptTemplatesRoute
   '/studio': typeof StudioRoute
   '/gallery/': typeof GalleryIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/audio': typeof AudioRoute
   '/prompt-templates': typeof PromptTemplatesRoute
   '/studio': typeof StudioRoute
   '/gallery': typeof GalleryIndexRoute
@@ -50,20 +58,23 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/audio': typeof AudioRoute
   '/prompt-templates': typeof PromptTemplatesRoute
   '/studio': typeof StudioRoute
   '/gallery/': typeof GalleryIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/prompt-templates' | '/studio' | '/gallery/'
+  fullPaths: '/' | '/audio' | '/prompt-templates' | '/studio' | '/gallery/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/prompt-templates' | '/studio' | '/gallery'
-  id: '__root__' | '/' | '/prompt-templates' | '/studio' | '/gallery/'
+  to: '/' | '/audio' | '/prompt-templates' | '/studio' | '/gallery'
+  id:
+    '__root__' | '/' | '/audio' | '/prompt-templates' | '/studio' | '/gallery/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AudioRoute: typeof AudioRoute
   PromptTemplatesRoute: typeof PromptTemplatesRoute
   StudioRoute: typeof StudioRoute
   GalleryIndexRoute: typeof GalleryIndexRoute
@@ -76,6 +87,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/audio': {
+      id: '/audio'
+      path: '/audio'
+      fullPath: '/audio'
+      preLoaderRoute: typeof AudioRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/prompt-templates': {
@@ -104,6 +122,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AudioRoute: AudioRoute,
   PromptTemplatesRoute: PromptTemplatesRoute,
   StudioRoute: StudioRoute,
   GalleryIndexRoute: GalleryIndexRoute,

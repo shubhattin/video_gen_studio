@@ -19,11 +19,11 @@ import {
 	PopoverTitle,
 	PopoverTrigger,
 } from "#/components/ui/popover";
-import {
-	DEFAULT_PLANNER_SYSTEM_PROMPT,
-	DEFAULT_PLANNER_SYSTEM_PROMPT_TITLE,
-	type PlannerPromptSelection,
-	type SystemPromptTemplate,
+import { builtInPromptFor } from "#/lib/built-in-prompts";
+import type {
+	PlannerPromptSelection,
+	PromptTemplateKind,
+	SystemPromptTemplate,
 } from "#/lib/planner-prompt";
 
 const DEFAULT_OPTION_VALUE = "__default__";
@@ -35,6 +35,11 @@ type SystemPromptPickerProps = {
 	templates: SystemPromptTemplate[] | undefined;
 	onChange: (selection: PlannerPromptSelection | null) => void;
 	disabled?: boolean;
+	/** Which built-in default to offer; `templates` should match this kind. */
+	kind?: PromptTemplateKind;
+	/** Helper copy under the picker once a prompt is selected / still missing. */
+	selectedHint?: string;
+	missingHint?: string;
 };
 
 /**
@@ -48,11 +53,15 @@ export function SystemPromptPicker({
 	templates,
 	onChange,
 	disabled = false,
+	kind = "video",
+	selectedHint = "This template is required for planning and is saved with the run.",
+	missingHint = "Select a system prompt template before generating a plan.",
 }: SystemPromptPickerProps) {
+	const builtIn = builtInPromptFor(kind);
 	const items: TemplateOption[] = useMemo(
 		() => [
 			{
-				label: DEFAULT_PLANNER_SYSTEM_PROMPT_TITLE,
+				label: builtIn.title,
 				value: DEFAULT_OPTION_VALUE,
 			},
 			...(templates ?? []).map((template) => ({
@@ -60,7 +69,7 @@ export function SystemPromptPicker({
 				value: template._id,
 			})),
 		],
-		[templates],
+		[templates, builtIn.title],
 	);
 
 	const selectedOption = useMemo(() => {
@@ -79,9 +88,9 @@ export function SystemPromptPicker({
 		}
 		if (selection.kind === "default") {
 			return {
-				label: DEFAULT_PLANNER_SYSTEM_PROMPT_TITLE,
-				content: DEFAULT_PLANNER_SYSTEM_PROMPT,
-				editHash: "#Pdefault",
+				label: builtIn.title,
+				content: builtIn.content,
+				editHash: `#${builtIn.focusKey}`,
 			};
 		}
 		const template = (templates ?? []).find(
@@ -95,7 +104,7 @@ export function SystemPromptPicker({
 			content: template.content,
 			editHash: `#P${template._id}`,
 		};
-	}, [selection, templates]);
+	}, [selection, templates, builtIn]);
 
 	const handleValueChange = (option: TemplateOption | null) => {
 		if (!option) {
@@ -187,7 +196,7 @@ export function SystemPromptPicker({
 
 				{selection && selection.kind === "template" && resolved ? (
 					<a
-						href={`/prompt-templates${resolved.editHash}`}
+						href={`/prompt-templates?kind=${kind}${resolved.editHash}`}
 						target="_blank"
 						rel="noreferrer"
 						className="inline-flex items-center gap-1 rounded-md text-sm font-medium text-foreground underline underline-offset-3 hover:text-accent-foreground"
@@ -208,9 +217,7 @@ export function SystemPromptPicker({
 						: "text-sm text-amber-700 dark:text-amber-300"
 				}
 			>
-				{selection
-					? "This template is required for planning and is saved with the run."
-					: "Select a system prompt template before generating a plan."}
+				{selection ? selectedHint : missingHint}
 			</p>
 		</div>
 	);

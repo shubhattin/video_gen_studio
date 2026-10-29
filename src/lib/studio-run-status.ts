@@ -15,6 +15,9 @@ const ACTIVE_STATUSES = new Set([
 	"planning",
 	"image_generating",
 	"video_generating",
+	// Model / audio studio runs.
+	"scripting",
+	"generating",
 ]);
 
 export function isActiveRunStatus(status: string | null | undefined) {
@@ -40,6 +43,10 @@ export function runStatusLabel(status: string | null | undefined) {
 			return "Image ready";
 		case "video_generating":
 			return "Video…";
+		case "scripting":
+			return "Scripting…";
+		case "generating":
+			return "Generating…";
 		case "completed":
 			return "Done";
 		case "failed":
@@ -64,6 +71,10 @@ export function runStatusPillLabel(status: string | null | undefined) {
 			return "Still";
 		case "video_generating":
 			return "Video";
+		case "scripting":
+			return "Script";
+		case "generating":
+			return "Gen";
 		case "completed":
 			return "Done";
 		case "failed":

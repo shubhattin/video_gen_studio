@@ -15,14 +15,16 @@ import {
 } from "#/components/ui/dialog";
 import { Input } from "#/components/ui/input";
 import { Label } from "#/components/ui/label";
+import type { PromptTemplateKind } from "#/lib/planner-prompt";
 import { notifyStudioError, notifyStudioSuccess } from "#/lib/studio-toast";
 
 type AddTemplateDialogProps = {
+	kind: PromptTemplateKind;
 	onCreated: (templateId: string) => void;
 };
 
 /** "+ Add New Template" — asks for a title and creates an empty-template row. */
-export function AddTemplateDialog({ onCreated }: AddTemplateDialogProps) {
+export function AddTemplateDialog({ kind, onCreated }: AddTemplateDialogProps) {
 	const createTemplate = useMutation(
 		api.studio.mutations.createSystemPromptTemplate,
 	);
@@ -37,7 +39,7 @@ export function AddTemplateDialog({ onCreated }: AddTemplateDialogProps) {
 		}
 		setCreating(true);
 		try {
-			const id = await createTemplate({ title: trimmed });
+			const id = await createTemplate({ title: trimmed, kind });
 			notifyStudioSuccess("Template added", trimmed);
 			setTitle("");
 			setOpen(false);
@@ -57,10 +59,15 @@ export function AddTemplateDialog({ onCreated }: AddTemplateDialogProps) {
 			</DialogTrigger>
 			<DialogContent>
 				<DialogHeader>
-					<DialogTitle>Add New Template</DialogTitle>
+					<DialogTitle>
+						Add New {kind === "audio" ? "Audio" : "Video"} Template
+					</DialogTitle>
 					<DialogDescription>
-						Name the template — you can write its prompt content right after it
-						appears below.
+						{kind === "audio"
+							? "Used by Sanskrit Song Studio to write song scripts."
+							: "Used by Shloka Studio to plan videos."}{" "}
+						Name it — you can write its prompt content right after it appears
+						below.
 					</DialogDescription>
 				</DialogHeader>
 				<div className="space-y-2">
@@ -75,7 +82,11 @@ export function AddTemplateDialog({ onCreated }: AddTemplateDialogProps) {
 								void handleCreate();
 							}
 						}}
-						placeholder="e.g. Concise devotional plan"
+						placeholder={
+							kind === "audio"
+								? "e.g. Upbeat bhajan with chorus"
+								: "e.g. Concise devotional plan"
+						}
 						autoFocus
 					/>
 				</div>

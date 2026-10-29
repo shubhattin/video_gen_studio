@@ -73,6 +73,13 @@ export async function findGalleryByObjectKey(ctx: DbCtx, objectKey: string) {
 	if (video) {
 		return { kind: "video" as const, doc: video };
 	}
+	const audio = await ctx.db
+		.query("galleryAudios")
+		.withIndex("by_objectKey", (q) => q.eq("objectKey", objectKey))
+		.unique();
+	if (audio) {
+		return { kind: "audio" as const, doc: audio };
+	}
 	return null;
 }
 
@@ -145,7 +152,7 @@ export async function imageReferencedOutsideRun(
 		if (run.firstFrameImageId === imageId) return true;
 		if (run.lastFrameImageId === imageId) return true;
 	}
-	return false;
+	return await imageReferencedByAudioRuns(ctx, imageId);
 }
 
 /** Same check for a model-studio run owner. */
@@ -169,7 +176,37 @@ export async function imageReferencedOutsideModelStudioRun(
 		if (run.firstFrameImageId === imageId) return true;
 		if (run.lastFrameImageId === imageId) return true;
 	}
-	return false;
+	return await imageReferencedByAudioRuns(ctx, imageId);
+}
+
+/** True when any audio run (other than `exceptRunId`) sends this image. */
+export async function imageReferencedByAudioRuns(
+	ctx: DbCtx,
+	imageId: Id<"galleryImages">,
+	exceptRunId?: Id<"audioRuns">,
+): Promise<boolean> {
+	const audioRuns = await ctx.db.query("audioRuns").collect();
+	return audioRuns.some(
+		(run) =>
+			run._id !== exceptRunId &&
+			(run.referenceImageIds ?? []).includes(imageId),
+	);
+}
+
+/** True when a shloka / model-studio run references this image. */
+export async function imageReferencedByVideoRuns(
+	ctx: DbCtx,
+	imageId: Id<"galleryImages">,
+): Promise<boolean> {
+	const runs = await ctx.db.query("generationRuns").collect();
+	const modelRuns = await ctx.db.query("modelStudioRuns").collect();
+	return [...runs, ...modelRuns].some(
+		(run) =>
+			(run.attachedImageIds ?? []).includes(imageId) ||
+			(run.extraReferenceImageIds ?? []).includes(imageId) ||
+			run.firstFrameImageId === imageId ||
+			run.lastFrameImageId === imageId,
+	);
 }
 
 export async function videoReferencedOutsideRun(
@@ -236,6 +273,37 @@ export async function unlinkGalleryImageFromRuns(
 			updatedAt: Date.now(),
 		});
 	}
+
+	const audioRuns = await ctx.db.query("audioRuns").collect();
+	for (const run of audioRuns) {
+		if (!(run.referenceImageIds ?? []).includes(imageId)) {
+			continue;
+		}
+		await ctx.db.patch(run._id, {
+			referenceImageIds: (run.referenceImageIds ?? []).filter(
+				(id) => id !== imageId,
+			),
+			updatedAt: Date.now(),
+		});
+	}
+}
+
+export function galleryAudioToResult(doc: Doc<"galleryAudios">) {
+	return {
+		id: doc._id,
+		objectKey: doc.objectKey,
+		meta: doc.meta,
+		audioParams: doc.audioParams,
+		prompt: doc.prompt,
+		outputText: doc.outputText,
+		referenceImageCount: doc.referenceImageCount,
+		openRouterGenerationId: doc.openRouterGenerationId,
+		actualCostUsd: doc.actualCostUsd,
+		timeTakenMs: doc.timeTakenMs,
+		warnings: doc.warnings,
+		audioRunId: doc.audioRunId,
+		createdAt: doc.createdAt,
+	};
 }
 
 export async function unlinkGalleryVideoFromRuns(

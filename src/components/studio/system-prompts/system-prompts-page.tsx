@@ -1,7 +1,8 @@
 import { api } from "@convex/_generated/api";
 import { useQuery } from "convex/react";
-import { Search } from "lucide-react";
+import { AudioLines, Search, Video } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { type PillTab, PillTabs } from "#/components/studio/pill-tabs";
 import {
 	Accordion,
 	AccordionContent,
@@ -16,18 +17,38 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "#/components/ui/select";
+import { builtInPromptFor } from "#/lib/built-in-prompts";
+import type { PromptTemplateKind } from "#/lib/planner-prompt";
 import { AddTemplateDialog } from "./add-template-dialog";
 import { DefaultSystemPromptItem } from "./default-system-prompt-item";
 import { SystemPromptItem } from "./system-prompt-item";
 
-export const DEFAULT_ITEM_KEY = "Pdefault";
-
 type SortMode = "newest" | "oldest" | "title";
 
+const KIND_TABS: ReadonlyArray<PillTab<PromptTemplateKind>> = [
+	{ id: "video", label: "Video", icon: Video },
+	{ id: "audio", label: "Audio", icon: AudioLines },
+];
+
+const KIND_COPY: Record<PromptTemplateKind, string> = {
+	video: "Used by Shloka Studio to plan reference images and video scenes.",
+	audio: "Used by Sanskrit Song Studio to write song and recitation scripts.",
+};
+
+/** Which tab a deep-link focus key belongs to (built-in keys only). */
+function kindForBuiltInKey(key: string): PromptTemplateKind | null {
+	if (key === builtInPromptFor("video").focusKey) return "video";
+	if (key === builtInPromptFor("audio").focusKey) return "audio";
+	return null;
+}
+
 type SystemPromptsPageProps = {
+	/** Template kind tab currently shown. */
+	kind: PromptTemplateKind;
+	onKindChange: (kind: PromptTemplateKind) => void;
 	/**
-	 * Deep-link focus key (`Pdefault` or `P<templateId>`) that should be
-	 * auto-expanded, scrolled to, and briefly highlighted.
+	 * Deep-link focus key (`Pdefault`, `Paudio-default`, or `P<templateId>`)
+	 * that should be auto-expanded, scrolled to, and briefly highlighted.
 	 */
 	focusKey: string | null;
 	/** Called once focus handling is done so the hash can be cleared. */
@@ -35,10 +56,21 @@ type SystemPromptsPageProps = {
 };
 
 export function SystemPromptsPage({
+	kind,
+	onKindChange,
 	focusKey,
 	onFocusHandled,
 }: SystemPromptsPageProps) {
-	const templates = useQuery(api.studio.queries.listSystemPromptTemplates);
+	// All kinds — deep links may target a template on the other tab.
+	const allTemplates = useQuery(
+		api.studio.queries.listSystemPromptTemplates,
+		{},
+	);
+	const templates = useMemo(
+		() => allTemplates?.filter((template) => template.kind === kind),
+		[allTemplates, kind],
+	);
+	const builtIn = builtInPromptFor(kind);
 	const [search, setSearch] = useState("");
 	const [sort, setSort] = useState<SortMode>("newest");
 	const [openItems, setOpenItems] = useState<string[]>([]);
@@ -70,9 +102,18 @@ export function SystemPromptsPage({
 			return;
 		}
 		const key = pendingFocus;
+		// Switch to the tab that owns the deep-linked item first.
+		const targetKind =
+			kindForBuiltInKey(key) ??
+			allTemplates?.find((template) => `P${template._id}` === key)?.kind ??
+			null;
+		if (targetKind && targetKind !== kind) {
+			onKindChange(targetKind);
+			return;
+		}
 		// If the deep-linked template exists but is hidden by the search filter,
 		// clear the search so it becomes visible and can be scrolled to.
-		if (key !== DEFAULT_ITEM_KEY && templates !== undefined) {
+		if (key !== builtIn.focusKey && templates !== undefined) {
 			const templateExists = templates.some(
 				(template) => `P${template._id}` === key,
 			);
@@ -84,7 +125,7 @@ export function SystemPromptsPage({
 			}
 		}
 		const ready =
-			key === DEFAULT_ITEM_KEY ||
+			key === builtIn.focusKey ||
 			(templates ?? []).some((template) => `P${template._id}` === key);
 		if (!ready) {
 			return;
@@ -103,7 +144,16 @@ export function SystemPromptsPage({
 		setPendingFocus(null);
 		onFocusHandled?.();
 		return () => clearTimeout(timer);
-	}, [pendingFocus, templates, filtered, onFocusHandled]);
+	}, [
+		pendingFocus,
+		templates,
+		allTemplates,
+		filtered,
+		onFocusHandled,
+		kind,
+		onKindChange,
+		builtIn.focusKey,
+	]);
 
 	const handleCreated = (templateId: string) => {
 		setPendingFocus(`P${templateId}`);
@@ -117,6 +167,18 @@ export function SystemPromptsPage({
 
 	return (
 		<div className="space-y-5">
+			<div className="flex flex-wrap items-center justify-between gap-3">
+				<PillTabs
+					tabs={KIND_TABS}
+					active={kind}
+					onChange={(next) => {
+						setSearch("");
+						onKindChange(next);
+					}}
+					aria-label="Template kind"
+				/>
+				<p className="text-sm text-muted-foreground">{KIND_COPY[kind]}</p>
+			</div>
 			<div className="flex flex-wrap items-center gap-2">
 				<div className="relative min-w-52 flex-1">
 					<Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -145,7 +207,7 @@ export function SystemPromptsPage({
 						<SelectItem value="title">Title A–Z</SelectItem>
 					</SelectContent>
 				</Select>
-				<AddTemplateDialog onCreated={handleCreated} />
+				<AddTemplateDialog kind={kind} onCreated={handleCreated} />
 			</div>
 
 			<Accordion
@@ -155,8 +217,8 @@ export function SystemPromptsPage({
 				className="gap-1"
 			>
 				<AccordionItem
-					value={DEFAULT_ITEM_KEY}
-					id={DEFAULT_ITEM_KEY}
+					value={builtIn.focusKey}
+					id={builtIn.focusKey}
 					className="rounded-lg border border-border/80 px-4 data-open:border-ring/40"
 				>
 					<AccordionTrigger className="gap-2 rounded-none !py-3 hover:no-underline">
@@ -169,7 +231,8 @@ export function SystemPromptsPage({
 					</AccordionTrigger>
 					<AccordionContent>
 						<DefaultSystemPromptItem
-							highlighted={highlightKey === DEFAULT_ITEM_KEY}
+							kind={kind}
+							highlighted={highlightKey === builtIn.focusKey}
 						/>
 					</AccordionContent>
 				</AccordionItem>

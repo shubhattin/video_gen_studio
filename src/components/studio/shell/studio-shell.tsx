@@ -1,4 +1,5 @@
 import { api } from "@convex/_generated/api";
+import { APP_NAME } from "@convex/lib/appInfo";
 import { Link } from "@tanstack/react-router";
 import { useConvexAuth, useQuery } from "convex/react";
 import { FileText, Images, Sparkles } from "lucide-react";
@@ -33,7 +34,7 @@ const emptyStudioSearch = {} as const;
 type StudioShellProps = {
 	children: ReactNode;
 	history: ReactNode;
-	activePath?: "/" | "/studio" | "/gallery" | "/prompt-templates";
+	activePath?: "/" | "/studio" | "/audio" | "/gallery" | "/prompt-templates";
 	/** Override the page title shown in the top bar (else derived from activePath). */
 	title?: string;
 	/** Override the page subtitle shown in the top bar (else derived from activePath). */
@@ -73,7 +74,7 @@ export function StudioShell({
 						<div className="flex items-center gap-2 px-2 py-1.5 group-data-[collapsible=icon]:justify-center">
 							<div className="flex min-w-0 flex-1 flex-col group-data-[collapsible=icon]:hidden">
 								<span className="truncate font-heading text-sm font-semibold tracking-tight text-sidebar-foreground">
-									Shloka Video Studio
+									{APP_NAME}
 								</span>
 							</div>
 						</div>
@@ -151,11 +152,13 @@ export function StudioShell({
 								{title ??
 									(activePath === "/studio"
 										? "Model Studio"
-										: activePath === "/gallery"
-											? "Gallery"
-											: activePath === "/prompt-templates"
-												? "System Prompt Templates"
-												: "New")}
+										: activePath === "/audio"
+											? "Audio Studio"
+											: activePath === "/gallery"
+												? "Gallery"
+												: activePath === "/prompt-templates"
+													? "System Prompt Templates"
+													: "New")}
 							</p>
 							<p className="truncate text-xs text-muted-foreground sm:text-sm">
 								{waitingForStudioData
@@ -163,11 +166,13 @@ export function StudioShell({
 									: (subtitle ??
 										(activePath === "/studio"
 											? "Direct video model API access"
-											: activePath === "/gallery"
-												? "Browse and download generated clips and reference stills"
-												: activePath === "/prompt-templates"
-													? "Manage the prompts the planner uses for Shloka plans"
-													: "Pick a studio and start a new run"))}
+											: activePath === "/audio"
+												? "Sanskrit songs and direct audio model access"
+												: activePath === "/gallery"
+													? "Browse and download generated clips, tracks, and reference stills"
+													: activePath === "/prompt-templates"
+														? "Manage the prompts the planner and song scripter use"
+														: "Pick a studio and start a new run"))}
 							</p>
 						</div>
 					</header>

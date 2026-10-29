@@ -1,10 +1,10 @@
 import { AnimatePresence, motion } from "motion/react";
 import { Spinner } from "#/components/ui/spinner";
 import {
-	PIPELINE_STEPS,
 	busyStageCopy,
 	isActiveRunStatus,
 	isStudioBusy,
+	PIPELINE_STEPS,
 	pipelineProgress,
 	runStatusCopy,
 	type StudioBusyStage,
@@ -17,6 +17,15 @@ type GenerationProgressDockProps = {
 	warnings?: string[];
 	/** Optional context shown under the title (model id / shloka snippet). */
 	contextLabel?: string | null;
+	/** Non-video pipelines (audio) supply their own copy, progress, and steps. */
+	pipeline?: {
+		visible: boolean;
+		title: string;
+		detail: string;
+		value: number;
+		stepIndex: number;
+		steps: ReadonlyArray<{ id: string; label: string }>;
+	};
 };
 
 export function GenerationProgressDock({
@@ -24,14 +33,21 @@ export function GenerationProgressDock({
 	busyStage = null,
 	warnings,
 	contextLabel,
+	pipeline,
 }: GenerationProgressDockProps) {
-	const visible = isStudioBusy(busyStage) || isActiveRunStatus(status);
-	const copy = busyStage
-		? busyStageCopy(busyStage)
-		: status && isActiveRunStatus(status)
-			? runStatusCopy(status)
-			: null;
-	const { value, stepIndex } = pipelineProgress({ status, busyStage });
+	const visible = pipeline
+		? pipeline.visible
+		: isStudioBusy(busyStage) || isActiveRunStatus(status);
+	const copy = pipeline
+		? { title: pipeline.title, detail: pipeline.detail }
+		: busyStage
+			? busyStageCopy(busyStage)
+			: status && isActiveRunStatus(status)
+				? runStatusCopy(status)
+				: null;
+	const { value, stepIndex } =
+		pipeline ?? pipelineProgress({ status, busyStage });
+	const steps = pipeline?.steps ?? PIPELINE_STEPS;
 	const warning = warnings?.[0];
 
 	return (
@@ -78,7 +94,7 @@ export function GenerationProgressDock({
 							</div>
 
 							<div className="flex items-center gap-1.5 px-4 pb-3">
-								{PIPELINE_STEPS.map((step, index) => {
+								{steps.map((step, index) => {
 									const done = stepIndex > index;
 									const current = stepIndex === index;
 									return (

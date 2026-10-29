@@ -98,6 +98,12 @@ export const lastModelParamsUsedValidator = v.object({
 	generateDuration: v.optional(v.boolean()),
 });
 
+/** Which studio a system prompt template is written for. */
+export const promptTemplateKindValidator = v.union(
+	v.literal("video"),
+	v.literal("audio"),
+);
+
 /** System prompt selection for a Shloka run; absent means "not chosen yet". */
 export const plannerPromptSelectionValidator = v.union(
 	v.object({ kind: v.literal("default") }),
@@ -106,6 +112,41 @@ export const plannerPromptSelectionValidator = v.union(
 		templateId: v.id("systemPromptTemplates"),
 	}),
 );
+
+export const audioRunModeValidator = v.union(
+	// Raw prompt straight to the provider (Model Studio equivalent).
+	v.literal("direct"),
+	// Shloka → Opus song script → provider (Shloka Studio equivalent).
+	v.literal("guided"),
+);
+
+export const audioRunStatusValidator = v.union(
+	v.literal("draft"),
+	v.literal("scripting"),
+	v.literal("generating"),
+	v.literal("completed"),
+	v.literal("failed"),
+);
+
+export const audioParamsValidator = v.object({
+	modelId: v.string(),
+	/** Speech models only (e.g. GPT Audio). */
+	voice: v.optional(v.string()),
+	/** Guided runs on length-steerable music models (Lyria Pro). */
+	targetDurationSeconds: v.optional(v.number()),
+	/** Guided runs on music models: no vocals. */
+	instrumental: v.optional(v.boolean()),
+});
+
+/** Song / recitation script written by the scripter (editable). */
+export const audioScriptValidator = v.object({
+	title: v.string(),
+	/** Music direction (music models) or voice direction (speech models). */
+	styleDirection: v.string(),
+	/** Section-tagged lyrics (music) or recitation text (speech). */
+	lyrics: v.string(),
+	pronunciationNotes: v.optional(v.string()),
+});
 
 export default defineSchema({
 	// ── Protected tables (unchanged) ─────────────────────────────────────
@@ -137,6 +178,27 @@ export default defineSchema({
 	})
 		.index("by_createdAt", ["createdAt"])
 		.index("by_objectKey", ["objectKey"]),
+
+	galleryAudios: defineTable({
+		objectKey: v.string(),
+		meta: mediaMetaValidator,
+		audioParams: audioParamsValidator,
+		/** Exact prompt text sent to the provider. */
+		prompt: v.string(),
+		/** Provider text output: Lyria lyrics/structure or GPT Audio transcript. */
+		outputText: v.optional(v.string()),
+		referenceImageCount: v.optional(v.number()),
+		openRouterGenerationId: v.optional(v.string()),
+		actualCostUsd: v.optional(v.number()),
+		timeTakenMs: v.optional(v.number()),
+		warnings: v.optional(v.array(v.string())),
+		/** Owning run; cleared when the run is deleted without its media. */
+		audioRunId: v.optional(v.id("audioRuns")),
+		createdAt: v.number(),
+	})
+		.index("by_createdAt", ["createdAt"])
+		.index("by_objectKey", ["objectKey"])
+		.index("by_audioRunId_and_createdAt", ["audioRunId", "createdAt"]),
 
 	catalogCache: defineTable({
 		key: v.string(),
@@ -170,8 +232,10 @@ export default defineSchema({
 	systemPromptTemplates: defineTable({
 		title: v.string(),
 		content: v.string(),
+		/** Video (Shloka planner) or audio (song scripter) template. */
+		kind: promptTemplateKindValidator,
 		updatedAt: v.number(),
-	}),
+	}).index("by_kind", ["kind"]),
 
 	// ── Shloka runs ──────────────────────────────────────────────────────
 	generationRuns: defineTable({
@@ -246,6 +310,32 @@ export default defineSchema({
 		lastFrameImageId: v.optional(v.id("galleryImages")),
 		extraReferenceImageIds: v.optional(v.array(v.id("galleryImages"))),
 		videoOutputIds: v.optional(v.array(v.id("galleryVideos"))),
+		warnings: v.optional(v.array(v.string())),
+		lastError: v.optional(v.string()),
+		createdAt: v.number(),
+		updatedAt: v.number(),
+	}).index("by_createdAt", ["createdAt"]),
+
+	// ── Audio studio (direct + guided song runs) ─────────────────────────
+	audioRuns: defineTable({
+		mode: audioRunModeValidator,
+		status: audioRunStatusValidator,
+		title: v.optional(v.string()),
+		audioParams: audioParamsValidator,
+		/** Direct mode: raw prompt sent to the provider. */
+		prompt: v.optional(v.string()),
+		/** Guided mode: the instructions brief the scripter composes from. */
+		customInstructions: v.optional(v.string()),
+		promptSelection: v.optional(plannerPromptSelectionValidator),
+		// Guided mode output — one editable script per run.
+		script: v.optional(audioScriptValidator),
+		/** Params the script was written for (model kind / length / vocals). */
+		scriptParamsUsed: v.optional(audioParamsValidator),
+		scriptModel: v.optional(v.string()),
+		scriptSystemPrompt: v.optional(v.string()),
+		scriptSystemPromptTemplateId: v.optional(v.id("systemPromptTemplates")),
+		/** Images sent to image-capable models (Lyria). Bounded by the model max. */
+		referenceImageIds: v.optional(v.array(v.id("galleryImages"))),
 		warnings: v.optional(v.array(v.string())),
 		lastError: v.optional(v.string()),
 		createdAt: v.number(),

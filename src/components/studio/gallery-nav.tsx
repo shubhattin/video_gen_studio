@@ -1,14 +1,11 @@
-import { Image as ImageIcon, Video } from "lucide-react";
-import { cn } from "#/lib/utils";
+import { AudioLines, Image as ImageIcon, Video } from "lucide-react";
+import { type PillTab, PillTabs } from "#/components/studio/pill-tabs";
 
-export type GalleryTab = "videos" | "images";
+export type GalleryTab = "videos" | "audio" | "images";
 
-const tabs: Array<{
-	id: GalleryTab;
-	label: string;
-	icon: typeof Video;
-}> = [
+const tabs: ReadonlyArray<PillTab<GalleryTab>> = [
 	{ id: "videos", label: "Videos", icon: Video },
+	{ id: "audio", label: "Audio", icon: AudioLines },
 	{ id: "images", label: "Images", icon: ImageIcon },
 ];
 
@@ -20,28 +17,11 @@ type GalleryNavProps = {
 /** Tab switcher for the unified gallery — switches the view without routing. */
 export function GalleryNav({ active, onChange }: GalleryNavProps) {
 	return (
-		<div className="inline-flex items-center gap-1 rounded-full border border-border/80 bg-muted/30 p-1">
-			{tabs.map((tab) => {
-				const Icon = tab.icon;
-				const isActive = active === tab.id;
-				return (
-					<button
-						key={tab.id}
-						type="button"
-						aria-pressed={isActive}
-						onClick={() => onChange(tab.id)}
-						className={cn(
-							"inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-sm font-medium transition-colors",
-							isActive
-								? "bg-foreground text-background"
-								: "text-muted-foreground hover:text-foreground",
-						)}
-					>
-						<Icon className="size-4" />
-						{tab.label}
-					</button>
-				);
-			})}
-		</div>
+		<PillTabs
+			tabs={tabs}
+			active={active}
+			onChange={onChange}
+			aria-label="Gallery type"
+		/>
 	);
 }
