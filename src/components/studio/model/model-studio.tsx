@@ -704,11 +704,7 @@ export function ModelStudio({ runId }: ModelStudioProps) {
 						}
 						onConfirm={() => void onGenerateVideo()}
 					/>
-					<VideoResult
-						runId={null}
-						videos={videos}
-						pendingKeys={pendingKeys}
-					/>
+					<VideoResult runId={null} videos={videos} pendingKeys={pendingKeys} />
 				</div>
 			</div>
 			<GenerationProgressDock
