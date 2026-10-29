@@ -37,6 +37,8 @@ export type AudioTakeItem = {
 	actualCostUsd?: number;
 	timeTakenMs?: number;
 	warnings?: string[];
+	/** Guided takes: 0-based script revision the take was generated from. */
+	scriptRevisionIndex?: number;
 	createdAt: number;
 };
 
@@ -77,6 +79,8 @@ type AudioTakeCardProps = {
 	/** e.g. "Take 3" in a run, omitted in the gallery. */
 	label?: string;
 	isLatest?: boolean;
+	/** Label the take with its script revision (runs with several revisions). */
+	showRevision?: boolean;
 	urlPending?: boolean;
 	/** Extra rows in the details popover (gallery: run connection). */
 	details?: ReactNode;
@@ -90,6 +94,7 @@ export function AudioTakeCard({
 	take,
 	label,
 	isLatest,
+	showRevision,
 	urlPending,
 	details,
 	onDelete,
@@ -139,6 +144,11 @@ export function AudioTakeCard({
 					{isLatest ? (
 						<Badge variant="secondary" className="font-normal">
 							Latest
+						</Badge>
+					) : null}
+					{showRevision && take.scriptRevisionIndex !== undefined ? (
+						<Badge variant="outline" className="font-normal tabular-nums">
+							Rev {take.scriptRevisionIndex + 1}
 						</Badge>
 					) : null}
 					<span

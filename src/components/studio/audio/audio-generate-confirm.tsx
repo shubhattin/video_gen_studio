@@ -28,6 +28,8 @@ type AudioGenerateConfirmProps = {
 	generating?: boolean;
 	triggerLabel?: string;
 	warning?: string;
+	/** Guided runs: script the take uses, e.g. "Title · revision 2 of 3". */
+	sourceLabel?: string;
 	className?: string;
 	onConfirm: () => void;
 };
@@ -52,6 +54,7 @@ export function AudioGenerateConfirm({
 	generating,
 	triggerLabel = "Generate audio",
 	warning,
+	sourceLabel,
 	className,
 	onConfirm,
 }: AudioGenerateConfirmProps) {
@@ -70,7 +73,9 @@ export function AudioGenerateConfirm({
 					/>
 				}
 			>
-				{generating ? "Generating audio…" : triggerLabel}
+				<span className="truncate">
+					{generating ? "Generating audio…" : triggerLabel}
+				</span>
 			</AlertDialogTrigger>
 			<AlertDialogContent size="default">
 				<AlertDialogHeader>
@@ -88,6 +93,9 @@ export function AudioGenerateConfirm({
 						<p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-700 dark:text-amber-300">
 							{warning}
 						</p>
+					) : null}
+					{sourceLabel ? (
+						<DetailRow label="Script" value={sourceLabel} />
 					) : null}
 					<DetailRow
 						label="Model"

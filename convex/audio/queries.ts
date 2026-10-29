@@ -6,6 +6,7 @@ import {
 	type AudioPromptSelection,
 } from "../lib/audioPrompt";
 import { requireAdmin } from "../lib/auth";
+import { resolveRevisionIndex } from "../lib/revisions";
 import { plannerPromptSelectionValidator } from "../schema";
 import { galleryAudioToResult, loadImagesByIds } from "../studio/media";
 
@@ -35,7 +36,21 @@ export const getAudioRun = query({
 			loadImagesByIds(ctx, run.referenceImageIds ?? []),
 			listRunAudios(ctx, run._id),
 		]);
-		return { ...run, images, audios };
+		const activeScriptRevisionIndex = resolveRevisionIndex(
+			run.scriptRevisions,
+			run.activeScriptRevisionIndex,
+		);
+		return {
+			...run,
+			scriptRevisions: run.scriptRevisions ?? [],
+			activeScriptRevisionIndex,
+			activeScriptRevision:
+				activeScriptRevisionIndex === null
+					? null
+					: run.scriptRevisions![activeScriptRevisionIndex]!,
+			images,
+			audios,
+		};
 	},
 });
 

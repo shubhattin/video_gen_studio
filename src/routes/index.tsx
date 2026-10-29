@@ -3,12 +3,19 @@ import type { Id } from "@convex/_generated/dataModel";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { useEffect, useMemo, useState } from "react";
+import { RevisePopover } from "#/components/studio/revisions/revise-popover";
+import {
+	RevisionNote,
+	RevisionSwitcher,
+	revisionSuffix,
+} from "#/components/studio/revisions/revision-switcher";
 import { AutosaveStatus } from "#/components/studio/shell/autosave-status";
 import { HistoryPanel } from "#/components/studio/shell/history-panel";
 import { StudioLauncher } from "#/components/studio/shell/studio-launcher";
 import { StudioRunSkeleton } from "#/components/studio/shell/studio-run-skeleton";
 import { StudioShell } from "#/components/studio/shell/studio-shell";
 import { DivergenceWarning } from "#/components/studio/shloka/divergence-warning";
+import { PlanRegenerateNotice } from "#/components/studio/shloka/plan-regenerate-notice";
 import { PlanTabs } from "#/components/studio/shloka/plan-tabs";
 import { ShlokaComposer } from "#/components/studio/shloka/shloka-composer";
 import { ShlokaPlanPreview } from "#/components/studio/shloka/shloka-plan-preview";
@@ -119,6 +126,27 @@ function ShlokaStudioPage() {
 	const deletePlan = useMutation(api.studio.mutations.deletePlan);
 	const renamePlan = useMutation(api.studio.mutations.renamePlan);
 	const updatePlanContent = useMutation(api.studio.mutations.updatePlanContent);
+	const selectPlanRevision = useMutation(
+		api.studio.mutations.selectPlanRevision,
+	).withOptimisticUpdate((localStore, args) => {
+		const plans = localStore.getQuery(api.studio.queries.listPlansForRun, {
+			runId: args.runId,
+		});
+		if (!plans) return;
+		localStore.setQuery(
+			api.studio.queries.listPlansForRun,
+			{ runId: args.runId },
+			plans.map((plan) =>
+				plan._id === args.planId && plan.revisions[args.revisionIndex]
+					? {
+							...plan,
+							activeRevisionIndex: args.revisionIndex,
+							activeRevision: plan.revisions[args.revisionIndex],
+						}
+					: plan,
+			),
+		);
+	});
 	const prepareReferenceImageUpload = useAction(
 		api.studio.r2.prepareReferenceImageUpload,
 	);
@@ -126,6 +154,7 @@ function ShlokaStudioPage() {
 		api.studio.r2.finalizeReferenceImageUpload,
 	);
 	const planRun = useAction(api.studio.actions.planShlokaRun);
+	const revisePlan = useAction(api.studio.actions.revisePlan);
 	const generateImage = useAction(api.studio.actions.generateReferenceImage);
 	const generateVideo = useAction(api.studio.actions.generateVideoForRun);
 
@@ -144,6 +173,12 @@ function ShlokaStudioPage() {
 	const activePlan = plans?.find(
 		(p: { _id: string }) => p._id === activePlanId,
 	);
+	const revisions = activePlan?.revisions ?? [];
+	const revisionIndex = activePlan?.activeRevisionIndex ?? null;
+	const activeRevision = activePlan?.activeRevision ?? null;
+	const planName = activePlan
+		? activePlan.title?.trim() || `Plan ${activePlan.attemptNumber}`
+		: "";
 
 	const selectPlanTab = (id: Id<"shlokaPlans">) => {
 		if (!runId || id === activePlanId) return;
@@ -406,12 +441,61 @@ function ShlokaStudioPage() {
 		}
 	};
 
+	const onRevise = async (prompt: string) => {
+		if (!runId || !activePlanId || revisionIndex === null) return false;
+		setBusyStage("revising");
+		try {
+			await planAutosave.flush();
+			await revisePlan({
+				runId,
+				planId: activePlanId,
+				baseRevisionIndex: revisionIndex,
+				prompt,
+			});
+			notifyStudioSuccess(
+				"Plan revised",
+				`Revision ${revisions.length + 1} is ready.`,
+			);
+			return true;
+		} catch (error) {
+			notifyStudioError("Revision failed", error);
+			return false;
+		} finally {
+			setBusyStage(null);
+		}
+	};
+
+	/** Save manual edits onto the shown revision. */
+	const saveRevisionContent = async (
+		patch: Omit<
+			Parameters<typeof updatePlanContent>[0],
+			"runId" | "planId" | "revisionIndex"
+		>,
+	) => {
+		if (!runId || !activePlanId || revisionIndex === null) return;
+		await updatePlanContent({
+			runId,
+			planId: activePlanId,
+			revisionIndex,
+			...patch,
+		});
+	};
+
+	const onSelectRevision = (index: number) => {
+		if (!runId || !activePlanId) return;
+		selectPlanRevision({
+			runId,
+			planId: activePlanId,
+			revisionIndex: index,
+		}).catch((error) => notifyStudioError("Could not switch revision", error));
+	};
+
 	const onGenerateImage = async () => {
-		if (!runId) return;
+		if (!runId || !activePlanId || revisionIndex === null) return;
 		setBusyStage("image");
 		try {
 			await ensureRun();
-			await generateImage({ runId });
+			await generateImage({ runId, planId: activePlanId, revisionIndex });
 			notifyStudioSuccess("Reference image ready");
 		} catch (error) {
 			notifyStudioError("Image generation failed", error);
@@ -440,11 +524,11 @@ function ShlokaStudioPage() {
 	};
 
 	const onGenerateVideo = async () => {
-		if (!runId || !activePlanId) return;
+		if (!runId || !activePlanId || revisionIndex === null) return;
 		setBusyStage("video");
 		try {
 			await ensureRun();
-			await generateVideo({ runId, planId: activePlanId });
+			await generateVideo({ runId, planId: activePlanId, revisionIndex });
 			notifyStudioSuccess("Video clip saved", "Added to this plan.");
 		} catch (error) {
 			notifyStudioError("Video generation failed", error);
@@ -459,6 +543,7 @@ function ShlokaStudioPage() {
 	const planReady =
 		activePlan?.status === "ready" ||
 		busyStage === "planning" ||
+		busyStage === "revising" ||
 		run?.status === "planning";
 
 	const videoBusy = busyStage === "video";
@@ -470,9 +555,8 @@ function ShlokaStudioPage() {
 
 	// Divergence: current config differs from what the plan was generated with.
 	const divergenceFields = useMemo(() => {
-		if (!activePlan || activePlan.status !== "ready") return [];
-		const used = activePlan.lastModelParamsUsed;
-		if (!used) return [];
+		if (activePlan?.status !== "ready" || !activeRevision) return [];
+		const used = activeRevision.lastModelParamsUsed;
 		const fields: Array<{ label: string; current: string; used: string }> = [];
 		if (videoConfig.modelId !== used.modelId) {
 			fields.push({
@@ -523,7 +607,7 @@ function ShlokaStudioPage() {
 			});
 		}
 		return fields;
-	}, [activePlan, videoConfig]);
+	}, [activePlan?.status, activeRevision, videoConfig]);
 
 	const hasDivergence = divergenceFields.length > 0;
 
@@ -531,13 +615,12 @@ function ShlokaStudioPage() {
 	// on one line. Only shown when a generated plan actually exists.
 	// Keep it visible (disabled) during regeneration so the extra
 	// "Planning…" button is not needed.
-	const hasExistingPlanContent = Boolean(
-		activePlan?.imagePrompt || activePlan?.videoScenes?.length,
-	);
 	const showRegenerate =
 		activePlan?.status === "ready" ||
-		(hasExistingPlanContent &&
-			(busyStage === "planning" || activePlan?.status === "planning"));
+		(revisions.length > 0 &&
+			(busyStage === "planning" ||
+				busyStage === "revising" ||
+				activePlan?.status === "planning"));
 	const regeneratePlanControl = showRegenerate ? (
 		<AlertDialog>
 			<AlertDialogTrigger
@@ -558,6 +641,7 @@ function ShlokaStudioPage() {
 						using your current settings. This cannot be undone.
 					</AlertDialogDescription>
 				</AlertDialogHeader>
+				<PlanRegenerateNotice revisionCount={revisions.length} />
 				<AlertDialogFooter>
 					<AlertDialogCancel>Cancel</AlertDialogCancel>
 					<AlertDialogAction onClick={() => void onPlan()}>
@@ -567,6 +651,23 @@ function ShlokaStudioPage() {
 			</AlertDialogContent>
 		</AlertDialog>
 	) : null;
+	const revisePlanControl =
+		showRegenerate && revisionIndex !== null ? (
+			<RevisePopover
+				label="Revise plan"
+				subject="plan"
+				placeholder="e.g. Make the scenes slower and set at dusk, and drop the river shot."
+				baseIndex={revisionIndex}
+				revisionCount={revisions.length}
+				disabled={anyBusy}
+				pending={busyStage === "revising"}
+				onSubmit={onRevise}
+			/>
+		) : null;
+	const generateSourceLabel =
+		revisionIndex !== null && revisions.length > 1
+			? `${planName} · revision ${revisionIndex + 1} of ${revisions.length}`
+			: planName;
 
 	const extraIds = (run?.extraReferenceImageIds ?? []) as Id<"galleryImages">[];
 	const isRunLoading = Boolean(runId) && run === undefined;
@@ -704,12 +805,13 @@ function ShlokaStudioPage() {
 												disabled={anyBusy}
 												showGenerateDuration
 												generatedDurationSeconds={
-													activePlan?.expectedIdealVideoDuration
+													activeRevision?.expectedIdealVideoDuration
 												}
 											/>
 											{hasDivergence ? (
 												<DivergenceWarning
 													fields={divergenceFields}
+													revisionCount={revisions.length}
 													onRegenerate={() => void onPlan()}
 												/>
 											) : null}
@@ -747,43 +849,60 @@ function ShlokaStudioPage() {
 										{planReady ? (
 											<div className="flex flex-col gap-3">
 												<ShlokaPlanPreview
-													imagePrompt={activePlan.imagePrompt}
-													videoScenes={activePlan.videoScenes}
+													// Remount per revision so in-progress edits never
+													// save onto a different revision.
+													key={`${activePlanId}:${revisionIndex}`}
+													imagePrompt={activeRevision?.imagePrompt}
+													videoScenes={activeRevision?.videoScenes}
 													generalVideoInstructions={
-														activePlan.generalVideoInstructions
+														activeRevision?.generalVideoInstructions
 													}
 													videoPrompt={
-														activePlan.videoScenes?.length
+														activeRevision
 															? buildVideoPromptFromScenes(
-																	activePlan.videoScenes,
-																	activePlan.generalVideoInstructions,
+																	activeRevision.videoScenes,
+																	activeRevision.generalVideoInstructions,
 																)
 															: undefined
 													}
 													summarizedVideoPrompt={
-														activePlan.summarizedVideoPrompt
+														activeRevision?.summarizedVideoPrompt
 													}
 													disabled={anyBusy}
-													actions={regeneratePlanControl}
+													actions={
+														<>
+															{regeneratePlanControl}
+															{revisePlanControl}
+														</>
+													}
+													revisionSwitcher={
+														revisionIndex !== null ? (
+															<RevisionSwitcher
+																index={revisionIndex}
+																count={revisions.length}
+																disabled={anyBusy}
+																onSelect={onSelectRevision}
+															/>
+														) : null
+													}
+													revisionNote={
+														activeRevision && revisionIndex !== null ? (
+															<RevisionNote
+																index={revisionIndex}
+																parentIndex={activeRevision.parentIndex}
+																revisionPrompt={activeRevision.revisionPrompt}
+															/>
+														) : null
+													}
 													onSaveImagePrompt={async (imagePrompt) => {
-														if (!runId || !activePlanId) return;
-														await updatePlanContent({
-															runId,
-															planId: activePlanId,
-															imagePrompt,
-														});
+														await saveRevisionContent({ imagePrompt });
 														notifyStudioSuccess(
 															"Image prompt saved",
 															"Reference image generation will use the updated prompt.",
 														);
 													}}
 													onSaveVideoScenes={async (scenes) => {
-														if (!runId || !activePlanId) return;
-														await updatePlanContent({
-															runId,
-															planId: activePlanId,
-															videoScenes: scenes,
-														});
+														await saveRevisionContent({ videoScenes: scenes });
 														notifyStudioSuccess(
 															"Video plan saved",
 															"Video generation will use the updated scenes.",
@@ -792,10 +911,7 @@ function ShlokaStudioPage() {
 													onSaveGeneralVideoInstructions={async (
 														generalVideoInstructions,
 													) => {
-														if (!runId || !activePlanId) return;
-														await updatePlanContent({
-															runId,
-															planId: activePlanId,
+														await saveRevisionContent({
 															generalVideoInstructions,
 														});
 														notifyStudioSuccess(
@@ -917,26 +1033,11 @@ function ShlokaStudioPage() {
 													</h2>
 													<VideoGenerateConfirm
 														config={
-															hasDivergence && activePlan.lastModelParamsUsed
+															hasDivergence && activeRevision
 																? {
-																		modelId: activePlan.lastModelParamsUsed
+																		...activeRevision.lastModelParamsUsed,
+																		modelId: activeRevision.lastModelParamsUsed
 																			.modelId as VideoModelId,
-																		aspectRatio:
-																			activePlan.lastModelParamsUsed
-																				.aspectRatio,
-																		resolution:
-																			activePlan.lastModelParamsUsed.resolution,
-																		durationSeconds:
-																			activePlan.lastModelParamsUsed
-																				.durationSeconds,
-																		generateAudio:
-																			activePlan.lastModelParamsUsed
-																				.generateAudio,
-																		negativePrompt:
-																			activePlan.lastModelParamsUsed
-																				.negativePrompt,
-																		cfgScale:
-																			activePlan.lastModelParamsUsed.cfgScale,
 																	}
 																: videoConfig
 														}
@@ -945,15 +1046,17 @@ function ShlokaStudioPage() {
 																? "Current settings differ from this plan — generation uses the plan’s original settings."
 																: undefined
 														}
+														sourceLabel={generateSourceLabel}
 														className="min-h-11"
-														disabled={anyBusy || !hasScenes(activePlan)}
+														disabled={anyBusy || !activeRevision}
 														generating={videoBusy}
-														triggerLabel="Generate video"
+														triggerLabel={`Generate video — ${planName}${revisionSuffix(revisionIndex, revisions.length)}`}
 														onConfirm={onGenerateVideo}
 													/>
 													<VideoResult
 														runId={runId}
 														videos={videos}
+														showRevision={revisions.length > 1}
 														pendingKeys={pendingKeys}
 													/>
 												</div>
@@ -978,10 +1081,6 @@ function ShlokaStudioPage() {
 			)}
 		</StudioShell>
 	);
-}
-
-function hasScenes(plan: { videoScenes?: unknown[] } | undefined) {
-	return Boolean(plan?.videoScenes?.length);
 }
 
 export { clearRunSearch };

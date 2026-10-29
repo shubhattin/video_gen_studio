@@ -8,6 +8,7 @@ import {
 	normalizeAudioParams,
 } from "../lib/audioCatalog";
 import { requireAdmin } from "../lib/auth";
+import { replaceRevision, requireRevision } from "../lib/revisions";
 import {
 	audioParamsValidator,
 	audioRunModeValidator,
@@ -142,10 +143,31 @@ export const updateAudioRun = mutation({
 	},
 });
 
-/** Save user edits to the guided script. */
+/** Show a script revision in the <i/n> switcher (also what takes use). */
+export const selectAudioScriptRevision = mutation({
+	args: {
+		runId: v.id("audioRuns"),
+		revisionIndex: v.number(),
+	},
+	returns: v.null(),
+	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
+		const run = await requireRun(ctx, args.runId);
+		assertNotBusy(run);
+		requireRevision(run.scriptRevisions, args.revisionIndex);
+		await ctx.db.patch(args.runId, {
+			activeScriptRevisionIndex: args.revisionIndex,
+			updatedAt: Date.now(),
+		});
+		return null;
+	},
+});
+
+/** Save user edits to one script revision (the next revise sees them). */
 export const updateAudioScript = mutation({
 	args: {
 		runId: v.id("audioRuns"),
+		revisionIndex: v.number(),
 		script: audioScriptValidator,
 	},
 	returns: v.null(),
@@ -153,9 +175,10 @@ export const updateAudioScript = mutation({
 		await requireAdmin(ctx);
 		const run = await requireRun(ctx, args.runId);
 		assertNotBusy(run);
-		if (run.mode !== "guided") {
+		if (run.mode !== "guided" || !run.scriptRevisions) {
 			throw new Error("Only guided runs have a script.");
 		}
+		const revision = requireRevision(run.scriptRevisions, args.revisionIndex);
 		const title = args.script.title.trim();
 		const styleDirection = args.script.styleDirection.trim();
 		const lyrics = args.script.lyrics.trim();
@@ -166,12 +189,15 @@ export const updateAudioScript = mutation({
 			throw new Error("Script is too long.");
 		}
 		await ctx.db.patch(args.runId, {
-			script: {
-				title: title.slice(0, 200),
-				styleDirection,
-				lyrics,
-				pronunciationNotes: args.script.pronunciationNotes?.trim() || undefined,
-			},
+			scriptRevisions: replaceRevision(run.scriptRevisions, args.revisionIndex, {
+				...revision,
+				script: {
+					title: title.slice(0, 200),
+					styleDirection,
+					lyrics,
+					pronunciationNotes: args.script.pronunciationNotes?.trim() || undefined,
+				},
+			}),
 			updatedAt: Date.now(),
 		});
 		return null;

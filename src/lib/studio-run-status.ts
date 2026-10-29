@@ -1,4 +1,10 @@
-export type StudioBusyStage = "planning" | "image" | "upload" | "video" | null;
+export type StudioBusyStage =
+	| "planning"
+	| "revising"
+	| "image"
+	| "upload"
+	| "video"
+	| null;
 
 export type StudioRunStatus =
 	| "draft"
@@ -124,6 +130,11 @@ export function busyStageCopy(busyStage: Exclude<StudioBusyStage, null>) {
 				title: "Planning",
 				detail: "Writing image prompt and video scenes…",
 			};
+		case "revising":
+			return {
+				title: "Revising plan",
+				detail: "Applying your changes to the plan…",
+			};
 		case "image":
 			return {
 				title: "Generating image",
@@ -186,7 +197,11 @@ export function pipelineProgress(args: {
 	busyStage?: StudioBusyStage;
 }): { value: number; stepIndex: number } {
 	const { status, busyStage } = args;
-	if (busyStage === "planning" || status === "planning") {
+	if (
+		busyStage === "planning" ||
+		busyStage === "revising" ||
+		status === "planning"
+	) {
 		return { value: 18, stepIndex: 0 };
 	}
 	if (status === "plan_ready") {

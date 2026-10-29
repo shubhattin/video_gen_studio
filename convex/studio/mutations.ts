@@ -6,6 +6,7 @@ import {
 	type MutationCtx,
 } from "../_generated/server";
 import { requireAdmin } from "../lib/auth";
+import { replaceRevision, requireRevision } from "../lib/revisions";
 import {
 	VIDEO_MODEL_IDS,
 	type VideoModelId,
@@ -386,11 +387,38 @@ export const updatePlanConfig = mutation({
 	},
 });
 
-/** Edit a generated plan's prompts (requires generated content). */
+/** Show a revision in the plan's <i/n> switcher (also what generation uses). */
+export const selectPlanRevision = mutation({
+	args: {
+		runId: v.id("generationRuns"),
+		planId: v.id("shlokaPlans"),
+		revisionIndex: v.number(),
+	},
+	returns: v.null(),
+	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
+		const plan = await ctx.db.get(args.planId);
+		if (!plan || plan.runId !== args.runId) {
+			throw new Error("Plan not found for this run.");
+		}
+		if (plan.status === "planning") {
+			throw new Error("Wait for the plan to finish before switching revisions.");
+		}
+		requireRevision(plan.revisions, args.revisionIndex);
+		await ctx.db.patch(args.planId, {
+			activeRevisionIndex: args.revisionIndex,
+			updatedAt: Date.now(),
+		});
+		return null;
+	},
+});
+
+/** Edit one revision's prompts (the next revise sees these edits). */
 export const updatePlanContent = mutation({
 	args: {
 		runId: v.id("generationRuns"),
 		planId: v.id("shlokaPlans"),
+		revisionIndex: v.number(),
 		imagePrompt: v.optional(v.string()),
 		videoScenes: v.optional(v.array(videoSceneValidator)),
 		generalVideoInstructions: v.optional(v.string()),
@@ -398,20 +426,15 @@ export const updatePlanContent = mutation({
 	returns: v.null(),
 	handler: async (ctx, args) => {
 		await requireAdmin(ctx);
-		const [run, plan] = await Promise.all([
-			ctx.db.get(args.runId),
-			ctx.db.get(args.planId),
-		]);
-		if (!run) {
-			throw new Error("Run not found.");
-		}
+		const plan = await ctx.db.get(args.planId);
 		if (!plan || plan.runId !== args.runId) {
 			throw new Error("Plan not found for this run.");
 		}
-		if (plan.status !== "ready") {
+		if (plan.status !== "ready" || !plan.revisions) {
 			throw new Error("Generate the plan before editing its content.");
 		}
-		let imagePrompt = plan.imagePrompt;
+		const revision = requireRevision(plan.revisions, args.revisionIndex);
+		let imagePrompt = revision.imagePrompt;
 		if (args.imagePrompt !== undefined) {
 			const trimmed = args.imagePrompt.trim();
 			if (trimmed.length < 20) {
@@ -419,39 +442,41 @@ export const updatePlanContent = mutation({
 			}
 			imagePrompt = trimmed;
 		}
-		let videoScenes = plan.videoScenes;
+		let videoScenes = revision.videoScenes;
 		if (args.videoScenes !== undefined) {
 			if (args.videoScenes.length < 1 || args.videoScenes.length > 12) {
 				throw new Error("Video plan must include between 1 and 12 scenes.");
 			}
 			videoScenes = normalizeVideoScenes(args.videoScenes);
 		}
-		let generalVideoInstructions = plan.generalVideoInstructions;
+		let generalVideoInstructions = revision.generalVideoInstructions;
 		if (args.generalVideoInstructions !== undefined) {
-			const trimmed = args.generalVideoInstructions.trim();
-			generalVideoInstructions = trimmed || undefined;
+			generalVideoInstructions = args.generalVideoInstructions.trim() || undefined;
 		}
 		const promptSourceChanged =
 			args.videoScenes !== undefined ||
 			args.generalVideoInstructions !== undefined;
 		await ctx.db.patch(args.planId, {
-			imagePrompt,
-			videoScenes,
-			generalVideoInstructions,
-			...(promptSourceChanged
-				? {
-						// Prompt source changed — invalidate the Luna summary cache.
-						summarizedVideoPrompt: undefined,
-						videoPromptSourceHash: undefined,
-					}
-				: {}),
+			revisions: replaceRevision(plan.revisions, args.revisionIndex, {
+				...revision,
+				imagePrompt,
+				videoScenes,
+				generalVideoInstructions,
+				...(promptSourceChanged
+					? {
+							// Prompt source changed — invalidate the Luna summary cache.
+							summarizedVideoPrompt: undefined,
+							videoPromptSourceHash: undefined,
+						}
+					: {}),
+			}),
 			updatedAt: Date.now(),
 		});
 		if (promptSourceChanged) {
 			await ctx.scheduler.runAfter(
 				0,
 				internal.studio.actions.refreshPlanPromptSummary,
-				{ planId: args.planId },
+				{ planId: args.planId, revisionIndex: args.revisionIndex },
 			);
 		}
 		return null;

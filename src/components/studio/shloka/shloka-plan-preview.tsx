@@ -41,6 +41,10 @@ type ShlokaPlanPreviewProps = {
 	disabled?: boolean;
 	/** Extra actions (e.g. "Regenerate plan") rendered first in the header row. */
 	actions?: ReactNode;
+	/** Revision stepper, right-aligned in the header row. */
+	revisionSwitcher?: ReactNode;
+	/** What produced the shown revision, under the header row. */
+	revisionNote?: ReactNode;
 	onSaveImagePrompt?: (imagePrompt: string) => Promise<void> | void;
 	onSaveVideoScenes?: (videoScenes: VideoScene[]) => Promise<void> | void;
 	onSaveGeneralVideoInstructions?: (
@@ -329,6 +333,8 @@ export function ShlokaPlanPreview({
 	summarizedVideoPrompt,
 	disabled,
 	actions,
+	revisionSwitcher,
+	revisionNote,
 	onSaveImagePrompt,
 	onSaveVideoScenes,
 	onSaveGeneralVideoInstructions,
@@ -460,7 +466,9 @@ export function ShlokaPlanPreview({
 						</Popover>
 					) : null}
 				</div>
+				{revisionSwitcher}
 			</div>
+			{revisionNote}
 
 			<Tabs
 				value={activeTab}

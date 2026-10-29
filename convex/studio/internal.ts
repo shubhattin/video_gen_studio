@@ -12,6 +12,11 @@ import {
 	videoParamsValidator,
 	videoSceneValidator,
 } from "../schema";
+import {
+	assertCanAddRevision,
+	replaceRevision,
+	requireRevision,
+} from "../lib/revisions";
 import { uniqueIds } from "./media";
 
 async function scheduleObjectDeletes(
@@ -53,6 +58,7 @@ export const createVideoJobRecord = internalMutation({
 		errorMessage: v.optional(v.string()),
 		runId: v.optional(v.id("generationRuns")),
 		planId: v.optional(v.id("shlokaPlans")),
+		planRevisionIndex: v.optional(v.number()),
 		modelStudioRunId: v.optional(v.id("modelStudioRuns")),
 		videoParams: videoParamsValidator,
 		videoPrompt: v.optional(v.string()),
@@ -69,6 +75,7 @@ export const createVideoJobRecord = internalMutation({
 			errorMessage: args.errorMessage,
 			runId: args.runId,
 			planId: args.planId,
+			planRevisionIndex: args.planRevisionIndex,
 			modelStudioRunId: args.modelStudioRunId,
 			videoParams: args.videoParams,
 			videoPrompt: args.videoPrompt,
@@ -183,54 +190,71 @@ export const setPlanStatus = internalMutation({
 });
 
 /**
- * Overwrite a plan's generated content (generate / regenerate semantics),
- * snapshot the config it was generated with, and reset the summary cache.
+ * Commit a planner turn. Without parentIndex this is generate / regenerate:
+ * every revision is replaced by a single root (fresh conversation). With
+ * parentIndex it is a revise: the turn is appended and becomes active.
  */
-export const commitPlanContent = internalMutation({
+export const commitPlanRevision = internalMutation({
 	args: {
 		planId: v.id("shlokaPlans"),
+		parentIndex: v.optional(v.number()),
+		revisionPrompt: v.optional(v.string()),
+		userMessage: v.string(),
 		imagePrompt: v.string(),
 		videoScenes: v.array(videoSceneValidator),
 		generalVideoInstructions: v.optional(v.string()),
-		expectedIdealVideoDuration: v.optional(v.union(v.number(), v.null())),
+		expectedIdealVideoDuration: v.optional(v.number()),
 		plannerModel: v.string(),
 		plannerReasoning: v.string(),
-		/** Resolved prompt text actually sent to the planner. */
+		/** Root only: resolved system prompt the conversation runs on. */
 		plannerSystemPrompt: v.optional(v.string()),
 		plannerSystemPromptTemplateId: v.optional(v.id("systemPromptTemplates")),
 		lastModelParamsUsed: lastModelParamsUsedValidator,
 		warnings: v.optional(v.array(v.string())),
 	},
-	returns: v.null(),
+	returns: v.number(),
 	handler: async (ctx, args) => {
 		const plan = await ctx.db.get(args.planId);
 		if (!plan) {
 			throw new Error("Plan not found.");
 		}
 		const now = Date.now();
-		const generalVideoInstructions = args.generalVideoInstructions?.trim();
-		const expectedIdealVideoDuration =
-			args.expectedIdealVideoDuration == null
-				? undefined
-				: args.expectedIdealVideoDuration;
-		await ctx.db.patch(args.planId, {
-			status: "ready",
+		const revision = {
+			parentIndex: args.parentIndex,
+			revisionPrompt: args.revisionPrompt,
+			userMessage: args.userMessage,
 			imagePrompt: args.imagePrompt,
 			videoScenes: args.videoScenes,
-			generalVideoInstructions: generalVideoInstructions || undefined,
-			expectedIdealVideoDuration,
-			plannerSystemPrompt: args.plannerSystemPrompt,
-			plannerSystemPromptTemplateId: args.plannerSystemPromptTemplateId,
+			generalVideoInstructions: args.generalVideoInstructions?.trim() || undefined,
+			expectedIdealVideoDuration: args.expectedIdealVideoDuration,
+			lastModelParamsUsed: args.lastModelParamsUsed,
 			plannerModel: args.plannerModel,
 			plannerReasoning: args.plannerReasoning,
+			createdAt: now,
+		};
+		const isRevise = args.parentIndex !== undefined;
+		const existing = plan.revisions ?? [];
+		if (isRevise) {
+			requireRevision(existing, args.parentIndex!);
+			assertCanAddRevision(existing);
+		}
+		const revisions = isRevise ? [...existing, revision] : [revision];
+		const revisionIndex = revisions.length - 1;
+		await ctx.db.patch(args.planId, {
+			status: "ready",
+			revisions,
+			activeRevisionIndex: revisionIndex,
+			...(isRevise
+				? {}
+				: {
+						plannerSystemPrompt: args.plannerSystemPrompt,
+						plannerSystemPromptTemplateId: args.plannerSystemPromptTemplateId,
+					}),
 			videoParams: {
 				...plan.videoParams,
 				durationSeconds: args.lastModelParamsUsed.durationSeconds,
 				generateDuration: args.lastModelParamsUsed.generateDuration,
 			},
-			lastModelParamsUsed: args.lastModelParamsUsed,
-			summarizedVideoPrompt: undefined,
-			videoPromptSourceHash: undefined,
 			warnings: args.warnings,
 			lastError: undefined,
 			updatedAt: now,
@@ -243,45 +267,42 @@ export const commitPlanContent = internalMutation({
 		await ctx.scheduler.runAfter(
 			0,
 			internal.studio.actions.refreshPlanPromptSummary,
-			{ planId: args.planId },
+			{ planId: args.planId, revisionIndex },
 		);
-		return null;
+		return revisionIndex;
 	},
 });
 
+/**
+ * Patch one revision's Luna summary cache. Pass no summary to clear it
+ * (prompt under limit, or its source changed).
+ */
 export const setPlanPromptSummaryCache = internalMutation({
 	args: {
 		planId: v.id("shlokaPlans"),
-		sourceHash: v.string(),
+		revisionIndex: v.number(),
+		sourceHash: v.optional(v.string()),
 		summarizedVideoPrompt: v.optional(v.string()),
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
 		const plan = await ctx.db.get(args.planId);
-		if (!plan) {
+		const revision = plan?.revisions?.[args.revisionIndex];
+		if (!plan?.revisions || !revision) {
 			return null;
 		}
-		await ctx.db.patch(args.planId, {
+		if (
+			revision.videoPromptSourceHash === args.sourceHash &&
+			revision.summarizedVideoPrompt === args.summarizedVideoPrompt
+		) {
+			return null;
+		}
+		const revisions = replaceRevision(plan.revisions, args.revisionIndex, {
+			...revision,
 			videoPromptSourceHash: args.sourceHash,
 			summarizedVideoPrompt: args.summarizedVideoPrompt,
-			updatedAt: Date.now(),
 		});
-		return null;
-	},
-});
-
-/** Clear stale summary when the prompt is under limit or its source changed. */
-export const clearPlanPromptSummary = internalMutation({
-	args: {
-		planId: v.id("shlokaPlans"),
-	},
-	returns: v.null(),
-	handler: async (ctx, args) => {
-		await ctx.db.patch(args.planId, {
-			summarizedVideoPrompt: undefined,
-			videoPromptSourceHash: undefined,
-			updatedAt: Date.now(),
-		});
+		await ctx.db.patch(args.planId, { revisions, updatedAt: Date.now() });
 		return null;
 	},
 });
@@ -505,6 +526,7 @@ export const insertGalleryVideo = internalMutation({
 	args: {
 		runId: v.optional(v.id("generationRuns")),
 		planId: v.optional(v.id("shlokaPlans")),
+		planRevisionIndex: v.optional(v.number()),
 		modelStudioRunId: v.optional(v.id("modelStudioRuns")),
 		video: galleryVideoInsertValidator,
 		warnings: v.optional(v.array(v.string())),
@@ -576,6 +598,7 @@ export const insertGalleryVideo = internalMutation({
 			videoPrompt: args.video.videoPrompt,
 			warnings: args.video.warnings,
 			sourceRunId: args.runId,
+			planRevisionIndex: args.planRevisionIndex,
 			createdAt: args.video.createdAt,
 		});
 

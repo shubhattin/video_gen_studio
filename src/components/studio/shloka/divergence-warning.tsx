@@ -1,4 +1,5 @@
 import { Info, TriangleAlert } from "lucide-react";
+import { PlanRegenerateNotice } from "#/components/studio/shloka/plan-regenerate-notice";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -26,16 +27,19 @@ export type DivergenceField = {
 
 /**
  * Amber warning shown when the plan's current video config has diverged from
- * the config it was generated with. Generation keeps using the original
- * settings until the plan is regenerated — the popover explains this.
+ * the config its shown revision was generated with. Generation keeps using
+ * the original settings until the plan is revised or regenerated — the
+ * popover explains this.
  */
 export function DivergenceWarning({
 	fields,
+	revisionCount,
 	onRegenerate,
 	className,
 }: {
 	/** Differing fields to enumerate in the popover. */
 	fields: DivergenceField[];
+	revisionCount: number;
 	onRegenerate?: () => void;
 	className?: string;
 }) {
@@ -54,7 +58,8 @@ export function DivergenceWarning({
 			<TriangleAlert className="size-4 shrink-0" />
 			<p className="min-w-0 flex-1">
 				Video settings have diverged from this plan ({summary}). Generation
-				still uses the plan’s original settings until you regenerate the plan.
+				still uses the plan’s original settings until you revise or regenerate
+				the plan.
 			</p>
 			{onRegenerate ? (
 				<AlertDialog>
@@ -77,6 +82,7 @@ export function DivergenceWarning({
 								scenes using your current settings. This cannot be undone.
 							</AlertDialogDescription>
 						</AlertDialogHeader>
+						<PlanRegenerateNotice revisionCount={revisionCount} />
 						<AlertDialogFooter>
 							<AlertDialogCancel>Cancel</AlertDialogCancel>
 							<AlertDialogAction onClick={onRegenerate}>
@@ -119,8 +125,8 @@ export function DivergenceWarning({
 						))}
 					</ul>
 					<p className="mt-2 text-muted-foreground">
-						Your current changes will be used the next time you regenerate the
-						plan.
+						Your current changes will be used the next time you revise or
+						regenerate the plan.
 					</p>
 				</PopoverContent>
 			</Popover>

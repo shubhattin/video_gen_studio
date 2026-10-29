@@ -1,6 +1,7 @@
 "use node";
 
-import { generateImage, generateText, Output } from "ai";
+import { generateImage, generateText, type ModelMessage, Output } from "ai";
+import type { FunctionReturnType } from "convex/server";
 import { v } from "convex/values";
 import Handlebars from "handlebars";
 import { internal } from "../_generated/api";
@@ -40,8 +41,16 @@ import {
 	videoParamsSchema,
 	type ImageConfig,
 	type LastModelParamsUsed,
+	type NormalPlannerOutput,
 	type VideoParams,
 } from "../lib/schemas";
+import {
+	assertCanAddRevision,
+	buildRevisionUserMessage,
+	cleanRevisionPrompt,
+	requireRevision,
+	revisionChain,
+} from "../lib/revisions";
 import { buildShlokaPlannerSystemPrompt } from "../lib/plannerPrompt";
 import {
 	buildVideoPromptFromScenes,
@@ -125,6 +134,7 @@ async function resolveProviderVideoPrompt(
 	ctx: ActionCtx,
 	args: {
 		planId: Id<"shlokaPlans">;
+		revisionIndex: number;
 		fullPrompt: string;
 		maxPromptChars: number;
 		cachedSummary?: string;
@@ -134,8 +144,9 @@ async function resolveProviderVideoPrompt(
 	const full = args.fullPrompt.trim();
 	const sourceHash = hashVideoPromptSource(full);
 	if (full.length <= args.maxPromptChars) {
-		await ctx.runMutation(internal.studio.internal.clearPlanPromptSummary, {
+		await ctx.runMutation(internal.studio.internal.setPlanPromptSummaryCache, {
 			planId: args.planId,
+			revisionIndex: args.revisionIndex,
 		});
 		return { prompt: full, usedSummary: false };
 	}
@@ -154,6 +165,7 @@ async function resolveProviderVideoPrompt(
 	);
 	await ctx.runMutation(internal.studio.internal.setPlanPromptSummaryCache, {
 		planId: args.planId,
+		revisionIndex: args.revisionIndex,
 		sourceHash,
 		summarizedVideoPrompt: summarized,
 	});
@@ -196,6 +208,7 @@ async function signedReadUrl(objectKey: string) {
 type VideoJobTarget = {
 	runId?: Id<"generationRuns">;
 	planId?: Id<"shlokaPlans">;
+	planRevisionIndex?: number;
 	modelStudioRunId?: Id<"modelStudioRuns">;
 };
 
@@ -265,6 +278,7 @@ async function completeVideoJob(
 	await ctx.runMutation(internal.studio.internal.insertGalleryVideo, {
 		runId: args.target.runId,
 		planId: args.target.planId,
+		planRevisionIndex: args.target.planRevisionIndex,
 		modelStudioRunId: args.target.modelStudioRunId,
 		video: {
 			objectKey,
@@ -366,11 +380,290 @@ async function failVideoJob(
 
 // ── Shloka planning ─────────────────────────────────────────────────────
 
+type PlanRevision = NonNullable<Doc<"shlokaPlans">["revisions"]>[number];
+
+type PlannerTurn =
+	| { kind: "regenerate" }
+	| { kind: "revise"; baseIndex: number; request: string };
+
+/** A revision as the assistant turn the planner would have returned. */
+function revisionAsPlannerOutput(revision: PlanRevision): NormalPlannerOutput {
+	return {
+		kind: "single-clip",
+		expectedIdealVideoDuration: revision.expectedIdealVideoDuration ?? null,
+		imagePrompt: revision.imagePrompt,
+		videoScenes: normalizeVideoScenes(revision.videoScenes).map((scene) => ({
+			...scene,
+			audio: scene.audio ?? null,
+		})),
+		generalVideoInstructions: revision.generalVideoInstructions ?? "",
+	};
+}
+
+/** Planner budget + prompt knobs derived from a plan's current config. */
+function plannerSettings(videoParams: Doc<"shlokaPlans">["videoParams"]) {
+	const generateDuration = videoParams.generateDuration === true;
+	const { budget, modelId } = planBudgetFromConfig({
+		...videoParams,
+		generateDuration,
+	});
+	const profile = MODEL_CAPABILITY_PROFILES[modelId];
+	return {
+		budget,
+		modelId,
+		generateDuration,
+		maxDurationSeconds: Math.max(...profile.supportedDurations),
+		// Audio planning only when the model can generate audio AND the user
+		// turned it on for this plan.
+		generateAudio: Boolean(budget.generateAudio) && profile.supportsAudio,
+	};
+}
+
+/** Restated constraints for a revise turn (mirrors the base prompt's block). */
+function revisionConstraints(settings: ReturnType<typeof plannerSettings>) {
+	const { budget } = settings;
+	return [
+		`Aspect ratio: ${budget.aspectRatio}`,
+		settings.generateDuration
+			? `Target video length: your choice, at most ${settings.maxDurationSeconds} seconds. Return it as expectedIdealVideoDuration and size the scene count to it.`
+			: `Target video length: ${budget.durationSeconds} seconds. Set expectedIdealVideoDuration to null.`,
+		`Provider video prompt character limit: ${budget.maxPromptChars}`,
+		`Generate Audio Plans: ${settings.generateAudio ? "Yes" : "No"}`,
+	];
+}
+
+/**
+ * One planner turn. Regenerate starts a fresh conversation from the run's
+ * current shloka, instructions, and template. Revise continues the
+ * conversation that produced `baseIndex` (derived from the revision chain,
+ * with edited content as the assistant turns) and appends the result.
+ */
+async function runPlannerTurn(
+	ctx: ActionCtx,
+	args: {
+		runId: Id<"generationRuns">;
+		planId: Id<"shlokaPlans">;
+		turn: PlannerTurn;
+	},
+): Promise<void> {
+	const run = await ctx.runQuery(internal.studio.queries.getRunDoc, {
+		runId: args.runId,
+	});
+	if (!run) {
+		throw new Error("Run not found.");
+	}
+	const plan = (await ctx.runQuery(internal.studio.queries.getPlanDoc, {
+		planId: args.planId,
+	})) as Doc<"shlokaPlans"> | null;
+	if (!plan || plan.runId !== args.runId) {
+		throw new Error("Plan not found for this run.");
+	}
+	const revisions = plan.revisions ?? [];
+	const { turn } = args;
+	if (turn.kind === "revise") {
+		if (plan.status !== "ready") {
+			throw new Error("Wait for the plan to finish before revising it.");
+		}
+		requireRevision(revisions, turn.baseIndex);
+		assertCanAddRevision(revisions);
+	} else {
+		if (!run.shlokaText?.trim()) {
+			throw new Error("Shloka text is required before planning.");
+		}
+		if (!run.plannerPromptSelection) {
+			throw new Error("Select a system prompt template before planning.");
+		}
+	}
+	// No idempotency short-circuit for regenerate: it is explicitly confirmed
+	// in the UI, so an already-"ready" plan is always overwritten. The action
+	// also re-establishes the "planning" status so progress UI updates.
+	const previousRunStatus = run.status;
+	const planHasContent = revisions.length > 0;
+
+	await ctx.runMutation(internal.studio.internal.setPlanStatus, {
+		planId: args.planId,
+		status: "planning",
+	});
+	await ctx.runMutation(internal.studio.internal.setRunStatus, {
+		runId: args.runId,
+		status: "planning",
+	});
+
+	try {
+		const settings = plannerSettings(plan.videoParams);
+		const { budget, modelId, generateDuration } = settings;
+		// Base (root) user turn for a config snapshot.
+		const basePromptFor = (used: LastModelParamsUsed) => {
+			const usedSettings = plannerSettings(used);
+			return buildPlannerPrompt({
+				shlokaText: run.shlokaText ?? "",
+				customInstructions: run.customInstructions,
+				generateDuration: usedSettings.generateDuration,
+				maxDurationSeconds: usedSettings.maxDurationSeconds,
+				durationSeconds: used.durationSeconds,
+				maxPromptChars: used.maxPromptChars,
+				aspectRatio: used.aspectRatio,
+				generateAudio: usedSettings.generateAudio,
+			});
+		};
+
+		let systemPrompt: string;
+		let resolvedPrompt:
+			| FunctionReturnType<
+					typeof internal.studio.queries.resolvePlannerPromptSelectionForRun
+			  >
+			| undefined;
+		let userMessage: string;
+		const history: ModelMessage[] = [];
+		if (turn.kind === "regenerate") {
+			resolvedPrompt = await ctx.runQuery(
+				internal.studio.queries.resolvePlannerPromptSelectionForRun,
+				{ selection: run.plannerPromptSelection! },
+			);
+			systemPrompt = resolvedPrompt.content;
+			userMessage = basePromptFor(budget);
+		} else {
+			// The conversation keeps the system prompt it started with.
+			systemPrompt = plan.plannerSystemPrompt ?? "";
+			for (const index of revisionChain(revisions, turn.baseIndex)) {
+				const revision = revisions[index]!;
+				history.push(
+					{
+						role: "user",
+						// Migrated roots have no stored turn — re-render it.
+						content:
+							revision.userMessage ??
+							basePromptFor(revision.lastModelParamsUsed),
+					},
+					{
+						role: "assistant",
+						content: JSON.stringify(revisionAsPlannerOutput(revision)),
+					},
+				);
+			}
+			userMessage = buildRevisionUserMessage({
+				request: turn.request,
+				subject: "plan",
+				constraints: revisionConstraints(settings),
+			});
+		}
+
+		const result = await withTimeout(
+			generateText({
+				model: openRouterChatModel(PLANNER_MODEL_ID, LLM_REASONING_LEVEL),
+				instructions: buildShlokaPlannerSystemPrompt({ stored: systemPrompt }),
+				messages: [...history, { role: "user", content: userMessage }],
+				output: Output.object({ schema: normalPlannerOutputSchema }),
+			}),
+			PLANNER_TIMEOUT_MS,
+			turn.kind === "revise" ? "Plan revision" : "Plan generation",
+		);
+		const planOutput = result.output;
+		const warnings = warningMessages(result.warnings ?? []);
+		const videoScenes = normalizeVideoScenes(planOutput.videoScenes);
+
+		let durationSeconds = budget.durationSeconds;
+		let expectedIdealVideoDuration: number | undefined;
+		if (generateDuration) {
+			const chosen = planOutput.expectedIdealVideoDuration;
+			if (chosen != null && Number.isFinite(chosen)) {
+				durationSeconds = snapDurationToSupported(
+					chosen,
+					MODEL_CAPABILITY_PROFILES[modelId].supportedDurations,
+				);
+				expectedIdealVideoDuration = durationSeconds;
+			} else {
+				warnings.push(
+					"Planner did not return a duration; using the stored clip length.",
+				);
+			}
+		}
+
+		await ctx.runMutation(internal.studio.internal.commitPlanRevision, {
+			planId: args.planId,
+			parentIndex: turn.kind === "revise" ? turn.baseIndex : undefined,
+			revisionPrompt: turn.kind === "revise" ? turn.request : undefined,
+			userMessage,
+			imagePrompt: planOutput.imagePrompt,
+			videoScenes,
+			generalVideoInstructions: planOutput.generalVideoInstructions,
+			expectedIdealVideoDuration,
+			plannerModel: PLANNER_MODEL_ID,
+			plannerReasoning: "medium",
+			plannerSystemPrompt: resolvedPrompt?.content,
+			plannerSystemPromptTemplateId:
+				resolvedPrompt?.source === "template"
+					? resolvedPrompt.templateId
+					: undefined,
+			lastModelParamsUsed: {
+				...budget,
+				durationSeconds,
+				generateDuration,
+			},
+			warnings: warnings.length > 0 ? warnings : undefined,
+		});
+	} catch (error) {
+		const message = error instanceof Error ? error.message : "Planning failed.";
+		await ctx.runMutation(internal.studio.internal.setPlanStatus, {
+			planId: args.planId,
+			status: planHasContent ? "ready" : "draft",
+			lastError: message,
+		});
+		await ctx.runMutation(internal.studio.internal.setRunStatus, {
+			runId: args.runId,
+			status: restoredRunStatus(previousRunStatus, planHasContent),
+			lastError: message,
+		});
+		throw error;
+	}
+}
+
+/** Generate / regenerate: replaces every revision with a fresh root. */
 export const planShlokaRun = action({
 	args: {
 		runId: v.id("generationRuns"),
 		planId: v.id("shlokaPlans"),
-		force: v.optional(v.boolean()),
+	},
+	returns: v.null(),
+	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
+		await runPlannerTurn(ctx, { ...args, turn: { kind: "regenerate" } });
+		return null;
+	},
+});
+
+/** Revise `baseRevisionIndex` with a follow-up instruction; appends a revision. */
+export const revisePlan = action({
+	args: {
+		runId: v.id("generationRuns"),
+		planId: v.id("shlokaPlans"),
+		baseRevisionIndex: v.number(),
+		prompt: v.string(),
+	},
+	returns: v.null(),
+	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
+		await runPlannerTurn(ctx, {
+			runId: args.runId,
+			planId: args.planId,
+			turn: {
+				kind: "revise",
+				baseIndex: args.baseRevisionIndex,
+				request: cleanRevisionPrompt(args.prompt),
+			},
+		});
+		return null;
+	},
+});
+
+// ── Reference image (shloka run) ────────────────────────────────────────
+
+export const generateReferenceImage = action({
+	args: {
+		runId: v.id("generationRuns"),
+		/** Plan + revision whose image prompt is shown to the user. */
+		planId: v.id("shlokaPlans"),
+		revisionIndex: v.number(),
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
@@ -387,150 +680,7 @@ export const planShlokaRun = action({
 		if (!plan || plan.runId !== args.runId) {
 			throw new Error("Plan not found for this run.");
 		}
-		if (!run.shlokaText?.trim()) {
-			throw new Error("Shloka text is required before planning.");
-		}
-		if (!run.plannerPromptSelection) {
-			throw new Error("Select a system prompt template before planning.");
-		}
-		// No idempotency short-circuit here: regeneration is explicitly
-		// confirmed in the UI, so an already-"ready" plan is always overwritten
-		// (image prompt + scenes + lastModelParamsUsed). The action also
-		// re-establishes the "planning" status so progress UI updates.
-		const previousRunStatus = run.status;
-		const planHasContent = Boolean(
-			plan.imagePrompt?.trim() || plan.videoScenes?.length,
-		);
-
-		await ctx.runMutation(internal.studio.internal.setPlanStatus, {
-			planId: args.planId,
-			status: "planning",
-		});
-		await ctx.runMutation(internal.studio.internal.setRunStatus, {
-			runId: args.runId,
-			status: "planning",
-		});
-
-		try {
-			const resolvedPrompt = await ctx.runQuery(
-				internal.studio.queries.resolvePlannerPromptSelectionForRun,
-				{ selection: run.plannerPromptSelection },
-			);
-			const generateDuration = plan.videoParams.generateDuration === true;
-			const { budget, modelId } = planBudgetFromConfig({
-				...plan.videoParams,
-				generateDuration,
-			});
-			// Audio planning only when the model can generate audio AND the
-			// user turned it on for this plan.
-			const generateAudio =
-				Boolean(budget.generateAudio) &&
-				Boolean(MODEL_CAPABILITY_PROFILES[modelId]?.supportsAudio);
-
-			const result = await withTimeout(
-				generateText({
-					model: openRouterChatModel(PLANNER_MODEL_ID, LLM_REASONING_LEVEL),
-					instructions: buildShlokaPlannerSystemPrompt({
-						stored: resolvedPrompt.content,
-					}),
-					prompt: buildPlannerPrompt({
-						shlokaText: run.shlokaText,
-						customInstructions: run.customInstructions,
-						generateDuration,
-						maxDurationSeconds: generateDuration
-							? Math.max(
-									...MODEL_CAPABILITY_PROFILES[modelId].supportedDurations,
-								)
-							: undefined,
-						durationSeconds: generateDuration
-							? undefined
-							: budget.durationSeconds,
-						maxPromptChars: budget.maxPromptChars,
-						aspectRatio: budget.aspectRatio,
-						generateAudio,
-					}),
-					output: Output.object({ schema: normalPlannerOutputSchema }),
-				}),
-				PLANNER_TIMEOUT_MS,
-				"Plan generation",
-			);
-			const planOutput = result.output;
-			const warnings = warningMessages(result.warnings ?? []);
-			const videoScenes = normalizeVideoScenes(planOutput.videoScenes);
-
-			let durationSeconds = budget.durationSeconds;
-			let expectedIdealVideoDuration: number | undefined;
-			if (generateDuration) {
-				const chosen = planOutput.expectedIdealVideoDuration;
-				if (chosen != null && Number.isFinite(chosen)) {
-					durationSeconds = snapDurationToSupported(
-						chosen,
-						MODEL_CAPABILITY_PROFILES[modelId].supportedDurations,
-					);
-					expectedIdealVideoDuration = durationSeconds;
-				} else {
-					warnings.push(
-						"Planner did not return a duration; using the stored clip length.",
-					);
-				}
-			}
-
-			await ctx.runMutation(internal.studio.internal.commitPlanContent, {
-				planId: args.planId,
-				imagePrompt: planOutput.imagePrompt,
-				videoScenes,
-				generalVideoInstructions: planOutput.generalVideoInstructions,
-				expectedIdealVideoDuration: expectedIdealVideoDuration ?? null,
-				plannerModel: PLANNER_MODEL_ID,
-				plannerReasoning: "medium",
-				plannerSystemPrompt: resolvedPrompt.content,
-				plannerSystemPromptTemplateId:
-					resolvedPrompt.source === "template"
-						? resolvedPrompt.templateId
-						: undefined,
-				lastModelParamsUsed: {
-					...budget,
-					durationSeconds,
-					generateDuration,
-				},
-				warnings: warnings.length > 0 ? warnings : undefined,
-			});
-		} catch (error) {
-			const message =
-				error instanceof Error ? error.message : "Planning failed.";
-			await ctx.runMutation(internal.studio.internal.setPlanStatus, {
-				planId: args.planId,
-				status: planHasContent ? "ready" : "draft",
-				lastError: message,
-			});
-			await ctx.runMutation(internal.studio.internal.setRunStatus, {
-				runId: args.runId,
-				status: restoredRunStatus(previousRunStatus, planHasContent),
-				lastError: message,
-			});
-			throw error;
-		}
-
-		return null;
-	},
-});
-
-// ── Reference image (shloka run) ────────────────────────────────────────
-
-export const generateReferenceImage = action({
-	args: {
-		runId: v.id("generationRuns"),
-	},
-	returns: v.null(),
-	handler: async (ctx, args) => {
-		await requireAdmin(ctx);
-		const run = await ctx.runQuery(internal.studio.queries.getRunDoc, {
-			runId: args.runId,
-		});
-		if (!run) {
-			throw new Error("Run not found.");
-		}
-		const imagePrompt = run.activePlan?.imagePrompt?.trim();
+		const imagePrompt = plan.revisions?.[args.revisionIndex]?.imagePrompt.trim();
 		if (!imagePrompt) {
 			throw new Error(
 				"Generate the plan's reference-image prompt before generating an image.",
@@ -597,7 +747,7 @@ export const generateReferenceImage = action({
 				runId: args.runId,
 				status: restoredRunStatus(
 					previousRunStatus,
-					Boolean(run.activePlan?.imagePrompt?.trim()),
+					Boolean(imagePrompt),
 				),
 				lastError: message,
 			});
@@ -614,6 +764,8 @@ export const generateVideoForRun = action({
 	args: {
 		runId: v.id("generationRuns"),
 		planId: v.id("shlokaPlans"),
+		/** Revision the user confirmed in the Generate dialog. */
+		revisionIndex: v.number(),
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
@@ -630,17 +782,13 @@ export const generateVideoForRun = action({
 		if (!plan || plan.runId !== args.runId) {
 			throw new Error("Plan not found for this run.");
 		}
-		if (plan.status !== "ready" || !plan.videoScenes?.length) {
+		if (plan.status !== "ready" || !plan.revisions?.length) {
 			throw new Error("Generate the plan before generating a video.");
 		}
-		// ★ Generation uses the config snapshot from plan-generation time —
-		// NOT the user's current edits (those apply after regeneration).
-		const used = plan.lastModelParamsUsed as LastModelParamsUsed | null;
-		if (!used) {
-			throw new Error(
-				"This plan has no generation config snapshot. Regenerate the plan.",
-			);
-		}
+		const revision = requireRevision(plan.revisions, args.revisionIndex);
+		// ★ Generation uses the revision's config snapshot from planning time —
+		// NOT the user's current edits (those apply on the next revise/regenerate).
+		const used = revision.lastModelParamsUsed;
 		if (!isVideoModelId(used.modelId)) {
 			throw new Error("This plan uses an unsupported video model.");
 		}
@@ -679,15 +827,16 @@ export const generateVideoForRun = action({
 		});
 
 		const fullPrompt = buildVideoPromptFromScenes(
-			plan.videoScenes,
-			plan.generalVideoInstructions,
+			revision.videoScenes,
+			revision.generalVideoInstructions,
 		);
 		const resolved = await resolveProviderVideoPrompt(ctx, {
 			planId: args.planId,
+			revisionIndex: args.revisionIndex,
 			fullPrompt,
 			maxPromptChars: used.maxPromptChars,
-			cachedSummary: plan.summarizedVideoPrompt,
-			cachedHash: plan.videoPromptSourceHash,
+			cachedSummary: revision.summarizedVideoPrompt,
+			cachedHash: revision.videoPromptSourceHash,
 		});
 
 		const firstUrl = first ? await signedReadUrl(first.objectKey) : null;
@@ -727,7 +876,7 @@ export const generateVideoForRun = action({
 			const generationStartedAt = Date.now();
 			const submitted = await submitOpenRouterVideoJob(apiKey, adapted.body);
 			const videoPrompt = videoScenesToMarkdown(
-				normalizeVideoScenes(plan.videoScenes),
+				normalizeVideoScenes(revision.videoScenes),
 			);
 			const jobRecordId = await ctx.runMutation(
 				internal.studio.internal.createVideoJobRecord,
@@ -739,6 +888,7 @@ export const generateVideoForRun = action({
 					errorMessage: submitted.error,
 					runId: args.runId,
 					planId: args.planId,
+					planRevisionIndex: args.revisionIndex,
 					videoParams: parsedParams,
 					videoPrompt,
 					warnings: genWarnings.length > 0 ? genWarnings : undefined,
@@ -763,7 +913,11 @@ export const generateVideoForRun = action({
 				jobRecordId,
 				completed: outcome.job,
 				generationStartedAt,
-				target: { runId: args.runId, planId: args.planId },
+				target: {
+					runId: args.runId,
+					planId: args.planId,
+					planRevisionIndex: args.revisionIndex,
+				},
 				videoParams: parsedParams,
 				videoPrompt,
 				warnings: genWarnings,
@@ -783,29 +937,31 @@ export const generateVideoForRun = action({
 	},
 });
 
-/** Rebuild / refresh the Luna-compressed provider prompt for a plan. */
+/** Rebuild / refresh the Luna-compressed provider prompt for a plan revision. */
 export const refreshPlanPromptSummary = internalAction({
 	args: {
 		planId: v.id("shlokaPlans"),
+		revisionIndex: v.number(),
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
 		const plan = (await ctx.runQuery(internal.studio.queries.getPlanDoc, {
 			planId: args.planId,
 		})) as Doc<"shlokaPlans"> | null;
-		if (!plan?.videoScenes?.length || !plan.lastModelParamsUsed) {
+		const revision = plan?.revisions?.[args.revisionIndex];
+		if (!revision?.videoScenes.length) {
 			return null;
 		}
-		const fullPrompt = buildVideoPromptFromScenes(
-			plan.videoScenes,
-			plan.generalVideoInstructions,
-		);
 		await resolveProviderVideoPrompt(ctx, {
 			planId: args.planId,
-			fullPrompt,
-			maxPromptChars: plan.lastModelParamsUsed.maxPromptChars,
-			cachedSummary: plan.summarizedVideoPrompt,
-			cachedHash: plan.videoPromptSourceHash,
+			revisionIndex: args.revisionIndex,
+			fullPrompt: buildVideoPromptFromScenes(
+				revision.videoScenes,
+				revision.generalVideoInstructions,
+			),
+			maxPromptChars: revision.lastModelParamsUsed.maxPromptChars,
+			cachedSummary: revision.summarizedVideoPrompt,
+			cachedHash: revision.videoPromptSourceHash,
 		});
 		return null;
 	},

@@ -6,6 +6,7 @@ import {
 	audioScriptValidator,
 	mediaMetaValidator,
 } from "../schema";
+import { assertCanAddRevision, requireRevision } from "../lib/revisions";
 
 export const setAudioRunStatus = internalMutation({
 	args: {
@@ -55,14 +56,22 @@ export const setAudioRunTitle = internalMutation({
 	},
 });
 
-/** Overwrite the guided script with fresh scripter output. */
-export const commitAudioScript = internalMutation({
+/**
+ * Commit a scripter turn. Without parentIndex this is write / regenerate:
+ * every revision is replaced by a single root (fresh conversation). With
+ * parentIndex it is a revise: the turn is appended and becomes active.
+ */
+export const commitAudioScriptRevision = internalMutation({
 	args: {
 		runId: v.id("audioRuns"),
+		parentIndex: v.optional(v.number()),
+		revisionPrompt: v.optional(v.string()),
+		userMessage: v.string(),
 		script: audioScriptValidator,
 		scriptParamsUsed: audioParamsValidator,
 		scriptModel: v.string(),
-		scriptSystemPrompt: v.string(),
+		/** Root only: resolved system prompt the conversation runs on. */
+		scriptSystemPrompt: v.optional(v.string()),
 		scriptSystemPromptTemplateId: v.optional(v.id("systemPromptTemplates")),
 		/** Status to settle on (the run's pre-scripting status). */
 		status: audioRunStatusValidator,
@@ -74,16 +83,36 @@ export const commitAudioScript = internalMutation({
 		if (!run) {
 			throw new Error("Audio run not found.");
 		}
-		await ctx.db.patch(args.runId, {
+		const now = Date.now();
+		const revision = {
+			parentIndex: args.parentIndex,
+			revisionPrompt: args.revisionPrompt,
+			userMessage: args.userMessage,
 			script: args.script,
 			scriptParamsUsed: args.scriptParamsUsed,
 			scriptModel: args.scriptModel,
-			scriptSystemPrompt: args.scriptSystemPrompt,
-			scriptSystemPromptTemplateId: args.scriptSystemPromptTemplateId,
+			createdAt: now,
+		};
+		const isRevise = args.parentIndex !== undefined;
+		const existing = run.scriptRevisions ?? [];
+		if (isRevise) {
+			requireRevision(existing, args.parentIndex!);
+			assertCanAddRevision(existing);
+		}
+		const scriptRevisions = isRevise ? [...existing, revision] : [revision];
+		await ctx.db.patch(args.runId, {
+			scriptRevisions,
+			activeScriptRevisionIndex: scriptRevisions.length - 1,
+			...(isRevise
+				? {}
+				: {
+						scriptSystemPrompt: args.scriptSystemPrompt,
+						scriptSystemPromptTemplateId: args.scriptSystemPromptTemplateId,
+					}),
 			status: args.status,
 			warnings: args.warnings,
 			lastError: undefined,
-			updatedAt: Date.now(),
+			updatedAt: now,
 		});
 		return null;
 	},
@@ -97,6 +126,8 @@ export const insertGalleryAudio = internalMutation({
 		meta: mediaMetaValidator,
 		audioParams: audioParamsValidator,
 		prompt: v.string(),
+		/** Guided runs: script revision the take was generated from. */
+		scriptRevisionIndex: v.optional(v.number()),
 		outputText: v.optional(v.string()),
 		referenceImageCount: v.optional(v.number()),
 		openRouterGenerationId: v.optional(v.string()),
@@ -113,6 +144,7 @@ export const insertGalleryAudio = internalMutation({
 			meta: args.meta,
 			audioParams: args.audioParams,
 			prompt: args.prompt,
+			scriptRevisionIndex: args.scriptRevisionIndex,
 			outputText: args.outputText,
 			referenceImageCount: args.referenceImageCount,
 			openRouterGenerationId: args.openRouterGenerationId,

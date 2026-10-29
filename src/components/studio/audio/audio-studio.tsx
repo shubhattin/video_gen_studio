@@ -15,6 +15,13 @@ import {
 	AudioTakeCard,
 	type AudioTakeItem,
 } from "#/components/studio/audio/audio-take-card";
+import { RegenerateNotice } from "#/components/studio/revisions/regenerate-notice";
+import { RevisePopover } from "#/components/studio/revisions/revise-popover";
+import {
+	RevisionNote,
+	RevisionSwitcher,
+	revisionSuffix,
+} from "#/components/studio/revisions/revision-switcher";
 import { AutosaveStatus } from "#/components/studio/shell/autosave-status";
 import { GenerationProgressDock } from "#/components/studio/video/generation-progress-dock";
 import {
@@ -54,7 +61,7 @@ import type {
 import { notifyStudioError, notifyStudioSuccess } from "#/lib/studio-toast";
 import { uploadReferenceImage } from "#/lib/upload-reference-image";
 
-type BusyStage = "script" | "audio" | "upload" | null;
+type BusyStage = "script" | "revise" | "audio" | "upload" | null;
 
 type TextPatch = {
 	prompt?: string;
@@ -112,11 +119,30 @@ export function AudioStudio({ runId }: AudioStudioProps) {
 
 	const updateRun = useMutation(api.audio.mutations.updateAudioRun);
 	const updateScript = useMutation(api.audio.mutations.updateAudioScript);
+	const selectRevision = useMutation(
+		api.audio.mutations.selectAudioScriptRevision,
+	).withOptimisticUpdate((localStore, args) => {
+		const current = localStore.getQuery(api.audio.queries.getAudioRun, {
+			runId: args.runId,
+		});
+		const revision = current?.scriptRevisions[args.revisionIndex];
+		if (!current || !revision) return;
+		localStore.setQuery(
+			api.audio.queries.getAudioRun,
+			{ runId: args.runId },
+			{
+				...current,
+				activeScriptRevisionIndex: args.revisionIndex,
+				activeScriptRevision: revision,
+			},
+		);
+	});
 	const attachImage = useMutation(api.audio.mutations.attachImageToAudioRun);
 	const removeImage = useMutation(
 		api.audio.mutations.removeAudioRunReferenceImage,
 	);
 	const scriptAction = useAction(api.audio.actions.scriptAudioRun);
+	const reviseAction = useAction(api.audio.actions.reviseAudioScript);
 	const generateAction = useAction(api.audio.actions.generateAudioForRun);
 	const prepareUpload = useAction(
 		api.studio.r2.prepareAudioReferenceImageUpload,
@@ -235,20 +261,18 @@ export function AudioStudio({ runId }: AudioStudioProps) {
 	const profile =
 		AUDIO_MODEL_PROFILES[params.modelId as AudioModelId] ??
 		AUDIO_MODEL_PROFILES[DEFAULT_AUDIO_MODEL_ID];
-	const script = run?.script as AudioScript | undefined;
+	const scriptRevisions = run?.scriptRevisions ?? [];
+	const revisionIndex = run?.activeScriptRevisionIndex ?? null;
+	const activeRevision = run?.activeScriptRevision ?? null;
+	const script: AudioScript | undefined = activeRevision?.script;
 	const providerPrompt = useMemo(
 		() => (script ? buildAudioProviderPrompt(script, params) : ""),
 		[script, params],
 	);
 	const divergence = useMemo(
 		() =>
-			script
-				? scriptDivergence(
-						run?.scriptParamsUsed as AudioParams | undefined,
-						params,
-					)
-				: [],
-		[script, run?.scriptParamsUsed, params],
+			script ? scriptDivergence(activeRevision?.scriptParamsUsed, params) : [],
+		[script, activeRevision?.scriptParamsUsed, params],
 	);
 
 	const runBusy = run?.status === "scripting" || run?.status === "generating";
@@ -294,11 +318,43 @@ export function AudioStudio({ runId }: AudioStudioProps) {
 		}
 	};
 
+	const onRevise = async (request: string) => {
+		if (revisionIndex === null) return false;
+		setBusyStage("revise");
+		try {
+			await flushText();
+			await reviseAction({
+				runId,
+				baseRevisionIndex: revisionIndex,
+				prompt: request,
+			});
+			notifyStudioSuccess(
+				"Script revised",
+				`Revision ${scriptRevisions.length + 1} is ready.`,
+			);
+			return true;
+		} catch (error) {
+			notifyStudioError("Revision failed", error);
+			return false;
+		} finally {
+			setBusyStage(null);
+		}
+	};
+
+	const onSelectRevision = (index: number) => {
+		selectRevision({ runId, revisionIndex: index }).catch((error) =>
+			notifyStudioError("Could not switch revision", error),
+		);
+	};
+
 	const onGenerate = async () => {
 		setBusyStage("audio");
 		try {
 			await flushText();
-			await generateAction({ runId });
+			await generateAction({
+				runId,
+				scriptRevisionIndex: guided ? (revisionIndex ?? undefined) : undefined,
+			});
 			notifyStudioSuccess("Audio take saved", "Added to this run.");
 		} catch (error) {
 			notifyStudioError("Audio generation failed", error);
@@ -352,6 +408,11 @@ export function AudioStudio({ runId }: AudioStudioProps) {
 						instructions and settings above. Existing takes are kept.
 					</AlertDialogDescription>
 				</AlertDialogHeader>
+				<RegenerateNotice
+					revisionCount={scriptRevisions.length}
+					reviseLabel="Revise script"
+					freshStart="For a fresh script that keeps this one, start a new Sanskrit Song Studio run."
+				/>
 				<AlertDialogFooter>
 					<AlertDialogCancel>Cancel</AlertDialogCancel>
 					<AlertDialogAction onClick={() => void onWriteScript()}>
@@ -362,7 +423,15 @@ export function AudioStudio({ runId }: AudioStudioProps) {
 		</AlertDialog>
 	);
 
-	const scripting = busyStage === "script" || run.status === "scripting";
+	const revising = busyStage === "revise";
+	const scripting =
+		busyStage === "script" || revising || run.status === "scripting";
+	const scriptSourceLabel =
+		script && revisionIndex !== null
+			? scriptRevisions.length > 1
+				? `${script.title} · revision ${revisionIndex + 1} of ${scriptRevisions.length}`
+				: script.title
+			: undefined;
 	const generating = busyStage === "audio" || run.status === "generating";
 
 	return (
@@ -457,18 +526,61 @@ export function AudioStudio({ runId }: AudioStudioProps) {
 								{divergence.length > 0 ? (
 									<p className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
 										Settings changed since this script was written (
-										{divergence.join(", ")}). Regenerate the script for the best
-										fit, or generate as-is.
+										{divergence.join(", ")}). Revise or regenerate the script
+										for the best fit, or generate as-is.
 									</p>
 								) : null}
 								<AudioScriptPanel
+									// Remount per revision so an open edit never saves onto
+									// a different revision.
+									key={revisionIndex}
 									script={script}
 									providerPrompt={providerPrompt}
 									disabled={anyBusy}
-									actions={regenerateControl}
+									actions={
+										<>
+											{regenerateControl}
+											{revisionIndex !== null ? (
+												<RevisePopover
+													label="Revise script"
+													subject="script"
+													placeholder="e.g. Make it slower and more meditative, and repeat the second pada as the refrain."
+													baseIndex={revisionIndex}
+													revisionCount={scriptRevisions.length}
+													disabled={anyBusy}
+													pending={revising}
+													onSubmit={onRevise}
+												/>
+											) : null}
+										</>
+									}
+									revisionSwitcher={
+										revisionIndex !== null ? (
+											<RevisionSwitcher
+												index={revisionIndex}
+												count={scriptRevisions.length}
+												disabled={anyBusy}
+												onSelect={onSelectRevision}
+											/>
+										) : null
+									}
+									revisionNote={
+										activeRevision && revisionIndex !== null ? (
+											<RevisionNote
+												index={revisionIndex}
+												parentIndex={activeRevision.parentIndex}
+												revisionPrompt={activeRevision.revisionPrompt}
+											/>
+										) : null
+									}
 									onSave={async (next) => {
+										if (revisionIndex === null) return;
 										try {
-											await updateScript({ runId, script: next });
+											await updateScript({
+												runId,
+												revisionIndex,
+												script: next,
+											});
 											notifyStudioSuccess(
 												"Script saved",
 												"New takes will use your edits.",
@@ -554,6 +666,12 @@ export function AudioStudio({ runId }: AudioStudioProps) {
 								? "Settings changed since the script was written — the take uses the current settings with the existing script."
 								: undefined
 						}
+						sourceLabel={guided ? scriptSourceLabel : undefined}
+						triggerLabel={
+							guided && script
+								? `Generate audio — ${script.title}${revisionSuffix(revisionIndex, scriptRevisions.length)}`
+								: undefined
+						}
 						onConfirm={() => void onGenerate()}
 					/>
 					{!canGenerate ? (
@@ -571,6 +689,7 @@ export function AudioStudio({ runId }: AudioStudioProps) {
 									take={take}
 									label={`Take ${takes.length - index}`}
 									isLatest={index === 0}
+									showRevision={scriptRevisions.length > 1}
 									urlPending={Boolean(
 										take.objectKey && pendingKeys.has(take.objectKey),
 									)}
@@ -586,16 +705,20 @@ export function AudioStudio({ runId }: AudioStudioProps) {
 				contextLabel={profile.displayName}
 				pipeline={{
 					visible: scripting || generating || busyStage === "upload",
-					title: scripting
-						? "Writing song script"
-						: busyStage === "upload"
-							? "Uploading"
-							: "Generating audio",
-					detail: scripting
-						? "Opus is composing direction and lyrics…"
-						: busyStage === "upload"
-							? "Saving your reference image…"
-							: "Composing your track — this can take a minute or two…",
+					title: revising
+						? "Revising song script"
+						: scripting
+							? "Writing song script"
+							: busyStage === "upload"
+								? "Uploading"
+								: "Generating audio",
+					detail: revising
+						? "Applying your changes to the script…"
+						: scripting
+							? "Opus is composing direction and lyrics…"
+							: busyStage === "upload"
+								? "Saving your reference image…"
+								: "Composing your track — this can take a minute or two…",
 					value: scripting ? 35 : busyStage === "upload" ? 20 : 80,
 					stepIndex: guided ? (scripting ? 0 : 1) : 0,
 					steps: guided
