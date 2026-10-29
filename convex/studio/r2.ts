@@ -274,6 +274,108 @@ export const finalizeModelStudioReferenceImageUpload = action({
 	},
 });
 
+// ── Audio-run reference image uploads ───────────────────────────────────
+
+const MAX_AUDIO_REFERENCE_IMAGES = 10;
+
+export const prepareAudioReferenceImageUpload = action({
+	args: {
+		runId: v.id("audioRuns"),
+		mimeType: v.string(),
+		bytes: v.optional(v.number()),
+	},
+	returns: v.object({
+		uploadUrl: v.string(),
+		objectKey: v.string(),
+		contentType: v.string(),
+	}),
+	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
+		const run = await ctx.runQuery(internal.audio.queries.getAudioRunDoc, {
+			runId: args.runId,
+		});
+		if (!run) {
+			throw new Error("Run not found.");
+		}
+		if ((run.referenceImageIds?.length ?? 0) >= MAX_AUDIO_REFERENCE_IMAGES) {
+			throw new Error(
+				`Audio runs take at most ${MAX_AUDIO_REFERENCE_IMAGES} reference images.`,
+			);
+		}
+		const mimeType = normalizeMimeType(args.mimeType);
+		if (!ALLOWED_REFERENCE_UPLOAD_MIME_TYPES.has(mimeType)) {
+			throw new Error("Unsupported image type. Use PNG, JPEG, WebP, or GIF.");
+		}
+		if (args.bytes !== undefined && args.bytes > MAX_REFERENCE_UPLOAD_BYTES) {
+			throw new Error("Image is too large. Max size is 20MB.");
+		}
+		const objectKey = buildStudioObjectKey({ kind: "images", mimeType });
+		const uploadUrl = await createPresignedPutUrl({ objectKey, mimeType });
+		return { uploadUrl, objectKey, contentType: mimeType };
+	},
+});
+
+export const finalizeAudioReferenceImageUpload = action({
+	args: {
+		runId: v.id("audioRuns"),
+		objectKey: v.string(),
+		mimeType: v.string(),
+		width: v.optional(v.number()),
+		height: v.optional(v.number()),
+		bytes: v.optional(v.number()),
+	},
+	returns: v.object({
+		imageId: v.id("galleryImages"),
+	}),
+	handler: async (ctx, args): Promise<{ imageId: Id<"galleryImages"> }> => {
+		await requireAdmin(ctx);
+		const run = await ctx.runQuery(internal.audio.queries.getAudioRunDoc, {
+			runId: args.runId,
+		});
+		if (!run) {
+			throw new Error("Run not found.");
+		}
+		if (!args.objectKey.startsWith("studio/gallery/images/")) {
+			throw new Error("Uploaded object key is invalid for the gallery.");
+		}
+		const mimeType = normalizeMimeType(args.mimeType);
+		if (!ALLOWED_REFERENCE_UPLOAD_MIME_TYPES.has(mimeType)) {
+			await deleteR2Objects([args.objectKey]);
+			throw new Error("Unsupported image type. Use PNG, JPEG, WebP, or GIF.");
+		}
+		let head: Awaited<ReturnType<typeof headObject>>;
+		try {
+			head = await headObject(args.objectKey);
+		} catch {
+			throw new Error("Uploaded file not found in storage.");
+		}
+		const contentLength = head.contentLength ?? args.bytes;
+		if (
+			contentLength !== undefined &&
+			contentLength !== null &&
+			contentLength > MAX_REFERENCE_UPLOAD_BYTES
+		) {
+			await deleteR2Objects([args.objectKey]);
+			throw new Error("Image is too large. Max size is 20MB.");
+		}
+		const imageId = await ctx.runMutation(
+			internal.studio.internal.insertGalleryImage,
+			{
+				audioRunId: args.runId,
+				objectKey: args.objectKey,
+				meta: {
+					mimeType,
+					width: args.width,
+					height: args.height,
+					bytes: contentLength ?? args.bytes ?? undefined,
+				},
+				source: "uploaded",
+			},
+		);
+		return { imageId };
+	},
+});
+
 export const getReadUrls = action({
 	args: {
 		objectKeys: v.array(v.string()),

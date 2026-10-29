@@ -18,6 +18,7 @@ import {
 import { normalizeVideoScenes } from "../lib/videoPlanMarkdown";
 import {
 	plannerPromptSelectionValidator,
+	promptTemplateKindValidator,
 	videoSceneValidator,
 } from "../schema";
 import {
@@ -936,6 +937,7 @@ function validateTemplateTitle(title: string): string {
 export const createSystemPromptTemplate = mutation({
 	args: {
 		title: v.string(),
+		kind: promptTemplateKindValidator,
 	},
 	returns: v.id("systemPromptTemplates"),
 	handler: async (ctx, args) => {
@@ -944,6 +946,7 @@ export const createSystemPromptTemplate = mutation({
 		const now = Date.now();
 		return await ctx.db.insert("systemPromptTemplates", {
 			title,
+			kind: args.kind,
 			content: "",
 			updatedAt: now,
 		});
@@ -1009,6 +1012,23 @@ export const deleteSystemPromptTemplate = mutation({
 			}
 			await ctx.db.patch(plan._id, {
 				plannerSystemPromptTemplateId: undefined,
+				updatedAt: Date.now(),
+			});
+		}
+		const audioRuns = await ctx.db.query("audioRuns").collect();
+		for (const run of audioRuns) {
+			const selected =
+				run.promptSelection?.kind === "template" &&
+				run.promptSelection.templateId === args.templateId;
+			const snapshot = run.scriptSystemPromptTemplateId === args.templateId;
+			if (!selected && !snapshot) {
+				continue;
+			}
+			await ctx.db.patch(run._id, {
+				promptSelection: selected ? undefined : run.promptSelection,
+				scriptSystemPromptTemplateId: snapshot
+					? undefined
+					: run.scriptSystemPromptTemplateId,
 				updatedAt: Date.now(),
 			});
 		}

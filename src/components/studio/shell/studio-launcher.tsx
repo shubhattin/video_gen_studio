@@ -2,8 +2,10 @@ import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { useNavigate } from "@tanstack/react-router";
 import { useMutation } from "convex/react";
-import { Clapperboard, Plus, Sparkles } from "lucide-react";
+import { AudioLines, Clapperboard, Plus, Sparkles, Video } from "lucide-react";
 import { useState } from "react";
+import { AudioRunSetup } from "#/components/studio/audio/audio-run-setup";
+import { type PillTab, PillTabs } from "#/components/studio/pill-tabs";
 import {
 	type VideoConfigState,
 	VideoConfiguration,
@@ -15,6 +17,13 @@ import { notifyStudioError } from "#/lib/studio-toast";
 import { cn } from "#/lib/utils";
 
 type StudioType = "shloka" | "model";
+
+type Medium = "video" | "audio";
+
+const MEDIUM_TABS: ReadonlyArray<PillTab<Medium>> = [
+	{ id: "video", label: "Video", icon: Video },
+	{ id: "audio", label: "Audio", icon: AudioLines },
+];
 
 type StudioLauncherProps = {
 	/** Called after a Shloka Studio run is created on the home page. */
@@ -44,8 +53,8 @@ const STUDIOS: Array<{
 ];
 
 /**
- * Home-page launcher for a new run. Pick Shloka Studio or Model Studio,
- * configure the video model, then start a run of that type.
+ * Home-page launcher for a new run. Pick a medium (video / audio), then the
+ * assisted or direct studio for it, and start a run of that type.
  */
 export function StudioLauncher({ onShlokaRunCreated }: StudioLauncherProps) {
 	const navigate = useNavigate();
@@ -53,6 +62,7 @@ export function StudioLauncher({ onShlokaRunCreated }: StudioLauncherProps) {
 	const createModelStudioDraft = useMutation(
 		api.studio.mutations.createModelStudioDraft,
 	);
+	const [medium, setMedium] = useState<Medium>("video");
 	const [studio, setStudio] = useState<StudioType>("shloka");
 	const [selectedModel, setSelectedModel] = useState<VideoModelId>(
 		"bytedance/seedance-2.5",
@@ -82,8 +92,31 @@ export function StudioLauncher({ onShlokaRunCreated }: StudioLauncherProps) {
 		}
 	};
 
+	const mediumSwitch = (
+		<PillTabs
+			tabs={MEDIUM_TABS}
+			active={medium}
+			onChange={setMedium}
+			aria-label="Studio medium"
+		/>
+	);
+
+	if (medium === "audio") {
+		return (
+			<div className="flex flex-col gap-5">
+				{mediumSwitch}
+				<AudioRunSetup
+					onCreated={(runId) =>
+						void navigate({ to: "/audio", search: { run: runId } })
+					}
+				/>
+			</div>
+		);
+	}
+
 	return (
 		<div className="flex flex-col gap-6">
+			{mediumSwitch}
 			<div className="grid gap-3 sm:grid-cols-2">
 				{STUDIOS.map((entry) => {
 					const Icon = entry.icon;

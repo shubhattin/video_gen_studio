@@ -100,7 +100,9 @@ function ShlokaStudioPage() {
 		api.studio.queries.listPlansForRun,
 		runId ? { runId } : "skip",
 	);
-	const templateDocs = useQuery(api.studio.queries.listSystemPromptTemplates);
+	const templateDocs = useQuery(api.studio.queries.listSystemPromptTemplates, {
+		kind: "video",
+	});
 	const templates: SystemPromptTemplate[] | undefined = templateDocs;
 	const catalog = useQuery(api.studio.queries.getCachedOpenRouterCatalog);
 	const refreshCatalog = useAction(api.studio.actions.refreshModelCatalog);

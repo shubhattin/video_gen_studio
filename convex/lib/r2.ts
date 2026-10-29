@@ -98,11 +98,13 @@ function extensionForMime(mimeType: string) {
 	if (normalized.includes("webm")) return "webm";
 	if (normalized.includes("quicktime")) return "mov";
 	if (normalized.includes("mp4")) return "mp4";
+	if (normalized === "audio/mpeg" || normalized === "audio/mp3") return "mp3";
+	if (normalized === "audio/wav" || normalized === "audio/x-wav") return "wav";
 	return "bin";
 }
 
 export function buildStudioObjectKey(args: {
-	kind: "images" | "videos" | "frames";
+	kind: "images" | "videos" | "frames" | "audios";
 	mimeType: string;
 	mediaId?: string;
 }) {

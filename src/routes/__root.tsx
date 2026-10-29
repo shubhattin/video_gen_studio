@@ -1,3 +1,4 @@
+import { APP_NAME } from "@convex/lib/appInfo";
 import { TanStackDevtools } from "@tanstack/react-devtools";
 import {
 	QueryClient,
@@ -13,7 +14,6 @@ import {
 } from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 import { useState } from "react";
-
 import { AppProviders } from "#/components/providers";
 import { themeBootScript } from "#/hooks/use-theme";
 import appCss from "../styles.css?url";
@@ -26,7 +26,7 @@ export const Route = createRootRoute({
 				name: "viewport",
 				content: "width=device-width, initial-scale=1",
 			},
-			{ title: "Shloka Video Studio" },
+			{ title: APP_NAME },
 		],
 		links: [{ rel: "stylesheet", href: appCss }],
 	}),

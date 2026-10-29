@@ -476,6 +476,7 @@ describe("system prompt templates", () => {
 		const t = adminConvex();
 		const id = await t.mutation(api.studio.mutations.createSystemPromptTemplate, {
 			title: "Concise devotional",
+			kind: "video",
 		});
 
 		let list = await t.query(api.studio.queries.listSystemPromptTemplates, {});
@@ -512,10 +513,11 @@ describe("system prompt templates", () => {
 	it("requires a non-empty title and trims it", async () => {
 		const t = adminConvex();
 		await expect(
-			t.mutation(api.studio.mutations.createSystemPromptTemplate, { title: "   " }),
+			t.mutation(api.studio.mutations.createSystemPromptTemplate, { title: "   ", kind: "video" }),
 		).rejects.toThrow("Title is required.");
 		const id = await t.mutation(api.studio.mutations.createSystemPromptTemplate, {
 			title: "  Padded title  ",
+			kind: "video",
 		});
 		const list = await t.query(api.studio.queries.listSystemPromptTemplates, {});
 		expect(list[0].title).toBe("Padded title");
@@ -542,6 +544,7 @@ describe("system prompt templates", () => {
 
 		const id = await t.mutation(api.studio.mutations.createSystemPromptTemplate, {
 			title: "Custom",
+			kind: "video",
 		});
 		await t.mutation(api.studio.mutations.updateSystemPromptTemplate, {
 			templateId: id,
@@ -561,6 +564,7 @@ describe("system prompt templates", () => {
 		const t = adminConvex();
 		const id = await t.mutation(api.studio.mutations.createSystemPromptTemplate, {
 			title: "Temporary",
+			kind: "video",
 		});
 		await t.mutation(api.studio.mutations.deleteSystemPromptTemplate, {
 			templateId: id,
@@ -576,6 +580,7 @@ describe("system prompt templates", () => {
 		const t = adminConvex();
 		const id = await t.mutation(api.studio.mutations.createSystemPromptTemplate, {
 			title: "Draft selection",
+			kind: "video",
 		});
 
 		const { runId } = await t.mutation(api.studio.mutations.createShlokaDraft, {
@@ -607,6 +612,7 @@ describe("system prompt templates", () => {
 		const t = adminConvex();
 		const id = await t.mutation(api.studio.mutations.createSystemPromptTemplate, {
 			title: "To delete",
+			kind: "video",
 		});
 		const { runId } = await t.mutation(api.studio.mutations.createShlokaDraft, {
 			shlokaText: "Deletion run",

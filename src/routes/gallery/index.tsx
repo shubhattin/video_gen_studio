@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
+import { AudioGallery } from "#/components/studio/audio/audio-gallery";
 import { GalleryNav, type GalleryTab } from "#/components/studio/gallery-nav";
 import { HistoryPanel } from "#/components/studio/shell/history-panel";
 import { StudioShell } from "#/components/studio/shell/studio-shell";
@@ -19,7 +20,13 @@ function GalleryPage() {
 				<div className="mb-5">
 					<GalleryNav active={tab} onChange={setTab} />
 				</div>
-				{tab === "videos" ? <VideoGallery /> : <ImageGallery />}
+				{tab === "videos" ? (
+					<VideoGallery />
+				) : tab === "audio" ? (
+					<AudioGallery />
+				) : (
+					<ImageGallery />
+				)}
 			</div>
 		</StudioShell>
 	);

@@ -65,12 +65,17 @@ type GalleryImage = {
 type RunReference = {
 	runId: string;
 	title?: string;
-	kind: "shloka" | "model-studio";
+	kind: "shloka" | "model-studio" | "audio";
 	status: string;
 };
 
 function runLabel(run: RunReference): string {
-	const typeLabel = run.kind === "shloka" ? "Shloka run" : "Model run";
+	const typeLabel =
+		run.kind === "shloka"
+			? "Shloka run"
+			: run.kind === "audio"
+				? "Audio run"
+				: "Model run";
 	return run.title?.trim()
 		? `${run.title} · ${typeLabel}`
 		: `${typeLabel} (${run.runId.slice(0, 8)}…)`;

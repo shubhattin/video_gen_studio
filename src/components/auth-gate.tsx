@@ -1,3 +1,4 @@
+import { APP_NAME } from "@convex/lib/appInfo";
 import { Authenticated, Unauthenticated, useConvexAuth } from "convex/react";
 import { LogOut } from "lucide-react";
 import {
@@ -6,7 +7,6 @@ import {
 	useEffect,
 	useState,
 } from "react";
-import { useJwtSession } from "#/hooks/use-jwt-session";
 import { Button } from "#/components/ui/button";
 import {
 	Empty,
@@ -17,6 +17,7 @@ import {
 } from "#/components/ui/empty";
 import { Skeleton } from "#/components/ui/skeleton";
 import { Spinner } from "#/components/ui/spinner";
+import { useJwtSession } from "#/hooks/use-jwt-session";
 import { signIn, signOut } from "#/lib/auth-client";
 import { clearJwtSession } from "#/lib/jwt-session";
 import { notifyStudioError } from "#/lib/studio-toast";
@@ -97,7 +98,7 @@ function GoogleSignIn() {
 		<div className="flex min-h-svh items-center justify-center p-6">
 			<Empty className="max-w-sm border-none">
 				<EmptyHeader>
-					<EmptyTitle>Shloka Video Studio</EmptyTitle>
+					<EmptyTitle>{APP_NAME}</EmptyTitle>
 				</EmptyHeader>
 				<EmptyContent>
 					<Button

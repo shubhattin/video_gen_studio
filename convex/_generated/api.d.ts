@@ -8,12 +8,21 @@
  * @module
  */
 
+import type * as audio_actions from "../audio/actions.js";
+import type * as audio_internal from "../audio/internal.js";
+import type * as audio_mutations from "../audio/mutations.js";
+import type * as audio_queries from "../audio/queries.js";
 import type * as http from "../http.js";
+import type * as lib_appInfo from "../lib/appInfo.js";
+import type * as lib_audioCatalog from "../lib/audioCatalog.js";
+import type * as lib_audioPrompt from "../lib/audioPrompt.js";
 import type * as lib_auth from "../lib/auth.js";
 import type * as lib_modelCatalog from "../lib/modelCatalog.js";
+import type * as lib_openrouterAudio from "../lib/openrouterAudio.js";
 import type * as lib_openrouterVideo from "../lib/openrouterVideo.js";
 import type * as lib_plannerPrompt from "../lib/plannerPrompt.js";
 import type * as lib_promptSummarizer from "../lib/promptSummarizer.js";
+import type * as lib_prompts_audio_song from "../lib/prompts/audio_song.js";
 import type * as lib_prompts_main_video_scene from "../lib/prompts/main_video_scene.js";
 import type * as lib_prompts_scene_summary from "../lib/prompts/scene_summary.js";
 import type * as lib_prompts_user_base_prompt from "../lib/prompts/user_base_prompt.js";
@@ -36,12 +45,21 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  "audio/actions": typeof audio_actions;
+  "audio/internal": typeof audio_internal;
+  "audio/mutations": typeof audio_mutations;
+  "audio/queries": typeof audio_queries;
   http: typeof http;
+  "lib/appInfo": typeof lib_appInfo;
+  "lib/audioCatalog": typeof lib_audioCatalog;
+  "lib/audioPrompt": typeof lib_audioPrompt;
   "lib/auth": typeof lib_auth;
   "lib/modelCatalog": typeof lib_modelCatalog;
+  "lib/openrouterAudio": typeof lib_openrouterAudio;
   "lib/openrouterVideo": typeof lib_openrouterVideo;
   "lib/plannerPrompt": typeof lib_plannerPrompt;
   "lib/promptSummarizer": typeof lib_promptSummarizer;
+  "lib/prompts/audio_song": typeof lib_prompts_audio_song;
   "lib/prompts/main_video_scene": typeof lib_prompts_main_video_scene;
   "lib/prompts/scene_summary": typeof lib_prompts_scene_summary;
   "lib/prompts/user_base_prompt": typeof lib_prompts_user_base_prompt;

@@ -1,3 +1,4 @@
+import { OPENROUTER_APP_HEADERS } from "./appInfo";
 /**
  * OpenRouter async video API client.
  * Method: POST /api/v1/videos → poll GET /api/v1/videos/{jobId} → download unsigned_urls.
@@ -91,8 +92,7 @@ function authHeaders(apiKey: string): HeadersInit {
 	return {
 		Authorization: `Bearer ${apiKey}`,
 		"Content-Type": "application/json",
-		"HTTP-Referer": "https://shloka-video-studio.local",
-		"X-Title": "Shloka Video Studio",
+		...OPENROUTER_APP_HEADERS,
 	};
 }
 

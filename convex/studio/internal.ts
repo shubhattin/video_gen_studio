@@ -428,6 +428,7 @@ export const insertGalleryImage = internalMutation({
 	args: {
 		runId: v.optional(v.id("generationRuns")),
 		modelStudioRunId: v.optional(v.id("modelStudioRuns")),
+		audioRunId: v.optional(v.id("audioRuns")),
 		objectKey: v.string(),
 		meta: mediaMetaValidator,
 		source: galleryImageSourceValidator,
@@ -448,7 +449,19 @@ export const insertGalleryImage = internalMutation({
 			createdAt: Date.now(),
 		});
 
-		if (args.modelStudioRunId !== undefined && args.attachToRun !== false) {
+		if (args.audioRunId !== undefined && args.attachToRun !== false) {
+			const audioRun = await ctx.db.get(args.audioRunId);
+			if (!audioRun) {
+				throw new Error("Run not found.");
+			}
+			await ctx.db.patch(audioRun._id, {
+				referenceImageIds: uniqueIds([
+					...(audioRun.referenceImageIds ?? []),
+					imageId,
+				]),
+				updatedAt: Date.now(),
+			});
+		} else if (args.modelStudioRunId !== undefined && args.attachToRun !== false) {
 			const modelRun = await ctx.db.get(args.modelStudioRunId);
 			if (!modelRun) {
 				throw new Error("Run not found.");
@@ -660,6 +673,17 @@ export const wipeAllStudioData = internalMutation({
 			await ctx.db.delete(video._id);
 		}
 
+		const audios = await ctx.db.query("galleryAudios").collect();
+		for (const audio of audios) {
+			keysToDelete.push(audio.objectKey);
+			await ctx.db.delete(audio._id);
+		}
+
+		const audioRuns = await ctx.db.query("audioRuns").collect();
+		for (const run of audioRuns) {
+			await ctx.db.delete(run._id);
+		}
+
 		const plans = await ctx.db.query("shlokaPlans").collect();
 		for (const plan of plans) {
 			await ctx.db.delete(plan._id);
@@ -693,10 +717,12 @@ export const wipeAllStudioData = internalMutation({
 		}
 
 		return {
-			runsDeleted: runs.length + modelRuns.length + plans.length,
+			runsDeleted:
+				runs.length + modelRuns.length + plans.length + audioRuns.length,
 			filesDeleted: keysToDelete.length,
 			cachesDeleted: caches.length,
 			jobsDeleted: videoJobs.length,
 		};
 	},
 });
+

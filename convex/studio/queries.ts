@@ -16,7 +16,10 @@ import {
 	type PlannerPromptSelection,
 } from "../lib/plannerPrompt";
 import { normalizeVideoScenes } from "../lib/videoPlanMarkdown";
-import { plannerPromptSelectionValidator } from "../schema";
+import {
+	plannerPromptSelectionValidator,
+	promptTemplateKindValidator,
+} from "../schema";
 import {
 	findGalleryByObjectKey,
 	galleryVideoToResult,
@@ -200,7 +203,7 @@ export const listRecentActivity = query({
 	handler: async (ctx, args) => {
 		await requireAdmin(ctx);
 		const limit = Math.min(args.limit ?? 24, 50);
-		const [shlokaRuns, modelRuns] = await Promise.all([
+		const [shlokaRuns, modelRuns, audioRuns] = await Promise.all([
 			ctx.db
 				.query("generationRuns")
 				.withIndex("by_createdAt")
@@ -211,17 +214,25 @@ export const listRecentActivity = query({
 				.withIndex("by_createdAt")
 				.order("desc")
 				.take(limit),
+			ctx.db
+				.query("audioRuns")
+				.withIndex("by_createdAt")
+				.order("desc")
+				.take(limit),
 		]);
 
 		const items: Array<{
-			_id: Id<"generationRuns"> | Id<"modelStudioRuns">;
-			kind: "shloka" | "model-studio";
+			_id: Id<"generationRuns"> | Id<"modelStudioRuns"> | Id<"audioRuns">;
+			kind: "shloka" | "model-studio" | "audio";
+			/** Audio runs only. */
+			audioMode?: "direct" | "guided";
 			status: string;
 			title?: string;
 			subtitle?: string;
 			selectedModelId?: string;
 			createdAt: number;
 			videoCount: number;
+			audioCount?: number;
 		}> = [];
 
 		for (const run of shlokaRuns) {
@@ -245,6 +256,30 @@ export const listRecentActivity = query({
 				selectedModelId: run.selectedModelId,
 				createdAt: run.createdAt,
 				videoCount: run.videoOutputIds?.length ?? 0,
+			});
+		}
+
+		for (const run of audioRuns) {
+			const takes = await ctx.db
+				.query("galleryAudios")
+				.withIndex("by_audioRunId_and_createdAt", (q) =>
+					q.eq("audioRunId", run._id),
+				)
+				.take(100);
+			items.push({
+				_id: run._id,
+				kind: "audio",
+				audioMode: run.mode,
+				status: run.status,
+				title: run.title,
+				subtitle: (run.mode === "guided" ? run.customInstructions : run.prompt)?.slice(
+					0,
+					80,
+				),
+				selectedModelId: run.audioParams.modelId,
+				createdAt: run.createdAt,
+				videoCount: 0,
+				audioCount: takes.length,
 			});
 		}
 
@@ -323,7 +358,17 @@ export const listModelStudioRunImages = internalQuery({
 
 // ── System prompt templates ─────────────────────────────────────────────
 
-export async function listSystemPromptTemplatesCtx(ctx: DbCtx) {
+export async function listSystemPromptTemplatesCtx(
+	ctx: DbCtx,
+	kind?: Doc<"systemPromptTemplates">["kind"],
+) {
+	if (kind) {
+		return await ctx.db
+			.query("systemPromptTemplates")
+			.withIndex("by_kind", (q) => q.eq("kind", kind))
+			.order("desc")
+			.take(200);
+	}
 	return await ctx.db.query("systemPromptTemplates").order("desc").take(200);
 }
 
@@ -346,18 +391,27 @@ export async function resolvePlannerPromptSnapshot(
 	if (!template) {
 		throw new Error("The selected system prompt template no longer exists.");
 	}
+	if (template.kind !== "video") {
+		throw new Error(
+			"The selected template is an audio template — pick a video template.",
+		);
+	}
 	return { content: template.content, templateId: template._id };
 }
 
 export const listSystemPromptTemplates = query({
-	args: {},
+	args: {
+		/** Omit to list every kind (templates page). */
+		kind: v.optional(promptTemplateKindValidator),
+	},
 	returns: v.array(v.any()),
-	handler: async (ctx) => {
+	handler: async (ctx, args) => {
 		await requireAdmin(ctx);
-		const templates = await listSystemPromptTemplatesCtx(ctx);
+		const templates = await listSystemPromptTemplatesCtx(ctx, args.kind);
 		return templates.map((template) => ({
 			_id: template._id,
 			title: template.title,
+			kind: template.kind,
 			content: template.content,
 			updatedAt: template.updatedAt,
 			createdAt: template._creationTime,
@@ -379,6 +433,7 @@ export const getSystemPromptTemplate = query({
 		return {
 			_id: template._id,
 			title: template.title,
+			kind: template.kind,
 			content: template.content,
 			updatedAt: template.updatedAt,
 			createdAt: template._creationTime,
@@ -522,8 +577,8 @@ export const listRunsReferencingImage = query({
 		await requireAdmin(ctx);
 		const imageId = args.imageId;
 		const results: Array<{
-			runId: Id<"generationRuns"> | Id<"modelStudioRuns">;
-			kind: "shloka" | "model-studio";
+			runId: Id<"generationRuns"> | Id<"modelStudioRuns"> | Id<"audioRuns">;
+			kind: "shloka" | "model-studio" | "audio";
 			title?: string;
 			status: string;
 		}> = [];
@@ -554,6 +609,17 @@ export const listRunsReferencingImage = query({
 				results.push({
 					runId: run._id,
 					kind: "model-studio",
+					title: run.title,
+					status: run.status,
+				});
+			}
+		}
+		const audioRuns = await ctx.db.query("audioRuns").collect();
+		for (const run of audioRuns) {
+			if ((run.referenceImageIds ?? []).includes(imageId)) {
+				results.push({
+					runId: run._id,
+					kind: "audio",
 					title: run.title,
 					status: run.status,
 				});
