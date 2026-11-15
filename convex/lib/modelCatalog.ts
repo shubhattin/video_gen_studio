@@ -120,6 +120,49 @@ export interface ModelCapabilityProfile {
 	fallbackEstimateUsdPerSecond?: number;
 	/** Optional with-audio $/s; defaults to base if omitted. */
 	fallbackEstimateUsdPerSecondWithAudio?: number;
+	/**
+	 * Token-billed models (Seedance): USD per 1M video tokens by output
+	 * resolution, mirroring OpenRouter `pricing_skus` (`video_tokens`,
+	 * `video_tokens_1080p`, `video_tokens_4k`). Audio does not change the rate.
+	 * When set, `fallbackEstimateUsdPerSecond` is the 720p rate.
+	 */
+	videoTokenUsdPerMillion?: Partial<Record<ResolutionLabel, number>>;
+}
+
+/**
+ * Output pixels per frame used by token-billed (Seedance) video pricing.
+ * 16:9 and 9:16 share the same count; other aspect ratios are approximated.
+ */
+export const VIDEO_TOKEN_PIXELS_BY_RESOLUTION: Record<ResolutionLabel, number> =
+	{
+		"480p": 854 * 480,
+		"720p": 1280 * 720,
+		"1080p": 1920 * 1080,
+		"4K": 3840 * 2160,
+	};
+/** Seedance renders at 24 fps. */
+export const VIDEO_TOKEN_FPS = 24;
+/** Reference resolution for comparable $/s of token-billed models. */
+export const VIDEO_TOKEN_REFERENCE_RESOLUTION: ResolutionLabel = "720p";
+
+/**
+ * Billed video tokens for one clip: (w·h / 1024) × frames, frames = 24·s + 1.
+ * Verified against real OpenRouter bills (Seedance 2.0 Fast 720p:
+ * 4s → 87,300 tokens = $0.36666; 8s → 173,700 tokens = $0.72954).
+ */
+export function videoTokensForClip(
+	resolution: ResolutionLabel,
+	durationSeconds: number,
+): number {
+	const frames = VIDEO_TOKEN_FPS * durationSeconds + 1;
+	return (VIDEO_TOKEN_PIXELS_BY_RESOLUTION[resolution] / 1024) * frames;
+}
+
+/** Steady-state video tokens per second (ignores the +1 frame). */
+export function videoTokensPerSecond(resolution: ResolutionLabel): number {
+	return (
+		(VIDEO_TOKEN_PIXELS_BY_RESOLUTION[resolution] / 1024) * VIDEO_TOKEN_FPS
+	);
 }
 
 function range(from: number, to: number): number[] {
@@ -155,9 +198,10 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 			"conditioningScale",
 			"enhancePrompt",
 		],
-		// Google publishes no hard prompt char cap for Veo (Gemini API Veo docs:
-		// https://ai.google.dev/gemini-api/docs/veo — no length field). ~2,000
-		// chars is the limit enforced across Veo-serving APIs / resellers.
+		// Google caps Veo 3 / 3.1 (incl. Lite) text input at 1,024 TOKENS, not
+		// chars (Gemini API Veo model card: https://ai.google.dev/gemini-api/docs/veo).
+		// English is ~4 chars/token, but transliterated Sanskrit / IAST
+		// tokenizes at ~2–3 chars/token, so 2,000 chars stays safely under the cap.
 		maxPromptChars: 2000,
 		pricingNotes: "~$0.03–0.05/s silent · ~$0.05–0.08/s with audio.",
 		fallbackEstimateUsdPerSecond: 0.05,
@@ -182,12 +226,15 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 		supportsSeed: true,
 		supportsNegativePrompt: false,
 		passthroughParams: ["watermark"],
-		// BytePlus ModelArk (Seedance upstream): recommended ≤1,000 English
-		// words / ≤500 Chinese chars; no hard char cap documented.
+		// BytePlus ModelArk (Seedance upstream) documents no hard prompt cap for
+		// video (checked 2026-11). 4,000 chars (~600–700 English words) is our
+		// own conservative ceiling; prompt guides note long prompts dilute detail.
 		// https://docs.byteplus.com/en/docs/ModelArk/1520757
 		maxPromptChars: 4000,
-		pricingNotes: "~$0.04/s (token-based OpenRouter pricing).",
-		fallbackEstimateUsdPerSecond: 0.04035,
+		pricingNotes:
+			"Token-based: ~$0.040/s at 480p · ~$0.091/s at 720p ($4.2 / 1M video tokens).",
+		fallbackEstimateUsdPerSecond: 0.0907,
+		videoTokenUsdPerMillion: { "480p": 4.2, "720p": 4.2 },
 	},
 	"bytedance/seedance-2.0": {
 		id: "bytedance/seedance-2.0",
@@ -208,12 +255,20 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 		supportsSeed: true,
 		supportsNegativePrompt: false,
 		passthroughParams: ["watermark"],
-		// BytePlus ModelArk (Seedance upstream): recommended ≤1,000 English
-		// words / ≤500 Chinese chars; no hard char cap documented.
+		// BytePlus ModelArk (Seedance upstream) documents no hard prompt cap for
+		// video (checked 2026-11). 4,000 chars (~600–700 English words) is our
+		// own conservative ceiling; prompt guides note long prompts dilute detail.
 		// https://docs.byteplus.com/en/docs/ModelArk/1520757
 		maxPromptChars: 4000,
-		pricingNotes: "Token-based OpenRouter pricing (~$0.07+/s depending on size).",
-		fallbackEstimateUsdPerSecond: 0.07,
+		pricingNotes:
+			"Token-based: ~$0.067/s 480p · ~$0.151/s 720p · ~$0.374/s 1080p · ~$0.778/s 4K.",
+		fallbackEstimateUsdPerSecond: 0.1512,
+		videoTokenUsdPerMillion: {
+			"480p": 7,
+			"720p": 7,
+			"1080p": 7.7,
+			"4K": 4,
+		},
 	},
 	"bytedance/seedance-2.5": {
 		id: "bytedance/seedance-2.5",
@@ -234,13 +289,15 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 		supportsSeed: true,
 		supportsNegativePrompt: false,
 		passthroughParams: ["watermark", "req_key", "output_format"],
-		// BytePlus ModelArk (Seedance upstream): recommended ≤1,000 English
-		// words / ≤500 Chinese chars; no hard char cap documented.
+		// BytePlus ModelArk (Seedance upstream) documents no hard prompt cap for
+		// video (checked 2026-11). 4,000 chars (~600–700 English words) is our
+		// own conservative ceiling; prompt guides note long prompts dilute detail.
 		// https://docs.byteplus.com/en/docs/ModelArk/1520757
 		maxPromptChars: 4000,
 		pricingNotes:
-			"~$0.103/s at 480p (token-based OpenRouter pricing; higher at larger sizes).",
-		fallbackEstimateUsdPerSecond: 0.1028,
+			"Token-based: ~$0.103/s at 480p · ~$0.231/s at 720p ($10.7 / 1M video tokens).",
+		fallbackEstimateUsdPerSecond: 0.2311,
+		videoTokenUsdPerMillion: { "480p": 10.7, "720p": 10.7 },
 	},
 	"kwaivgi/kling-v3.0-std": {
 		id: "kwaivgi/kling-v3.0-std",
@@ -431,8 +488,8 @@ export function familyForVideoModel(modelId: VideoModelId): VideoModelFamily {
 
 /**
  * Derive a comparable USD/second figure from OpenRouter `pricing_skus`.
- * Prefers silent/base duration rates; converts cents keys; returns null when
- * SKUs are token-based or otherwise not $/s.
+ * Prefers silent/base duration rates; converts cents keys; token-billed SKUs
+ * (`video_tokens`) are converted to the 720p $/s. Returns null otherwise.
  */
 export function estimateUsdPerSecondFromPricingSkus(
 	skus: Record<string, string> | null | undefined,
@@ -457,6 +514,14 @@ export function estimateUsdPerSecondFromPricingSkus(
 		if (Number.isFinite(value) && value > 0) {
 			return value;
 		}
+	}
+
+	// Token-billed (Seedance): base `video_tokens` is the 480p/720p rate.
+	const tokenRate = Number(skus.video_tokens);
+	if (Number.isFinite(tokenRate) && tokenRate > 0) {
+		return (
+			tokenRate * videoTokensPerSecond(VIDEO_TOKEN_REFERENCE_RESOLUTION)
+		);
 	}
 
 	let cheapestCents: number | null = null;
