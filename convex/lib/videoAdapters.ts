@@ -5,7 +5,9 @@ import type {
 } from "./openrouterVideo";
 import {
 	MODEL_CAPABILITY_PROFILES,
+	type ResolutionLabel,
 	type VideoModelId,
+	videoTokensForClip,
 } from "./modelCatalog";
 import { type VideoParams, validateVideoParams } from "./schemas";
 
@@ -178,6 +180,15 @@ export function estimateVideoCostUsd(params: VideoParams): number | null {
 		return null;
 	}
 	const profile = MODEL_CAPABILITY_PROFILES[validated.modelId as VideoModelId];
+	const resolution = validated.resolution as ResolutionLabel;
+	const usdPerMillionTokens = profile.videoTokenUsdPerMillion?.[resolution];
+	if (usdPerMillionTokens != null) {
+		return (
+			(videoTokensForClip(resolution, validated.durationSeconds) *
+				usdPerMillionTokens) /
+			1_000_000
+		);
+	}
 	if (!profile.fallbackEstimateUsdPerSecond) {
 		return null;
 	}
