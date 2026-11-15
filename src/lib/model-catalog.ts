@@ -1,5 +1,6 @@
 export {
 	type AspectRatio,
+	effectiveGenerateAudio,
 	estimateUsdPerSecondFromPricingSkus,
 	familyForVideoModel,
 	GPT_IMAGE_ESTIMATES_USD,

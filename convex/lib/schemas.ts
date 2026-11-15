@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+	effectiveGenerateAudio,
 	isVideoModelId,
 	MODEL_CAPABILITY_PROFILES,
 	type AspectRatio,
@@ -133,7 +134,8 @@ export function planConfigDiverges(
 		current.aspectRatio !== used.aspectRatio ||
 		current.resolution !== used.resolution ||
 		current.durationSeconds !== used.durationSeconds ||
-		Boolean(current.generateAudio) !== Boolean(used.generateAudio) ||
+		effectiveGenerateAudio(current.modelId, current.generateAudio) !==
+			effectiveGenerateAudio(used.modelId, used.generateAudio) ||
 		Boolean(current.generateDuration) !== Boolean(used.generateDuration)
 	);
 }
@@ -173,9 +175,11 @@ export function validateVideoParams(params: VideoParams): VideoParams {
 
 	return {
 		...params,
-		generateAudio: profile.supportsAudio
-			? (params.generateAudio ?? false)
-			: false,
+		generateAudio: profile.audioAlwaysOn
+			? true
+			: profile.supportsAudio
+				? (params.generateAudio ?? false)
+				: false,
 	};
 }
 
@@ -204,6 +208,6 @@ export function defaultVideoParams(modelId: VideoModelId): VideoParams {
 			? "720p"
 			: profile.resolutions[0],
 		durationSeconds: preferred ?? profile.supportedDurations[0],
-		generateAudio: false,
+		generateAudio: profile.audioAlwaysOn === true,
 	};
 }

@@ -115,7 +115,8 @@ export function adaptOpenRouterVideoRequest(args: {
 		aspect_ratio: validated.aspectRatio,
 	};
 
-	if (profile.supportsAudio) {
+	// Audio-always-on models reject the field (even `false`), so omit it.
+	if (profile.supportsAudio && !profile.audioAlwaysOn) {
 		body.generate_audio = validated.generateAudio ?? false;
 	}
 
@@ -188,6 +189,10 @@ export function estimateVideoCostUsd(params: VideoParams): number | null {
 				usdPerMillionTokens) /
 			1_000_000
 		);
+	}
+	const flatRate = profile.usdPerSecondByResolution?.[resolution];
+	if (flatRate != null) {
+		return flatRate * validated.durationSeconds;
 	}
 	if (!profile.fallbackEstimateUsdPerSecond) {
 		return null;

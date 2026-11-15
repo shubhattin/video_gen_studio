@@ -5,6 +5,7 @@ export const VIDEO_MODEL_IDS = [
 	"bytedance/seedance-2.0",
 	"bytedance/seedance-2.0-fast",
 	"google/veo-3.1-lite",
+	"google/gemini-omni-1.2-flash",
 	"kwaivgi/kling-v3.0-pro",
 	"kwaivgi/kling-v3.0-std",
 	"minimax/hailuo-3-max",
@@ -84,7 +85,7 @@ export type AspectRatio =
 	| "2:3"
 	| "21:9"
 	| "9:21";
-export type ResolutionLabel = "480p" | "720p" | "1080p" | "4K";
+export type ResolutionLabel = "360p" | "480p" | "720p" | "1080p" | "4K";
 export type ImageQuality = "low" | "medium" | "high" | "auto";
 export type ImageSize = "1024x1024" | "1024x1536" | "1536x1024";
 
@@ -105,6 +106,11 @@ export interface ModelCapabilityProfile {
 	/** Exact allowed durations from OpenRouter `supported_durations`. */
 	supportedDurations: number[];
 	supportsAudio: boolean;
+	/**
+	 * Model always renders an audio track and rejects `generate_audio: false`
+	 * (Gemini Omni). Audio is forced on and `generate_audio` is not sent.
+	 */
+	audioAlwaysOn?: boolean;
 	supportsSeed: boolean;
 	supportsNegativePrompt: boolean;
 	passthroughParams: string[];
@@ -127,6 +133,8 @@ export interface ModelCapabilityProfile {
 	 * When set, `fallbackEstimateUsdPerSecond` is the 720p rate.
 	 */
 	videoTokenUsdPerMillion?: Partial<Record<ResolutionLabel, number>>;
+	/** Flat $/s by output resolution, for models whose rate varies by size. */
+	usdPerSecondByResolution?: Partial<Record<ResolutionLabel, number>>;
 }
 
 /**
@@ -135,6 +143,7 @@ export interface ModelCapabilityProfile {
  */
 export const VIDEO_TOKEN_PIXELS_BY_RESOLUTION: Record<ResolutionLabel, number> =
 	{
+		"360p": 640 * 360,
 		"480p": 854 * 480,
 		"720p": 1280 * 720,
 		"1080p": 1920 * 1080,
@@ -206,6 +215,44 @@ export const MODEL_CAPABILITY_PROFILES: Record<
 		pricingNotes: "~$0.03–0.05/s silent · ~$0.05–0.08/s with audio.",
 		fallbackEstimateUsdPerSecond: 0.05,
 		fallbackEstimateUsdPerSecondWithAudio: 0.08,
+	},
+	"google/gemini-omni-1.2-flash": {
+		id: "google/gemini-omni-1.2-flash",
+		displayName: "Gemini Omni 1.2 Flash",
+		description:
+			"Google Gemini Omni 1.2 Flash — Veo's successor; 3–15s with native audio, first/last frames and reference images.",
+		family: "google",
+		requiresFirstFrame: false,
+		supportsTextToVideo: true,
+		supportsFirstFrame: true,
+		supportsLastFrame: true,
+		supportsInputReferences: true,
+		// Gemini API: up to 6 reference images (≤3 per character, ≤2 characters).
+		maxInputReferences: 6,
+		aspectRatios: ["16:9", "9:16"],
+		resolutions: ["360p", "720p", "1080p", "4K"],
+		supportedDurations: range(3, 15),
+		supportsAudio: true,
+		// Verified 2026-11-15: OpenRouter returns 400 "This model always
+		// generates audio with the video. generate_audio cannot be set to false."
+		audioAlwaysOn: true,
+		supportsSeed: true,
+		supportsNegativePrompt: false,
+		passthroughParams: [],
+		// Google documents no prompt-specific cap; the model's input context is
+		// 131,072 tokens (Google Cloud model spec). 5,000 chars is our own
+		// ceiling, matching Wan 2.7. Negatives belong in the prompt itself.
+		maxPromptChars: 5000,
+		pricingNotes:
+			"Audio always on · $0.023/s 360p · $0.070/s 720p · $0.104/s 1080p · $0.209/s 4K.",
+		fallbackEstimateUsdPerSecond: 0.069504,
+		fallbackEstimateUsdPerSecondWithAudio: 0.069504,
+		usdPerSecondByResolution: {
+			"360p": 0.023172,
+			"720p": 0.069504,
+			"1080p": 0.104256,
+			"4K": 0.208512,
+		},
 	},
 	"bytedance/seedance-2.0-fast": {
 		id: "bytedance/seedance-2.0-fast",
@@ -482,6 +529,20 @@ export function isVideoModelId(value: string): value is VideoModelId {
 	return (VIDEO_MODEL_IDS as readonly string[]).includes(value);
 }
 
+/**
+ * Audio flag that actually applies to a generation: forced on for
+ * audio-always-on models, otherwise whatever was requested.
+ */
+export function effectiveGenerateAudio(
+	modelId: string,
+	requested: boolean | undefined,
+): boolean {
+	if (isVideoModelId(modelId) && MODEL_CAPABILITY_PROFILES[modelId].audioAlwaysOn) {
+		return true;
+	}
+	return Boolean(requested);
+}
+
 export function familyForVideoModel(modelId: VideoModelId): VideoModelFamily {
 	return MODEL_CAPABILITY_PROFILES[modelId].family;
 }
@@ -506,6 +567,8 @@ export function estimateUsdPerSecondFromPricingSkus(
 		"text_to_video_duration_seconds_720p",
 		"text_to_video_duration_seconds_480p",
 		"image_to_video_duration_seconds_720p",
+		// Audio-always-on models (Gemini Omni) only publish with-audio SKUs.
+		"duration_seconds_with_audio_720p",
 	];
 	for (const key of preferredUsdKeys) {
 		const raw = skus[key];

@@ -47,6 +47,7 @@ import {
 } from "#/hooks/use-signed-media-urls";
 import {
 	defaultVideoParams,
+	effectiveGenerateAudio,
 	MODEL_CAPABILITY_PROFILES,
 	type VideoModelId,
 } from "#/lib/model-catalog";
@@ -599,11 +600,19 @@ function ShlokaStudioPage() {
 				used: used.generateDuration ? "on" : "off",
 			});
 		}
-		if (Boolean(videoConfig.generateAudio) !== Boolean(used.generateAudio)) {
+		const currentAudio = effectiveGenerateAudio(
+			videoConfig.modelId,
+			videoConfig.generateAudio,
+		);
+		const usedAudio = effectiveGenerateAudio(
+			used.modelId,
+			used.generateAudio,
+		);
+		if (currentAudio !== usedAudio) {
 			fields.push({
 				label: "audio generation",
-				current: videoConfig.generateAudio ? "on" : "off",
-				used: used.generateAudio ? "on" : "off",
+				current: currentAudio ? "on" : "off",
+				used: usedAudio ? "on" : "off",
 			});
 		}
 		return fields;

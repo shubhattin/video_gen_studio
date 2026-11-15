@@ -115,7 +115,7 @@ function planBudgetFromConfig(config: {
 			aspectRatio: config.aspectRatio,
 			resolution: config.resolution,
 			durationSeconds: config.durationSeconds,
-			generateAudio: config.generateAudio,
+			generateAudio: profile.audioAlwaysOn ? true : config.generateAudio,
 			generateDuration: config.generateDuration,
 			negativePrompt: config.negativePrompt,
 			cfgScale: config.cfgScale,
@@ -415,7 +415,9 @@ function plannerSettings(videoParams: Doc<"shlokaPlans">["videoParams"]) {
 		maxDurationSeconds: Math.max(...profile.supportedDurations),
 		// Audio planning only when the model can generate audio AND the user
 		// turned it on for this plan.
-		generateAudio: Boolean(budget.generateAudio) && profile.supportsAudio,
+		generateAudio:
+			profile.audioAlwaysOn === true ||
+			(Boolean(budget.generateAudio) && profile.supportsAudio),
 	};
 }
 

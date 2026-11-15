@@ -64,7 +64,9 @@ function capabilityChips(modelId: VideoModelId) {
 	if (profile.supportsInputReferences) {
 		chips.push(`Style refs ×${profile.maxInputReferences}`);
 	}
-	if (profile.supportsAudio) chips.push("Audio");
+	if (profile.supportsAudio) {
+		chips.push(profile.audioAlwaysOn ? "Audio (always on)" : "Audio");
+	}
 	if (!profile.supportsAudio) chips.push("Video only");
 	if (profile.supportsNegativePrompt) chips.push("Neg. prompt");
 	if (profile.requiresFirstFrame) chips.push("Requires frame");
