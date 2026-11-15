@@ -4,7 +4,15 @@ import {
 	resolveVideoModelSortPrice,
 	videoTokensForClip,
 } from "./modelCatalog";
-import { estimateVideoCostUsd } from "./videoAdapters";
+import {
+	defaultVideoParams,
+	planConfigDiverges,
+	validateVideoParams,
+} from "./schemas";
+import {
+	adaptOpenRouterVideoRequest,
+	estimateVideoCostUsd,
+} from "./videoAdapters";
 
 const baseParams = {
 	aspectRatio: "9:16",
@@ -55,5 +63,66 @@ describe("token-billed (Seedance) video pricing", () => {
 			0.1512,
 			4,
 		);
+	});
+});
+
+describe("Gemini Omni 1.2 Flash", () => {
+	const omni = "google/gemini-omni-1.2-flash";
+	const liveSkus = {
+		duration_seconds_with_audio: "0.104256",
+		duration_seconds_with_audio_4k: "0.208512",
+		duration_seconds_with_audio_360p: "0.023172",
+		duration_seconds_with_audio_720p: "0.069504",
+	};
+
+	it("defaults to 9:16 · 720p · 8s with audio forced on", () => {
+		expect(defaultVideoParams(omni)).toEqual({
+			modelId: omni,
+			aspectRatio: "9:16",
+			resolution: "720p",
+			durationSeconds: 8,
+			generateAudio: true,
+		});
+	});
+
+	it("never sends generate_audio (OpenRouter rejects false)", () => {
+		const { body } = adaptOpenRouterVideoRequest({
+			params: { ...defaultVideoParams(omni), generateAudio: false },
+			fallbackPrompt: "A temple bell swinging in morning light.",
+			referenceUrls: ["https://example.com/a.png"],
+		});
+		expect(body).not.toHaveProperty("generate_audio");
+		expect(body.input_references).toHaveLength(1);
+		expect(
+			validateVideoParams({ ...defaultVideoParams(omni), generateAudio: false })
+				.generateAudio,
+		).toBe(true);
+	});
+
+	it("estimates cost per resolution (matches a real 360p 3s bill)", () => {
+		const cost = (resolution: string, durationSeconds: number) =>
+			estimateVideoCostUsd({
+				...baseParams,
+				modelId: omni,
+				resolution,
+				durationSeconds,
+			});
+		expect(cost("360p", 3)).toBeCloseTo(0.069516, 6);
+		expect(cost("720p", 10)).toBeCloseTo(0.69504, 6);
+		expect(cost("4K", 5)).toBeCloseTo(1.04256, 6);
+	});
+
+	it("sorts on the live 720p with-audio SKU", () => {
+		expect(estimateUsdPerSecondFromPricingSkus(liveSkus)).toBeCloseTo(
+			0.069504,
+			6,
+		);
+	});
+
+	it("does not flag audio divergence for always-on models", () => {
+		const current = { ...defaultVideoParams(omni), generateAudio: false };
+		expect(
+			planConfigDiverges(current, { ...current, generateAudio: true }),
+		).toBe(false);
 	});
 });

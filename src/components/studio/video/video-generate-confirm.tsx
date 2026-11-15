@@ -110,7 +110,9 @@ export function VideoGenerateConfirm({
 						{profile?.supportsAudio ? (
 							<DetailRow
 								label="Audio"
-								value={config.generateAudio ? "On" : "Off"}
+								value={
+									config.generateAudio || profile.audioAlwaysOn ? "On" : "Off"
+								}
 							/>
 						) : null}
 						{profile?.supportsNegativePrompt &&

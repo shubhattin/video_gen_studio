@@ -202,14 +202,14 @@ export function VideoConfiguration({
 						<div className="flex h-9 min-w-32 items-center gap-2 rounded-lg border border-border/70 bg-background px-3">
 							<Switch
 								id="generate-audio"
-								checked={value.generateAudio ?? false}
+								checked={profile.audioAlwaysOn || (value.generateAudio ?? false)}
 								onCheckedChange={(checked) =>
 									onChange({ ...value, generateAudio: checked })
 								}
-								disabled={disabled}
+								disabled={disabled || profile.audioAlwaysOn}
 							/>
 							<Label htmlFor="generate-audio" className="text-xs font-medium">
-								Audio
+								{profile.audioAlwaysOn ? "Audio (always on)" : "Audio"}
 							</Label>
 						</div>
 					) : null}
